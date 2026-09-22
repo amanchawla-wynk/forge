@@ -253,3 +253,44 @@ supersedes the old one.
   remain mechanically checkable and configurable. They do not solve generic
   filler in requirements and other qualitative fields, and they are not
   calibrated until tested against human-labelled company PRDs.
+
+## D-024: Calibrate Only Against Independent Human Labels
+
+- Status: accepted
+- Decision: Weights, gates, and bands may be tuned only against representative
+  PRDs with independent document-level human readiness labels. Public and
+  synthetic PRDs without those labels may expand format and adversarial test
+  coverage but cannot serve as calibration truth. Calibration suites contain
+  predictions and reviewer verdicts, not source-document text, and are bound to
+  an exact rubric version.
+- Reason: The evaluated Kaggle corpus is combinatorial synthetic structured data
+  with no per-document quality label and contradictory license metadata. The
+  evaluated Hugging Face corpus is repetitive generated prompt/response text
+  with one text column, no quality labels, and no declared license. Treating
+  either as ground truth would tune Forge toward generator conventions rather
+  than downstream-team actionability.
+- Evidence: `karmukilandk/prd-synthetic-data` on Kaggle and
+  `Sajjadcube/PRD_dataset_new` on Hugging Face, reviewed on 2026-09-22.
+- Consequence: Forge provides an offline calibration evaluator that measures
+  model-to-human and inter-reviewer agreement, band distance, false-ready and
+  false-not-ready rates, and per-criterion agreement. Until enough internal
+  labels exist, `prd.v0.yaml` remains explicitly untuned.
+
+## D-025: Derive Specialist Views Instead Of Chaining Specialist Judges
+
+- Status: accepted
+- Decision: Forge reports exhaustive structured gaps grouped by affected
+  downstream consumer. These technical, UX, data, risk, leadership, and
+  go-to-market views are deterministic projections of failed criteria and do
+  not invoke additional specialist agents or change scoring.
+- Reason: Review of `dimospapadopoulos/multi-agent-prd-reviewer` found useful
+  role-specific presentation, but its sequential technical, UX, and legal
+  critiques are unconstrained prose passed from one model call to the next. Its
+  validator uses keyword presence, can exceed 100 points, requires a provider
+  API key, and does not evidence-check specialist findings. Copying that
+  architecture would weaken Forge's trust boundary.
+- Consequence: Each Forge gap names the criterion, verdict, missing fields,
+  affected consumers, gate status, and configured rationale. Richer advisory
+  checks such as performance, observability, accessibility, retention, and
+  consent may be added as configurable coverage later, but cannot affect the
+  readiness band without evidence rules and human-labelled calibration.

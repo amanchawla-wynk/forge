@@ -205,9 +205,35 @@ remains.
 
 Every assessment returns `report` before the detailed `assessment` audit. The
 report contains the readiness headline, criterion summary, three highest-impact
-gaps, blocked downstream consumers, next step, and an extraction-confidence
-note. Python derives it from the same verified assessment; the model does not
-write or score the narrative.
+gaps, exhaustive structured gap records, consumer-specific gap views, blocked
+downstream consumers, next step, and an extraction-confidence note. Python
+derives it from the same verified assessment; the model does not write or score
+the narrative.
+
+## Calibrate The Rubric
+
+Calibration requires Forge assessment JSON plus independent human labels. The
+label suite stores verdicts and bands, not the PRD text. Create an exhaustive
+blank label from either a full Forge response or its nested `assessment` object:
+
+```bash
+uv run python -m forge.calibration template assessment.json labels.json \
+  --case-id prd-001 --reviewer reviewer-a --source-kind internal
+```
+
+Set the human `band` and every criterion verdict in `labels.json`. Add a second
+reviewer label to the same case before drawing conclusions about model
+agreement. Evaluate the suite with:
+
+```bash
+uv run python -m forge.calibration evaluate labels.json
+```
+
+The report includes model-to-human and inter-reviewer agreement, ordinal band
+distance, false-ready and false-not-ready rates, criterion-level agreement,
+contested cases, source mix, and sample-size warnings. Synthetic or public PRDs
+can exercise robustness, but only representative human-labelled company PRDs
+can calibrate the company rubric.
 
 ## Troubleshooting
 

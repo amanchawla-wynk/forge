@@ -290,6 +290,11 @@ def test_service_only_credits_quotes_found_in_source(tmp_path):
     assert response.report.headline == response.assessment.band_label
     assert response.report.summary.startswith("0 of 12 applicable criteria")
     assert len(response.report.key_gaps) == 3
+    assert response.report.gaps[0].criterion_id == "problem_statement"
+    assert response.report.gaps[0].missing_fields == ["affected_users", "evidence"]
+    assert response.report.gaps[0].gate_triggered
+    assert "engineering" in response.report.consumer_gaps
+    assert "problem_statement" in response.report.consumer_gaps["engineering"]
     assert response.report.next_step == response.next_question.question
     assert "stability is unknown" in response.report.confidence_note
 
@@ -478,6 +483,8 @@ def test_service_returns_no_question_when_every_criterion_is_present(tmp_path):
     assert response.next_question is None
     assert response.report.headline == "Ready to build"
     assert response.report.key_gaps == []
+    assert response.report.gaps == []
+    assert response.report.consumer_gaps == {}
     assert response.report.blocked_consumers == []
     assert response.report.next_step is None
 

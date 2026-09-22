@@ -121,6 +121,12 @@ prioritized gaps, the next remediation question, and extraction agreement. It
 does not ask the LLM for a second interpretation and cannot introduce claims
 that are absent from the structured audit.
 
+Role-specific presentation is also deterministic. Every failed criterion
+produces a structured gap record containing its missing fields, affected
+consumers, gate status, and rubric rationale. Consumer views group those records
+without adding specialist-agent opinions, generated severity, or unsupported
+technical, UX, or legal claims.
+
 A comprehensive review checklist is not automatically a defensible measurement
 model. Category percentages, severity labels, probability estimates, project
 health indices, rework estimates, and defect-leakage predictions require their
@@ -174,5 +180,17 @@ Build a labelled internal corpus with multiple reviewers and roles. Measure:
 - resistance to empty headings, placeholders, duplicated content, and prompt
   injection;
 - whether answering recommended questions improves human-rated actionability.
+
+The offline calibration evaluator records source type and warns when there are
+no internal labels, fewer than 20 resolved human bands, or no cases with two
+completed reviewers. Reviewer ties are reported as contested and excluded from
+model-to-human agreement rather than resolved pessimistically. This differs
+from repeated model extraction, where pessimistic tie-breaking is an intentional
+product rule.
+
+Public or synthetic PRDs without human readiness labels may be used for format
+coverage, robustness, and gaming tests. They cannot determine criterion
+weights, gate placement, or band thresholds. Dataset-level claims of quality or
+completeness are not substitutes for document-level reviewer judgments.
 
 No rubric version should be called calibrated until these tests have been run.

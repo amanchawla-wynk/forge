@@ -40,7 +40,7 @@ def assess_extractions(
     document_batches = batch_document(document)
     runs = verify_extraction_batch(document_batches, batch, rubric)
     assessment = score(rubric, runs)
-    questions = plan_questions(rubric, assessment, limit=3)
+    questions = plan_questions(rubric, assessment)
 
     warnings = [
         "The bundled PRD rubric is generic, untuned, and not calibrated for your company."

@@ -47,10 +47,23 @@
 - Added a fluent-but-hollow template-gaming fixture and rubric-configured value
   constraints. Its vague success metrics now trigger the metric gate instead
   of receiving a false `ready_to_build` result.
+- Added an offline human-label calibration evaluator with exhaustive templates,
+  criterion and band agreement, reviewer disagreement, ordinal error,
+  false-ready rates, source-mix checks, and low-sample warnings.
+- Evaluated two public PRD datasets and rejected them as calibration truth: both
+  lack human readiness labels, and their reuse licensing is unclear or
+  contradictory. They remain candidates only for stress tests after licensing
+  is resolved.
+- Compared Forge with the BSD-licensed `multi-agent-prd-reviewer`. Retained
+  Forge's verified deterministic architecture and adopted its strongest
+  presentation idea as exhaustive structured gaps grouped by downstream
+  consumer, without adding provider keys or free-text scoring agents.
 
 ## Current Build
 
 - Grow the regression corpus with a multi-batch document.
+- Label the existing real PRD with at least two independent reviewers and run
+  the first calibration report.
 - Evaluate local OCR output as separately provenanced, quote-verifiable evidence.
 - Harden extraction validation against duplicate or unknown criterion fields.
 - Ingest DOCX header and footer text, which is currently skipped.
@@ -60,7 +73,6 @@
 - Test installation and behavior in Cursor and GitHub Copilot.
 - Compare a direct Docling adapter with current PDF and DOCX normalization on
   representative fixtures before expanding to multimodal document content.
-- Add evidence-linked structured gap records derived from failed rubric fields.
 - Add qualitative risk records only where source evidence or a rubric omission
   supports them; do not invent probability or numeric risk scores.
 - Add local session storage only if the stateless workflow proves cumbersome.
@@ -70,7 +82,7 @@
 - Tune terminology, criteria, weights, gates, and bands to the company PRD
   template and guidance.
 - Build adversarial and representative fixtures from real PRDs.
-- Create a multi-reviewer labelled calibration set.
+- Expand the multi-reviewer labelled calibration set beyond the first real PRD.
 - Set acceptable agreement and false-ready thresholds.
 
 ## Later

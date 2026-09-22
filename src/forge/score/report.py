@@ -7,10 +7,22 @@ from forge.score.engine import Assessment
 from forge.score.planner import Question
 
 
+class GapRecord(BaseModel):
+    criterion_id: str
+    criterion_name: str
+    verdict: Verdict
+    missing_fields: list[str]
+    affected_consumers: list[str]
+    gate_triggered: bool
+    rationale: str
+
+
 class NarrativeReport(BaseModel):
     headline: str
     summary: str
     key_gaps: list[str]
+    gaps: list[GapRecord]
+    consumer_gaps: dict[str, list[str]]
     blocked_consumers: list[str]
     next_step: str | None
     confidence_note: str
@@ -61,6 +73,26 @@ def build_narrative_report(
             f"{assessment.confidence:.0%}."
         )
 
+    results_by_id = {
+        result.criterion_id: result for result in assessment.criteria
+    }
+    gaps = [
+        GapRecord(
+            criterion_id=question.criterion_id,
+            criterion_name=question.criterion_name,
+            verdict=results_by_id[question.criterion_id].verdict,
+            missing_fields=question.missing_fields,
+            affected_consumers=question.unblocks_consumers,
+            gate_triggered=question.is_gate,
+            rationale=results_by_id[question.criterion_id].rationale.strip(),
+        )
+        for question in questions
+    ]
+    consumer_gaps: dict[str, list[str]] = {}
+    for gap in gaps:
+        for consumer in gap.affected_consumers:
+            consumer_gaps.setdefault(consumer, []).append(gap.criterion_id)
+
     return NarrativeReport(
         headline=assessment.band_label,
         summary=summary,
@@ -68,6 +100,8 @@ def build_narrative_report(
             _gap_summary(question)
             for question in questions[:3]
         ],
+        gaps=gaps,
+        consumer_gaps=consumer_gaps,
         blocked_consumers=blocked_consumers,
         next_step=questions[0].question if questions else None,
         confidence_note=confidence_note,

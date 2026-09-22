@@ -75,6 +75,13 @@ generation is deterministic and consumes only scored verdicts, failed gates,
 consumer blockers, remediation ordering, and extraction-run agreement. It does
 not invoke an LLM or alter the audit result.
 
+The report also exposes exhaustive structured gap records and groups criterion
+ids by affected consumer. This provides technical, UX, data, risk, leadership,
+and go-to-market views without chaining specialist agents or allowing generated
+critique to change the score. A gap record is derived from a failed verified
+criterion and names its missing fields, affected consumers, gate status, and
+configured rationale.
+
 Each supplemental answer contains a rubric `criterion_id` and answer text. It
 is rendered as a distinct normalized block, and evidence verification rejects
 attempts to use that block for another criterion. Responses echo the accumulated
@@ -116,6 +123,20 @@ The domain core returns structured assessment data. Chat rendering, Excel
 workbooks, and SharePoint publication are adapters, not scoring concerns. Excel
 and SharePoint are deferred until the conversational review is validated;
 Forge will not own SharePoint credentials as part of the scoring core.
+
+## Offline Calibration
+
+`forge.calibration` is a domain-side developer workflow, not an MCP assessment
+tool. It creates exhaustive reviewer-label templates from an `Assessment`
+without retaining source-document text, and compares fixed-version predictions
+with one or more human labels. Reports include band and criterion agreement,
+inter-reviewer agreement, ordinal band error, false-ready and false-not-ready
+rates, contested labels, source mix, and low-sample warnings.
+
+Calibration suites are bound to an exact rubric id and version. Mismatched
+criteria, duplicate reviewers, unknown bands, and cross-version predictions are
+rejected rather than silently compared. Tied human votes remain contested; the
+system does not resolve disagreement in its own favour.
 
 ## Portability
 
