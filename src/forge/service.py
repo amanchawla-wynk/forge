@@ -11,10 +11,12 @@ from forge.rubric.loader import load_rubric
 from forge.rubric.models import Rubric
 from forge.score.engine import Assessment, score
 from forge.score.planner import Question, plan_questions
+from forge.score.report import NarrativeReport, build_narrative_report
 
 
 class AssessmentResponse(BaseModel):
     source_path: str
+    report: NarrativeReport
     assessment: Assessment
     next_question: Question | None
     supplemental_answers: list[SupplementalAnswer]
@@ -36,7 +38,7 @@ def assess_extractions(
     document, rubric = prepare_assessment_input(source_path, rubric_name, answers)
     runs = [verify_run(document, run) for run in batch.runs]
     assessment = score(rubric, runs)
-    questions = plan_questions(rubric, assessment, limit=1)
+    questions = plan_questions(rubric, assessment, limit=3)
 
     warnings = [
         "The bundled PRD rubric is generic, untuned, and not calibrated for your company."
@@ -49,6 +51,12 @@ def assess_extractions(
 
     return AssessmentResponse(
         source_path=document.source_path,
+        report=build_narrative_report(
+            assessment,
+            questions,
+            run_count=len(runs),
+            expected_run_count=rubric.extraction_runs,
+        ),
         assessment=assessment,
         next_question=questions[0] if questions else None,
         supplemental_answers=answers,

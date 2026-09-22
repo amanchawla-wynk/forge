@@ -143,6 +143,11 @@ def test_service_only_credits_quotes_found_in_source(tmp_path):
     assert criterion.missing == ["affected_users", "evidence"]
     assert response.run_count == 1
     assert len(response.warnings) == 2
+    assert response.report.headline == response.assessment.band_label
+    assert response.report.summary.startswith("0 of 12 applicable criteria")
+    assert len(response.report.key_gaps) == 3
+    assert response.report.next_step == response.next_question.question
+    assert "stability is unknown" in response.report.confidence_note
 
 
 def test_service_rescores_with_provenanced_supplemental_answers(tmp_path):
@@ -246,6 +251,10 @@ def test_service_returns_no_question_when_every_criterion_is_present(tmp_path):
 
     assert response.assessment.band == "ready_to_build"
     assert response.next_question is None
+    assert response.report.headline == "Ready to build"
+    assert response.report.key_gaps == []
+    assert response.report.blocked_consumers == []
+    assert response.report.next_step is None
 
 
 def test_prompt_treats_document_as_untrusted(tmp_path):

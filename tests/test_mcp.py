@@ -75,6 +75,13 @@ async def test_assess_prd_borrows_client_model_three_times(tmp_path):
     assert calls == 3
     assert result.structured_content["run_count"] == 3
     assert result.structured_content["assessment"]["band"] == "not_a_prd"
+    assert result.structured_content["report"]["headline"] == "Not a PRD"
+    assert result.structured_content["report"]["next_step"] == (
+        result.structured_content["next_question"]["question"]
+    )
+    assert "across 3 extraction runs" in (
+        result.structured_content["report"]["confidence_note"]
+    )
     assert result.structured_content["next_question"] is not None
     assert result.structured_content["supplemental_answers"] == [
         {

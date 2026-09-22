@@ -21,10 +21,11 @@
   inputs to native sampling and agent-driven fallback tools.
 - Replaced the top-five response with one adaptive `next_question`; complete
   assessments return no question.
+- Added a concise deterministic narrative report above the detailed assessment
+  audit, including key gaps, blocked consumers, next step, and confidence note.
 
 ## Current Build
 
-- Produce a more concise narrative report above the audit detail.
 - Decide and test a chunking strategy for documents over 120,000 characters.
 - Harden extraction validation against duplicate or unknown criterion fields.
 

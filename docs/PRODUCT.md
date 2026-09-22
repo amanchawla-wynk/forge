@@ -50,8 +50,9 @@ product bet itself is strategically correct.
 2. Forge normalizes the document while retaining page and section evidence.
 3. The client's model extracts rubric fields and verbatim evidence.
 4. Forge verifies evidence and computes deterministic verdicts and bands.
-5. The user receives the readiness band, consumer breakdown, failed gates,
-   confidence, evidence-based reasons, and the single next question to answer.
+5. The user receives a concise deterministic narrative followed by the readiness
+   band, consumer breakdown, failed gates, confidence, evidence-based reasons,
+   and the single next question to answer.
 6. The answer is added as explicit supplemental evidence and the PRD is
    rescored.
 7. Steps 5 and 6 repeat until no material question remains or the user stops.

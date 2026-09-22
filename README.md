@@ -11,7 +11,8 @@ its bands are treated as reliable.
 ## Current Tools
 
 - `assess_prd`: three extraction runs using MCP client sampling, followed by
-  evidence verification, deterministic scoring, and one `next_question`.
+  evidence verification, deterministic scoring, a concise narrative report,
+  and one `next_question`.
 - `prepare_prd_assessment`: returns the extraction task for hosts without MCP
   sampling.
 - `score_prd_extraction`: verifies and scores extraction JSON produced by the
@@ -182,6 +183,12 @@ After presenting `next_question`, the agent records the reply as an object with
 separately from the PRD and may provide evidence only for their named criterion.
 Forge remains stateless and returns `next_question: null` when no rubric gap
 remains.
+
+Every assessment returns `report` before the detailed `assessment` audit. The
+report contains the readiness headline, criterion summary, three highest-impact
+gaps, blocked downstream consumers, next step, and an extraction-confidence
+note. Python derives it from the same verified assessment; the model does not
+write or score the narrative.
 
 ## Troubleshooting
 

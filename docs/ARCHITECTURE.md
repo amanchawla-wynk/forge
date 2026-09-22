@@ -17,7 +17,7 @@ MCP client / coding agent
       -> client's LLM through MCP sampling, when supported
       -> evidence verification and extraction validation
       -> deterministic scoring and gates
-      -> readiness report and remediation questions
+      -> deterministic narrative report, audit, and remediation question
 ```
 
 ## Inference Modes
@@ -63,6 +63,11 @@ Assessment responses return one highest-impact remediation question. The client
 keeps the conversation state and resubmits accumulated answers on each turn.
 Forge marks those answers as supplemental user evidence and includes them in
 normalization and quote verification without rewriting the source PRD.
+
+The response places a concise `report` before the detailed `assessment`. Report
+generation is deterministic and consumes only scored verdicts, failed gates,
+consumer blockers, remediation ordering, and extraction-run agreement. It does
+not invoke an LLM or alter the audit result.
 
 Each supplemental answer contains a rubric `criterion_id` and answer text. It
 is rendered as a distinct normalized block, and evidence verification rejects

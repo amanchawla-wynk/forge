@@ -91,6 +91,12 @@ answer so the two can never be presented as the same provenance.
 
 ## Output Restraint
 
+The concise narrative report is a deterministic projection of the scored
+assessment. It may summarize verdict counts, failed gates, blocked consumers,
+prioritized gaps, the next remediation question, and extraction agreement. It
+does not ask the LLM for a second interpretation and cannot introduce claims
+that are absent from the structured audit.
+
 A comprehensive review checklist is not automatically a defensible measurement
 model. Category percentages, severity labels, probability estimates, project
 health indices, rework estimates, and defect-leakage predictions require their

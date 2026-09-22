@@ -126,3 +126,12 @@ supersedes the old one.
 - Reason: This provides an auditable conversational loop without introducing a
   database, silently modifying the PRD, or allowing one broad answer to inflate
   unrelated criteria.
+
+## D-015: Derive Narrative Reports Deterministically
+
+- Status: accepted
+- Decision: The concise report shown before audit detail is generated in Python
+  from the final assessment and remediation ordering. The LLM does not write a
+  second review narrative.
+- Reason: A generated interpretation could contradict verified verdicts, add
+  unsupported claims, or obscure why the deterministic result was reached.
