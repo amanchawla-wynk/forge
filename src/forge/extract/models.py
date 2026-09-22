@@ -22,6 +22,9 @@ class Evidence(BaseModel):
     page: int | None = None
     provenance: Literal["document", "supplemental_answer"] = "document"
     source_block_id: str | None = None
+    source_parent_block_id: str | None = None
+    source_start_char: int | None = None
+    source_end_char: int | None = None
 
 
 class FieldExtraction(BaseModel):

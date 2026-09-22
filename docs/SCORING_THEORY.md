@@ -39,6 +39,18 @@ also means no credit. Evidence is location-aware where the source format permits
 it. DOCX page numbers are not treated as reliable because pagination depends on
 the renderer; paragraph and heading locations are used instead.
 
+Long-document processing must remain exhaustive. Every normalized source block
+must be included in at least one extraction batch; relevance-ranked retrieval
+cannot decide which parts of a PRD are eligible to receive credit. Reused
+chunking libraries may choose safe text boundaries, but Forge retains the source
+offsets and verifies the resulting evidence against the complete document.
+
+Text recovered from an image may receive credit only when it is represented in
+the normalized evidence corpus and the quoted text can be verified there.
+Model interpretations of diagram structure, arrows, grouping, or visual meaning
+are advisory and remain outside numeric scoring. Detecting a visual without
+analyzing it must produce an explicit limitation warning.
+
 ## Aggregation
 
 - Verdict credits are fixed: present `1.0`, partial `0.5`, absent `0.0`.

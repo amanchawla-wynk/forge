@@ -23,15 +23,30 @@
   assessments return no question.
 - Added a concise deterministic narrative report above the detailed assessment
   audit, including key gaps, blocked consumers, next step, and confidence note.
+- Evaluated RAG-Anything and narrower open-source alternatives for long-document
+  processing; selected a reuse-first boundary with `semchunk` for text splitting
+  and direct Docling evaluation for richer parsing.
+- Integrated `semchunk` source offsets for oversized text blocks, exhaustive
+  bounded extraction batches, and deterministic fragment consolidation.
+- Added PDF and DOCX visual-asset detection with explicit warnings that visual
+  interpretation is advisory and excluded from scoring.
+- Added native per-batch client-model sampling through `list_prd_batches` and
+  `assess_prd_batch`, with an end-to-end long-document MCP test.
+- Bound fragments to a plan fingerprint and run index, and surfaced anticipated
+  tool failures to the calling agent.
+- Added advisory visual observations through `list_prd_visuals` and
+  `observe_prd_visual`, using on-demand rendering and `ImageContent` sampling.
 
 ## Current Build
 
-- Decide and test a chunking strategy for documents over 120,000 characters.
+- Evaluate local OCR output as separately provenanced, quote-verifiable evidence.
 - Harden extraction validation against duplicate or unknown criterion fields.
 
 ## Next
 
 - Test installation and behavior in Cursor and GitHub Copilot.
+- Compare a direct Docling adapter with current PDF and DOCX normalization on
+  representative fixtures before expanding to multimodal document content.
 - Add evidence-linked structured gap records derived from failed rubric fields.
 - Add qualitative risk records only where source evidence or a rubric omission
   supports them; do not invent probability or numeric risk scores.

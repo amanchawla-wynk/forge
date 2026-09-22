@@ -18,6 +18,19 @@ class SourceBlock(BaseModel):
     section: str | None = None
     provenance: Literal["document", "supplemental_answer"] = "document"
     criterion_id: str | None = None
+    parent_id: str | None = None
+    start_char: int | None = None
+    end_char: int | None = None
+
+
+class VisualAsset(BaseModel):
+    id: str
+    media_type: str
+    page: int | None = None
+    section: str | None = None
+    # Format-specific handle used to fetch the bytes again on demand, so the
+    # document model never carries image payloads.
+    locator: str | None = None
 
 
 class SupplementalAnswer(BaseModel):
@@ -37,6 +50,7 @@ class NormalizedDocument(BaseModel):
     source_path: str
     source_type: str
     blocks: list[SourceBlock]
+    visual_assets: list[VisualAsset] = Field(default_factory=list)
 
     @property
     def text(self) -> str:

@@ -135,3 +135,103 @@ supersedes the old one.
   second review narrative.
 - Reason: A generated interpretation could contradict verified verdicts, add
   unsupported claims, or obscure why the deterministic result was reached.
+
+## D-016: Reuse Open-Source Document Infrastructure First
+
+- Status: accepted
+- Decision: Before writing parsing or chunking infrastructure, evaluate a
+  maintained open-source component and prefer a dependency or narrow attributed
+  fork when it meets Forge's requirements. Use `semchunk` for oversized text
+  splitting with exact source offsets. Evaluate Docling directly for future
+  structured and multimodal ingestion. Do not adopt RAG-Anything or LightRAG in
+  the readiness-scoring path.
+- Reason: Commodity splitting and format parsing should not be rebuilt. Forge's
+  custom code should be limited to its differentiating guarantees: exhaustive
+  coverage, stable provenance, criterion extraction consolidation, exact quote
+  verification, and deterministic scoring.
+- Evidence: RAG-Anything delegates text chunking to LightRAG and flattens text
+  blocks before insertion. Its full pipeline requires model and embedding
+  callbacks plus persistent graph/vector storage. A local spike confirmed that
+  `semchunk` returns exact source offsets on Python 3.14, while Docling exposes
+  modular conversion and hybrid chunking under an MIT license.
+
+## D-017: Separate Text Evidence From Visual Interpretation
+
+- Status: accepted
+- Decision: `semchunk` handles text only. Forge detects and preserves embedded
+  visual assets through parser adapters. Verifiable text recovered from images
+  may receive scoring credit with explicit visual provenance; model-derived
+  interpretations of diagrams remain advisory and cannot change the readiness
+  score.
+- Reason: Diagram semantics cannot satisfy the existing exact-quote evidence
+  rule. Silently ignoring visuals is also unsafe, so assessments must expose the
+  limitation until multimodal extraction and validation are implemented.
+
+## D-018: Require Complete, Schema-Exact Extraction Fragments
+
+- Status: accepted
+- Decision: A batched run must submit one fragment per prepared batch, and each
+  fragment must contain every rubric criterion and every field exactly once.
+  Incomplete, duplicated, or unknown fragments, criteria, and fields are
+  rejected rather than silently treated as absent. A `not_applicable` claim is
+  also evidence-checked: its reason must be locatable in that batch.
+- Reason: Without these checks, an empty or sparse submission would look like a
+  complete run, produce high apparent agreement, and let unsupported
+  `not_applicable` claims remove criteria from the scoring denominator.
+- Consequence: `prepare_prd_assessment` now returns `extraction_batches`
+  instead of a single `extraction_prompt`. This is a breaking pre-release
+  change to the fallback tool response.
+
+## D-019: Per-Batch Native Sampling Instead Of Dynamic Tool Signatures
+
+- Status: accepted
+- Decision: Keep native MCP sampling for long documents by exposing
+  `list_prd_batches` and `assess_prd_batch`, where one tool call samples the
+  client model three times for a single batch. The calling agent iterates the
+  batches and submits the collected fragments to `score_prd_extraction`.
+- Reason: The MCP Python SDK resolves sampling dependencies from a statically
+  analyzed signature, so one tool cannot vary its sampling count per document.
+  Generating per-document tool signatures would add fragile metaprogramming for
+  no additional capability, and Forge still never contacts an LLM provider.
+- Consequence: `assess_prd` remains the single-call path for small documents.
+  Batch orchestration is client-side, which keeps the server stateless.
+
+## D-020: Bind Fragments To A Plan Fingerprint And Run Index
+
+- Status: accepted
+- Decision: A batch plan is identified by a fingerprint over its batch text and
+  rubric version. Native sampling stamps every fragment with that fingerprint
+  and its `run_index`. Scoring rejects fragments from a stale plan, a repeated
+  `run_index`, or fragments from different runs submitted as one run.
+- Reason: Client-side orchestration is stateless, so nothing else prevents an
+  agent from scoring extractions taken before the latest supplemental answer,
+  or from submitting one run three times and reporting fabricated test/retest
+  agreement.
+- Consequence: Recording a new supplemental answer invalidates an existing
+  batch plan, and the agent must re-run the batch extraction flow.
+
+## D-021: Report Anticipated Tool Failures To The Agent
+
+- Status: accepted
+- Decision: Expected failures in MCP tools and sampling resolvers are raised as
+  `ToolError` so the agent receives the message, including unknown batch ids,
+  stale plans, schema mismatches, and the redirect from `assess_prd` to the
+  batched flow.
+- Reason: The SDK reduces other exceptions to "Error executing tool", which
+  hides the information an agent needs to self-correct and makes the documented
+  batched workflow undiscoverable.
+
+## D-022: Advisory Visual Observations Through Client Vision Sampling
+
+- Status: accepted
+- Decision: Forge renders a detected visual on demand and sends it as
+  `ImageContent` through MCP sampling. The returned description is advisory,
+  carries an explicit scoring note, and never enters the evidence corpus or the
+  readiness score. A fact confirmed from an image must be resubmitted as a
+  supplemental answer to become scoreable.
+- Reason: This closes the multimodal blind spot without weakening the
+  exact-quote evidence rule or letting model interpretation of a diagram move a
+  score.
+- Consequence: Image bytes stay out of the normalized document and are produced
+  only for an explicit observation request, subject to a size limit. Clients
+  without image sampling lose only this tool.

@@ -4,7 +4,8 @@ import json
 
 from pydantic import BaseModel
 
-from forge.extract.batch import ExtractionBatch, verify_run
+from forge.extract.batch import ExtractionBatch, verify_extraction_batch
+from forge.ingest.batching import batch_document
 from forge.ingest.document import add_supplemental_answers, ingest_document
 from forge.ingest.models import NormalizedDocument, SupplementalAnswer
 from forge.rubric.loader import load_rubric
@@ -36,13 +37,20 @@ def assess_extractions(
 ) -> AssessmentResponse:
     answers = supplemental_answers or []
     document, rubric = prepare_assessment_input(source_path, rubric_name, answers)
-    runs = [verify_run(document, run) for run in batch.runs]
+    document_batches = batch_document(document)
+    runs = verify_extraction_batch(document_batches, batch, rubric)
     assessment = score(rubric, runs)
     questions = plan_questions(rubric, assessment, limit=3)
 
     warnings = [
         "The bundled PRD rubric is generic, untuned, and not calibrated for your company."
     ]
+    if document.visual_assets:
+        warnings.append(
+            f"Detected {len(document.visual_assets)} visual asset(s). Text found in "
+            "the document may receive credit, but image and diagram interpretation "
+            "is advisory and is not yet included in scoring."
+        )
     if len(runs) < rubric.extraction_runs:
         warnings.append(
             f"Only {len(runs)} extraction run(s) were supplied; "

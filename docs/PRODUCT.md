@@ -23,6 +23,9 @@ product bet itself is strategically correct.
 
 - PRDs only. BRDs require a separate theory and rubric and are deferred.
 - PDF and DOCX input first; plain text and Markdown are convenient additions.
+- Embedded images and diagrams are detected and can be described on request
+  using the client's vision-capable model. Text can affect scoring; visual
+  interpretation stays advisory until its evidence model is validated.
 - Company-tuned criteria and terminology.
 - A readiness band, downstream-consumer breakdown, evidence, confidence, and
   concise reasons.

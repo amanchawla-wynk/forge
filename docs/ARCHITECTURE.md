@@ -12,7 +12,8 @@ planning. It does not own or authenticate to an LLM provider.
 MCP client / coding agent
   -> Forge MCP tools
       -> document ingestion (PDF / DOCX / text)
-      -> normalized document with stable evidence locations
+      -> normalized text blocks and detected visual assets
+      -> exhaustive, source-mapped extraction batches
       -> extraction prompt and JSON schema
       -> client's LLM through MCP sampling, when supported
       -> evidence verification and extraction validation
@@ -52,8 +53,13 @@ the inference, then submits structured data to deterministic Forge code.
 
 The target public surface is:
 
-- `assess_prd`: initial or subsequent assessment using MCP sampling; subsequent
-  calls include the accumulated supplemental answers.
+- `assess_prd`: single-batch assessment using MCP sampling; subsequent calls
+  include the accumulated supplemental answers.
+- `list_prd_batches`: enumerate the exhaustive extraction batches.
+- `assess_prd_batch`: sample the client model three times for one batch and
+  return its fragments.
+- `list_prd_visuals`: enumerate detected images and diagrams.
+- `observe_prd_visual`: describe one rendered image through client sampling.
 - `prepare_prd_assessment`: create a sampling-independent extraction request.
 - `score_prd_extraction`: verify and score submitted extraction JSON.
 - `describe_prd_rubric`: explain the active rubric without exposing a prompt
@@ -78,6 +84,32 @@ assessment has no remaining failed criterion.
 Server-side session persistence remains deferred until the stateless
 conversation proves cumbersome.
 
+`prepare_prd_assessment` returns `extraction_batches` rather than a single
+`extraction_prompt`, because a long document requires several exhaustive
+batches. Each independent run submits one fragment per batch, and scoring
+rejects a run whose fragment set is incomplete or whose criteria and fields do
+not match the rubric exactly.
+
+Resolver-based sampling is declared statically, so one tool cannot vary its
+sampling count per document. `assess_prd` therefore covers single-batch
+documents only. Long documents keep native client-model inference through
+`assess_prd_batch`, which uses the same fixed three-resolver shape for one batch
+at a time while the calling agent iterates the batch list. Forge stays stateless
+and performs consolidation and scoring in `score_prd_extraction`.
+
+Generating dynamic tool signatures per document was rejected as unnecessary
+metaprogramming for the same capability.
+
+Because orchestration is client-side, fragments are bound to their inputs. Each
+plan has a fingerprint over its batch text and rubric version, and every
+fragment carries that fingerprint plus its `run_index`. Scoring rejects stale
+plans, repeated run indexes, and mixed runs, so a new supplemental answer
+requires re-running the batch flow instead of silently scoring outdated
+extractions.
+
+Anticipated failures are raised as `ToolError` so their messages reach the
+agent; the SDK would otherwise collapse them into "Error executing tool".
+
 ## Output Adapters
 
 The domain core returns structured assessment data. Chat rendering, Excel
@@ -89,3 +121,41 @@ Forge will not own SharePoint credentials as part of the scoring core.
 
 The scoring and ingestion packages must remain independent of MCP so they can be
 reused by a future dashboard. MCP code is an adapter, not the domain core.
+
+## Dependency Strategy
+
+Forge reuses maintained open-source parsing and chunking components before
+implementing equivalent infrastructure. Dependencies or small, attributable
+forks are preferred to copied code; modifications must retain upstream license
+notices and stay narrow enough to rebase.
+
+The evidence-specific orchestration remains Forge-owned: stable source block
+identity, page and section provenance, exhaustive batch coverage, extraction
+consolidation, and quote verification. These guarantees are domain behavior,
+not generic chunking.
+
+For long text, the initial integration target is `semchunk`, using returned
+source offsets when an individual block must be split. Forge groups the
+resulting blocks into bounded extraction batches and processes every batch.
+Docling will be evaluated directly as a future structured or multimodal parser
+adapter rather than importing a RAG stack.
+
+`semchunk` is text-only and has no responsibility for images or diagrams.
+Visual assets are a parallel input stream. Ingestion adapters detect PDF pages
+containing raster or vector content and DOCX image relationships, and retain
+only their source metadata.
+
+Image bytes are produced on demand by `forge.ingest.visuals`, which renders a
+PDF page or extracts an embedded DOCX image and enforces a size limit before
+sampling. `observe_prd_visual` sends that render as `ImageContent` to the
+client's model and returns a description carrying an explicit advisory note.
+Observations never enter the evidence corpus or the score; a user-confirmed
+fact must be resubmitted as a supplemental answer to become verifiable.
+
+OCR-derived text may join the evidence corpus later, but only with explicit
+image provenance and exact quote verification.
+
+RAG-Anything is not used in the scoring path. Its text ingestion delegates
+chunking to LightRAG, its retrieval is relevance-ranked rather than exhaustive,
+and its full pipeline adds model, embedding, graph, and persistent-storage
+boundaries that Forge deliberately assigns to the MCP client or does not need.

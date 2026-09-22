@@ -13,8 +13,14 @@ its bands are treated as reliable.
 - `assess_prd`: three extraction runs using MCP client sampling, followed by
   evidence verification, deterministic scoring, a concise narrative report,
   and one `next_question`.
-- `prepare_prd_assessment`: returns the extraction task for hosts without MCP
-  sampling.
+- `list_prd_batches`: lists the exhaustive extraction batches for a document.
+- `assess_prd_batch`: extracts one batch using three MCP client sampling runs,
+  for documents too large for a single `assess_prd` call.
+- `list_prd_visuals`: lists detected images and diagrams.
+- `observe_prd_visual`: describes one image using the client's vision-capable
+  model; advisory only and never scored.
+- `prepare_prd_assessment`: returns one or more exhaustive extraction batches
+  for hosts without MCP sampling.
 - `score_prd_extraction`: verifies and scores extraction JSON produced by the
   calling agent.
 - `describe_prd_rubric`: describes the active criteria and consumers.
@@ -172,10 +178,23 @@ single next clarification question, retain my answers as supplemental evidence,
 and continue until no material question remains.
 ```
 
-If the host supports MCP sampling, the agent should call `assess_prd`. Sampling
-support varies by host; when it is unavailable, the agent should call
-`prepare_prd_assessment`, perform the returned extraction with its connected
-model, and submit the JSON to `score_prd_extraction`.
+If the host supports MCP sampling, the agent should call `assess_prd`. When that
+reports that the document needs several batches, the agent should call
+`list_prd_batches`, then `assess_prd_batch` for each `batch_id`, and submit the
+collected fragments to `score_prd_extraction`, keeping each run's fragments
+together.
+
+When sampling is unavailable, the agent should call `prepare_prd_assessment`,
+perform every returned batch extraction with its connected model, and submit the
+fragments to `score_prd_extraction`.
+
+Long documents automatically use `semchunk` to split oversized source blocks
+while preserving exact source offsets. Scoring rejects incomplete fragment sets,
+fragments whose criteria or fields do not match the rubric exactly, repeated run
+indexes, and fragments from a stale batch plan.
+
+Recording a new supplemental answer changes the batch plan, so the batch
+extraction flow must be repeated before rescoring.
 
 After presenting `next_question`, the agent records the reply as an object with
 `criterion_id` and `answer`, then resubmits the accumulated
@@ -198,8 +217,18 @@ write or score the narrative.
   terminal to expose installation or path errors.
 - If `assess_prd` cannot run because the client does not support MCP sampling,
   use the `prepare_prd_assessment` and `score_prd_extraction` fallback workflow.
+- If `assess_prd` reports that a document requires multiple batches, use the
+  same prepare/score fallback workflow and complete every returned batch.
 - Always pass an absolute PRD path. Forge runs with your local user permissions
   and must be able to read that file.
+- Forge detects embedded PDF and DOCX visuals and reports a warning. Text remains
+  scoreable. To inspect a diagram, call `list_prd_visuals` and then
+  `observe_prd_visual`, which sends the rendered image to a vision-capable
+  client model. Those observations are advisory and never change the score;
+  record any confirmed fact as a supplemental answer so it becomes verifiable
+  evidence.
+- If a client cannot accept image sampling requests, `observe_prd_visual` fails
+  while the text assessment tools keep working.
 
 ## Verify
 

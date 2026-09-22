@@ -4,8 +4,14 @@ from pathlib import Path
 
 import pymupdf
 from docx import Document
+from docx.opc.constants import RELATIONSHIP_TYPE
 
-from forge.ingest.models import NormalizedDocument, SourceBlock, SupplementalAnswer
+from forge.ingest.models import (
+    NormalizedDocument,
+    SourceBlock,
+    SupplementalAnswer,
+    VisualAsset,
+)
 
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".md", ".txt"}
@@ -21,16 +27,20 @@ def ingest_document(source: str | Path) -> NormalizedDocument:
 
     suffix = path.suffix.lower()
     if suffix == ".pdf":
-        blocks = _pdf_blocks(path)
+        blocks, visual_assets = _pdf_content(path)
     elif suffix == ".docx":
-        blocks = _docx_blocks(path)
+        blocks, visual_assets = _docx_content(path)
     else:
         blocks = _text_blocks(path)
+        visual_assets = []
 
-    if not blocks:
+    if not blocks and not visual_assets:
         raise ValueError(f"document contains no extractable text: {path}")
     return NormalizedDocument(
-        source_path=str(path), source_type=suffix.removeprefix("."), blocks=blocks
+        source_path=str(path),
+        source_type=suffix.removeprefix("."),
+        blocks=blocks,
+        visual_assets=visual_assets,
     )
 
 
@@ -50,8 +60,9 @@ def add_supplemental_answers(
     return document.model_copy(update={"blocks": blocks})
 
 
-def _pdf_blocks(path: Path) -> list[SourceBlock]:
+def _pdf_content(path: Path) -> tuple[list[SourceBlock], list[VisualAsset]]:
     blocks: list[SourceBlock] = []
+    visual_assets: list[VisualAsset] = []
     with pymupdf.open(path) as pdf:
         for page_number, page in enumerate(pdf, start=1):
             text = page.get_text("text").strip()
@@ -59,10 +70,18 @@ def _pdf_blocks(path: Path) -> list[SourceBlock]:
                 blocks.append(
                     SourceBlock(id=f"page-{page_number}", text=text, page=page_number)
                 )
-    return blocks
+            if page.get_images(full=True) or page.get_drawings():
+                visual_assets.append(
+                    VisualAsset(
+                        id=f"page-{page_number}-visual",
+                        media_type="application/pdf-page",
+                        page=page_number,
+                    )
+                )
+    return blocks, visual_assets
 
 
-def _docx_blocks(path: Path) -> list[SourceBlock]:
+def _docx_content(path: Path) -> tuple[list[SourceBlock], list[VisualAsset]]:
     document = Document(path)
     blocks: list[SourceBlock] = []
     section: str | None = None
@@ -91,7 +110,23 @@ def _docx_blocks(path: Path) -> list[SourceBlock]:
                         section=section,
                     )
                 )
-    return blocks
+    image_relationships = sorted(
+        (
+            relationship
+            for relationship in document.part.rels.values()
+            if relationship.reltype == RELATIONSHIP_TYPE.IMAGE
+        ),
+        key=lambda relationship: relationship.rId,
+    )
+    visual_assets = [
+        VisualAsset(
+            id=f"embedded-image-{index}",
+            media_type=relationship.target_part.content_type,
+            locator=relationship.rId,
+        )
+        for index, relationship in enumerate(image_relationships, start=1)
+    ]
+    return blocks, visual_assets
 
 
 def _text_blocks(path: Path) -> list[SourceBlock]:
