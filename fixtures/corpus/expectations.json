@@ -1,0 +1,42 @@
+{
+  "complete": {
+    "band": "ready_to_build",
+    "raw_score": 1.0,
+    "gates_failed": [],
+    "rationale": "Every criterion is stated with verifiable evidence."
+  },
+  "gaps": {
+    "band": "needs_work",
+    "raw_score": 0.5,
+    "gates_failed": ["success_metrics", "non_goals", "acceptance_criteria"],
+    "rationale": "Readable and partly actionable, but unmeasurable and unbounded."
+  },
+  "gaming": {
+    "band": "needs_work",
+    "raw_score": 0.9423,
+    "gates_failed": ["success_metrics"],
+    "rationale": "Fluent template filler cannot satisfy quantified success metrics, but other generic fields remain a known source of raw-score inflation."
+  },
+  "notes": {
+    "band": "not_a_prd",
+    "raw_score": 0.0577,
+    "gates_failed": [
+      "problem_statement",
+      "success_metrics",
+      "non_goals",
+      "acceptance_criteria"
+    ],
+    "rationale": "Enthusiastic prose with no decidable content."
+  },
+  "placeholders": {
+    "band": "not_a_prd",
+    "raw_score": 0.0,
+    "gates_failed": [
+      "problem_statement",
+      "success_metrics",
+      "non_goals",
+      "acceptance_criteria"
+    ],
+    "rationale": "Complete-looking template whose every value is a placeholder."
+  }
+}

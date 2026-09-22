@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from forge.rubric.models import Criterion, Verdict
+from forge.rubric.models import Criterion, FieldSpec, Verdict
 
 
 class Evidence(BaseModel):
@@ -29,21 +29,30 @@ class Evidence(BaseModel):
 
 class FieldExtraction(BaseModel):
     name: str
-    value: str | None = None
+    # `string[]` rubric fields (non-goals, requirements, acceptance criteria)
+    # are legitimately extracted as lists, so both shapes are accepted.
+    value: str | list[str] | None = None
     evidence: Evidence | None = None
 
-    def is_satisfied(self, reject_values: list[str]) -> bool:
+    def is_satisfied(self, spec: FieldSpec) -> bool:
         """A field counts only if it has a real value AND a citation.
 
         The evidence requirement is the anti-hallucination mechanism: the model
-        cannot award itself credit for content that isn't in the document.
+        cannot award itself credit for content that isn't in the document. The
+        rubric's optional `value_pattern` additionally rejects values that are
+        fluent but unfalsifiable.
         """
         if self.value is None or self.evidence is None:
             return False
-        normalised = self.value.strip().lower()
-        if not normalised:
+        if not spec.matches_pattern(self.evidence.quote):
             return False
-        return normalised not in {v.lower() for v in reject_values}
+        rejected = {value.lower() for value in spec.reject_values}
+        entries = self.value if isinstance(self.value, list) else [self.value]
+        return any(
+            entry.strip().lower() not in rejected and spec.matches_pattern(entry)
+            for entry in entries
+            if isinstance(entry, str) and entry.strip()
+        )
 
 
 class CriterionExtraction(BaseModel):
@@ -78,7 +87,7 @@ def derive_verdict(criterion: Criterion, extraction: CriterionExtraction) -> Ver
     hits = 0
     for spec in required:
         found = extraction.field(spec.name)
-        if found is not None and found.is_satisfied(spec.reject_values):
+        if found is not None and found.is_satisfied(spec):
             hits += 1
 
     if hits == len(required):
@@ -95,6 +104,6 @@ def missing_fields(
     out: list[str] = []
     for spec in criterion.required_fields:
         found = extraction.field(spec.name)
-        if found is None or not found.is_satisfied(spec.reject_values):
+        if found is None or not found.is_satisfied(spec):
             out.append(spec.name)
     return out

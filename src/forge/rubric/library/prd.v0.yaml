@@ -1,5 +1,5 @@
 id: prd
-version: "0.1.0-untuned"
+version: "0.2.0-untuned"
 doc_type: prd
 description: >
   Generic PRD completeness & actionability rubric. Grades whether each
@@ -68,10 +68,16 @@ criteria:
         description: "The single headline metric."
       - name: baseline
         description: "Current value of that metric."
+        value_pattern: '\d'
+        value_requirement: "Must contain a numeric current value."
       - name: target
         description: "Target value."
+        value_pattern: '\d'
+        value_requirement: "Must contain a numeric target value."
       - name: measurement_window
         description: "Over what period success is judged."
+        value_pattern: '(?i)(?:\d|daily|weekly|monthly|quarterly|annually|calendar)'
+        value_requirement: "Must contain a numeric duration or calendar period."
       - name: guardrail_metric
         description: "Metric that must not regress."
         required: false

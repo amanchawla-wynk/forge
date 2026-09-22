@@ -36,11 +36,24 @@
   tool failures to the calling agent.
 - Added advisory visual observations through `list_prd_visuals` and
   `observe_prd_visual`, using on-demand rendering and `ImageContent` sampling.
+- Ran the first real company PRD (DOCX, 397 blocks, 26 sections, 24 images)
+  end to end: ingestion, single-batch extraction with three agent runs,
+  deterministic scoring, and the supplemental-answer rescore loop.
+- Fixed extraction rejecting `string[]` rubric fields, which three independent
+  runs all triggered on that document.
+- Added an authored regression corpus with band expectations and anti-gaming
+  invariants for padding, section order, placeholders, injection, and
+  hallucinated quotes.
+- Added a fluent-but-hollow template-gaming fixture and rubric-configured value
+  constraints. Its vague success metrics now trigger the metric gate instead
+  of receiving a false `ready_to_build` result.
 
 ## Current Build
 
+- Grow the regression corpus with a multi-batch document.
 - Evaluate local OCR output as separately provenanced, quote-verifiable evidence.
 - Harden extraction validation against duplicate or unknown criterion fields.
+- Ingest DOCX header and footer text, which is currently skipped.
 
 ## Next
 

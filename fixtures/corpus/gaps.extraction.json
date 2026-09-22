@@ -1,0 +1,153 @@
+{
+  "criteria": [
+    {
+      "criterion_id": "problem_statement",
+      "fields": [
+        {
+          "name": "problem",
+          "value": "Sellers cannot see payout arrival timing",
+          "evidence": {
+            "quote": "Sellers cannot see when a payout will arrive, and support handles about 300 payout questions each week."
+          }
+        },
+        {
+          "name": "affected_users",
+          "value": "Sellers running daily operations",
+          "evidence": {
+            "quote": "Sellers running daily operations are the people affected."
+          }
+        },
+        {
+          "name": "evidence",
+          "value": "About 300 payout questions each week",
+          "evidence": {
+            "quote": "support handles about 300 payout questions each week"
+          }
+        },
+        {"name": "cost_of_inaction", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "success_metrics",
+      "fields": [
+        {
+          "name": "primary_metric",
+          "value": "Payout page engagement",
+          "evidence": {"quote": "We will track payout page engagement."}
+        },
+        {"name": "baseline", "value": null, "evidence": null},
+        {"name": "target", "value": null, "evidence": null},
+        {"name": "measurement_window", "value": null, "evidence": null},
+        {"name": "guardrail_metric", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "non_goals",
+      "fields": [{"name": "non_goals", "value": null, "evidence": null}]
+    },
+    {
+      "criterion_id": "functional_requirements",
+      "fields": [
+        {
+          "name": "requirements",
+          "value": [
+            "Open a payout dashboard from the account menu",
+            "List payouts with status and expected arrival date",
+            "Filter payouts by date range"
+          ],
+          "evidence": {
+            "quote": "Sellers can open a payout dashboard from the account menu."
+          }
+        },
+        {
+          "name": "prioritisation",
+          "value": "All listed requirements are required for launch",
+          "evidence": {"quote": "Everything listed here is required for launch."}
+        }
+      ]
+    },
+    {
+      "criterion_id": "acceptance_criteria",
+      "fields": [{"name": "criteria", "value": null, "evidence": null}]
+    },
+    {
+      "criterion_id": "edge_cases_and_states",
+      "fields": [
+        {
+          "name": "error_states",
+          "value": "Cached view with stale-data notice when the service is unavailable",
+          "evidence": {
+            "quote": "If the payout service is unavailable the dashboard shows a cached view with a stale-data notice."
+          }
+        },
+        {
+          "name": "empty_or_edge_states",
+          "value": "New seller sees onboarding guidance",
+          "evidence": {
+            "quote": "A new seller with no payouts sees onboarding guidance instead of an empty table."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "instrumentation",
+      "fields": [
+        {"name": "events", "value": null, "evidence": null},
+        {"name": "metric_link", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "dependencies",
+      "fields": [
+        {
+          "name": "dependencies",
+          "value": ["Payouts service team", "Notification platform"],
+          "evidence": {
+            "quote": "This work depends on the Payouts service team and the existing notification platform."
+          }
+        },
+        {"name": "constraints", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "risk_compliance",
+      "fields": [
+        {"name": "data_handled", "value": null, "evidence": null},
+        {"name": "review_status", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "rollout",
+      "fields": [
+        {
+          "name": "rollout_mechanism",
+          "value": "Single release to all sellers",
+          "evidence": {
+            "quote": "We will ship the dashboard to all sellers in a single release."
+          }
+        },
+        {"name": "rollback_plan", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "open_questions_owned",
+      "fields": [
+        {
+          "name": "open_questions",
+          "value": ["Whether fee breakdowns are shown"],
+          "evidence": {
+            "quote": "Whether we show fee breakdowns is still undecided."
+          }
+        },
+        {"name": "owners", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "alternatives_considered",
+      "fields": [
+        {"name": "alternatives", "value": null, "evidence": null},
+        {"name": "rejection_reasons", "value": null, "evidence": null}
+      ]
+    }
+  ]
+}

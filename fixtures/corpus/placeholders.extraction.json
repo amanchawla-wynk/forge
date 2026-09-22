@@ -1,0 +1,63 @@
+{
+  "criteria": [
+    {
+      "criterion_id": "problem_statement",
+      "fields": [
+        {"name": "problem", "value": "TBD", "evidence": {"quote": "TBD"}},
+        {"name": "affected_users", "value": "TBD", "evidence": {"quote": "TBD"}},
+        {"name": "evidence", "value": "TBD", "evidence": {"quote": "TBD"}},
+        {"name": "cost_of_inaction", "value": "TBD", "evidence": {"quote": "TBD"}}
+      ]
+    },
+    {
+      "criterion_id": "success_metrics",
+      "fields": [
+        {
+          "name": "primary_metric",
+          "value": "TBD",
+          "evidence": {"quote": "Primary metric: TBD"}
+        },
+        {"name": "baseline", "value": "TBD", "evidence": {"quote": "Baseline: TBD"}},
+        {"name": "target", "value": "TBD", "evidence": {"quote": "Target: TBD"}},
+        {
+          "name": "measurement_window",
+          "value": "TBD",
+          "evidence": {"quote": "Measurement window: TBD"}
+        }
+      ]
+    },
+    {
+      "criterion_id": "non_goals",
+      "fields": [
+        {"name": "non_goals", "value": ["TBD"], "evidence": {"quote": "TBD"}}
+      ]
+    },
+    {
+      "criterion_id": "functional_requirements",
+      "fields": [
+        {"name": "requirements", "value": ["TBD"], "evidence": {"quote": "TBD"}},
+        {"name": "prioritisation", "value": "TBD", "evidence": {"quote": "TBD"}}
+      ]
+    },
+    {
+      "criterion_id": "acceptance_criteria",
+      "fields": [
+        {"name": "criteria", "value": ["TBD"], "evidence": {"quote": "TBD"}}
+      ]
+    },
+    {
+      "criterion_id": "dependencies",
+      "fields": [
+        {"name": "dependencies", "value": ["N/A"], "evidence": {"quote": "N/A"}},
+        {"name": "constraints", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "rollout",
+      "fields": [
+        {"name": "rollout_mechanism", "value": "TBD", "evidence": {"quote": "TBD"}},
+        {"name": "rollback_plan", "value": "TBD", "evidence": {"quote": "TBD"}}
+      ]
+    }
+  ]
+}

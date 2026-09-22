@@ -235,3 +235,21 @@ supersedes the old one.
 - Consequence: Image bytes stay out of the normalized document and are produced
   only for an explicit observation request, subject to a size limit. Clients
   without image sampling lose only this tool.
+
+## D-023: Permit Objective Field Constraints In Rubrics
+
+- Status: accepted
+- Decision: A rubric field may declare a regular-expression constraint and a
+  plain-language extraction requirement. Python awards credit only when both
+  the extracted value and its verified evidence quote match the constraint.
+  The generic rubric initially uses this for quantified metric baselines and
+  targets and concrete measurement windows.
+- Reason: A fluent but hollow PRD filled every field and received the same
+  score as the complete corpus anchor. Exact quote verification proves that
+  words exist, but not that phrases such as "improve meaningfully" are
+  measurable. Objective constraints close that specific gap without asking the
+  LLM to judge quality or hardcoding company-specific prose rules in scoring.
+- Consequence: The bundled rubric advances to `0.2.0-untuned`. Constraints must
+  remain mechanically checkable and configurable. They do not solve generic
+  filler in requirements and other qualitative fields, and they are not
+  calibrated until tested against human-labelled company PRDs.

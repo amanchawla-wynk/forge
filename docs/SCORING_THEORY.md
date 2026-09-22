@@ -23,7 +23,8 @@ The LLM does not answer "how good is this?" and never assigns points. For each
 criterion, it extracts named fields and a verbatim evidence quote. Python then
 derives one of four verdicts:
 
-- `present`: every required field has a non-placeholder value and verified
+- `present`: every required field has a non-placeholder value, satisfies any
+  objective field constraint configured by the rubric, and has verified
   evidence;
 - `partial`: at least one, but not every, required field is satisfied;
 - `absent`: no required field is satisfied;
@@ -50,6 +51,17 @@ the normalized evidence corpus and the quoted text can be verified there.
 Model interpretations of diagram structure, arrows, grouping, or visual meaning
 are advisory and remain outside numeric scoring. Detecting a visual without
 analyzing it must produce an explicit limitation warning.
+
+A field declared as `string[]` may be extracted as a JSON array. Such a field
+counts when at least one entry is a non-placeholder value and the evidence
+quote verifies, so a list of `TBD` earns nothing.
+
+A rubric field may also declare a regular-expression value constraint for an
+objective, mechanically checkable requirement. Both the extracted value and
+its verified quote must match. The generic rubric uses this only to require
+quantified baselines and targets, and a numeric duration or named calendar
+cadence for measurement windows. These constraints are rubric configuration,
+not scoring-code heuristics, and remain uncalibrated.
 
 ## Aggregation
 
@@ -130,10 +142,25 @@ organization to block development.
 - Cross-model drift: recorded and evaluated during calibration.
 - Prompt injection inside a PRD: document text is untrusted data; extraction
   prompts must explicitly ignore instructions found inside it.
-- Template gaming: calibration must include superficially complete but
-  substantively weak examples.
+- Template gaming: a quantified success-metric gate now prevents the corpus's
+  fluent-but-hollow example from reaching a ready band. Generic filler in other
+  fields still inflates its raw score, so calibration must include
+  superficially complete but substantively weak examples.
 - Overly generic requirements: field presence alone may not establish
   testability. Anchored examples and human calibration are needed.
+
+## Regression Corpus
+
+`fixtures/corpus/` holds authored documents paired with extraction JSON, plus
+expected bands. It locks the deterministic half of the system: placeholder
+templates score zero, padding and section reordering do not move a score,
+injected instructions cannot award credit, unverifiable quotes lose theirs,
+and vague metric prose cannot satisfy configured quantitative constraints.
+
+The corpus is a regression guard, not calibration. Its expected bands are
+derived from the current uncalibrated rubric, so they record present behaviour
+rather than validated truth. Human-labelled company PRDs remain required before
+any band is treated as reliable.
 
 ## Validation Plan
 

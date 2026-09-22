@@ -1,0 +1,255 @@
+{
+  "criteria": [
+    {
+      "criterion_id": "problem_statement",
+      "fields": [
+        {
+          "name": "problem",
+          "value": "Checkout is frustrating and inconsistent",
+          "evidence": {
+            "quote": "Customers find the current checkout experience frustrating and inconsistent."
+          }
+        },
+        {
+          "name": "affected_users",
+          "value": "Our customers",
+          "evidence": {
+            "quote": "Our customers are the people affected by this."
+          }
+        },
+        {
+          "name": "evidence",
+          "value": "Stakeholder feedback",
+          "evidence": {
+            "quote": "Feedback from several stakeholders suggests this is a real and pressing problem."
+          }
+        },
+        {
+          "name": "cost_of_inaction",
+          "value": "The situation gets worse over time",
+          "evidence": {
+            "quote": "If we do not act, the situation is likely to get worse over time."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "success_metrics",
+      "fields": [
+        {
+          "name": "primary_metric",
+          "value": "Checkout conversion",
+          "evidence": {"quote": "The primary metric is checkout conversion."}
+        },
+        {
+          "name": "baseline",
+          "value": "Lower than we would like",
+          "evidence": {
+            "quote": "Conversion is currently lower than we would like."
+          }
+        },
+        {
+          "name": "target",
+          "value": "Improve it meaningfully",
+          "evidence": {
+            "quote": "We want to improve it meaningfully after launch."
+          }
+        },
+        {
+          "name": "measurement_window",
+          "value": "Reviewed regularly after launch",
+          "evidence": {
+            "quote": "We will review performance regularly once the feature is live."
+          }
+        },
+        {
+          "name": "guardrail_metric",
+          "value": "Other key metrics do not get worse",
+          "evidence": {
+            "quote": "We will also make sure that other key metrics do not get worse."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "non_goals",
+      "fields": [
+        {
+          "name": "non_goals",
+          "value": ["Anything not described in this document"],
+          "evidence": {
+            "quote": "Anything not described in this document is considered out of scope."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "functional_requirements",
+      "fields": [
+        {
+          "name": "requirements",
+          "value": [
+            "Checkout works reliably across supported platforms",
+            "The experience is intuitive",
+            "The system handles errors gracefully"
+          ],
+          "evidence": {
+            "quote": "The checkout should work reliably across all supported platforms."
+          }
+        },
+        {
+          "name": "prioritisation",
+          "value": "All are important for launch",
+          "evidence": {
+            "quote": "All of the above are important for a successful launch."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "acceptance_criteria",
+      "fields": [
+        {
+          "name": "criteria",
+          "value": ["Checkout works as described", "QA confirms expected behaviour"],
+          "evidence": {
+            "quote": "The feature is complete when checkout works as described above."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "edge_cases_and_states",
+      "fields": [
+        {
+          "name": "error_states",
+          "value": "Errors handled with helpful messaging",
+          "evidence": {
+            "quote": "Errors should be handled in a user-friendly way with helpful messaging."
+          }
+        },
+        {
+          "name": "empty_or_edge_states",
+          "value": "Empty states guide the customer",
+          "evidence": {
+            "quote": "Empty states should guide the customer toward the next logical action."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "instrumentation",
+      "fields": [
+        {
+          "name": "events",
+          "value": ["Appropriate analytics events"],
+          "evidence": {
+            "quote": "We will add appropriate analytics events to the checkout flow."
+          }
+        },
+        {
+          "name": "metric_link",
+          "value": "Events show how the feature performs",
+          "evidence": {
+            "quote": "These events will let us understand how the feature is performing."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "dependencies",
+      "fields": [
+        {
+          "name": "dependencies",
+          "value": ["Platform and backend teams"],
+          "evidence": {
+            "quote": "This work depends on the usual platform and backend teams."
+          }
+        },
+        {
+          "name": "constraints",
+          "value": "Further dependencies may emerge",
+          "evidence": {
+            "quote": "There may be other dependencies that we discover during implementation."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "risk_compliance",
+      "fields": [
+        {
+          "name": "data_handled",
+          "value": "Customer data under standard policies",
+          "evidence": {
+            "quote": "This feature follows all standard company policies for customer data."
+          }
+        },
+        {
+          "name": "review_status",
+          "value": "Relevant teams consulted as needed",
+          "evidence": {
+            "quote": "The relevant teams will be consulted as needed."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "rollout",
+      "fields": [
+        {
+          "name": "rollout_mechanism",
+          "value": "Phased rollout",
+          "evidence": {
+            "quote": "We will roll this out in a phased and careful manner."
+          }
+        },
+        {
+          "name": "rollback_plan",
+          "value": "Corrective action if needed",
+          "evidence": {
+            "quote": "If anything goes wrong we will take appropriate corrective action."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "open_questions_owned",
+      "fields": [
+        {
+          "name": "open_questions",
+          "value": ["Details being worked through with the team"],
+          "evidence": {
+            "quote": "A few details are still being worked through with the wider team."
+          }
+        },
+        {
+          "name": "owners",
+          "value": ["The wider team"],
+          "evidence": {
+            "quote": "These will be resolved as part of the implementation process."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "alternatives_considered",
+      "fields": [
+        {
+          "name": "alternatives",
+          "value": ["Several other approaches"],
+          "evidence": {
+            "quote": "We considered several other approaches to this problem."
+          }
+        },
+        {
+          "name": "rejection_reasons",
+          "value": ["The proposed approach is a better fit"],
+          "evidence": {
+            "quote": "They were not chosen because the proposed approach is a better fit."
+          }
+        }
+      ]
+    }
+  ]
+}

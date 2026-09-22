@@ -11,6 +11,7 @@ Design invariants (do not relax these without re-running calibration):
 
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import Literal
 
@@ -60,6 +61,28 @@ class FieldSpec(BaseModel):
     reject_values: list[str] = Field(
         default_factory=lambda: ["tbd", "n/a", "na", "none", "unknown", "?", "-"]
     )
+    # If set, the value must match this regex to count. This is the only
+    # defence against a field that is filled in with a fluent but
+    # unfalsifiable phrase ("conversion is lower than we would like"), which
+    # `reject_values` cannot catch. Keep it objective: a pattern must be
+    # checkable without judgement, such as requiring a digit in a baseline.
+    value_pattern: str | None = None
+    # Shown to the extractor so it does not claim a field it cannot satisfy.
+    value_requirement: str | None = None
+
+    @model_validator(mode="after")
+    def _compile_value_pattern(self) -> FieldSpec:
+        if self.value_pattern is not None:
+            try:
+                re.compile(self.value_pattern)
+            except re.error as error:
+                raise ValueError(f"invalid value_pattern: {error}") from error
+        return self
+
+    def matches_pattern(self, value: str) -> bool:
+        if self.value_pattern is None:
+            return True
+        return re.search(self.value_pattern, value) is not None
 
 
 class GateLevel(str, Enum):

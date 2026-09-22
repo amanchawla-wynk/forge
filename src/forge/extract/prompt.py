@@ -29,6 +29,7 @@ def build_extraction_prompt(
                     "description": field.description,
                     "required": field.required,
                     "type": field.type,
+                    "value_requirement": field.value_requirement,
                 }
                 for field in criterion.fields
             ],

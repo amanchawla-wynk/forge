@@ -4,7 +4,7 @@ import pytest
 
 from forge.extract.models import CriterionExtraction, Evidence, FieldExtraction
 from forge.rubric.loader import load_rubric
-from forge.rubric.models import Rubric, Verdict
+from forge.rubric.models import FieldSpec, Rubric, Verdict
 from forge.score.engine import score
 from forge.score.planner import plan_questions
 
@@ -20,8 +20,19 @@ def _full(criterion) -> CriterionExtraction:
         fields=[
             FieldExtraction(
                 name=f.name,
-                value=f"value for {f.name}",
-                evidence=Evidence(quote=f"quoted {f.name}", page=1),
+                value=(
+                    f"1 value for {f.name}"
+                    if f.value_pattern
+                    else f"value for {f.name}"
+                ),
+                evidence=Evidence(
+                    quote=(
+                        f"1 quoted {f.name}"
+                        if f.value_pattern
+                        else f"quoted {f.name}"
+                    ),
+                    page=1,
+                ),
             )
             for f in criterion.fields
         ],
@@ -160,6 +171,52 @@ def test_questions_are_gate_first_and_band_aware(rubric):
 
     indices = [BAND_ORDER.index(q.band_if_answered) for q in questions]
     assert indices == sorted(indices)
+
+
+def test_list_valued_fields_are_accepted(rubric):
+    """`string[]` rubric fields are extracted as JSON arrays by real models."""
+    criterion = rubric.criterion("non_goals")
+    extraction = CriterionExtraction(
+        criterion_id="non_goals",
+        fields=[
+            FieldExtraction(
+                name="non_goals",
+                value=["Web is out of scope", "Offline downloads are excluded"],
+                evidence=Evidence(quote="Web is out of scope"),
+            )
+        ],
+    )
+
+    assert extraction.fields[0].is_satisfied(criterion.fields[0])
+
+    placeholder = extraction.model_copy(deep=True)
+    placeholder.fields[0].value = ["TBD"]
+    assert not placeholder.fields[0].is_satisfied(criterion.fields[0])
+
+    empty = extraction.model_copy(deep=True)
+    empty.fields[0].value = []
+    assert not empty.fields[0].is_satisfied(criterion.fields[0])
+
+
+def test_value_pattern_rejects_fluent_but_unfalsifiable_values():
+    spec = FieldSpec(
+        name="target",
+        description="A numeric target.",
+        value_pattern=r"\d",
+        value_requirement="Must contain a number.",
+    )
+    vague_evidence = Evidence(quote="We want to improve conversion meaningfully.")
+    numeric_evidence = Evidence(quote="We want to improve conversion by 10%.")
+
+    assert not FieldExtraction(
+        name="target", value="Improve meaningfully", evidence=vague_evidence
+    ).is_satisfied(spec)
+    assert not FieldExtraction(
+        name="target", value="Improve by 10%", evidence=vague_evidence
+    ).is_satisfied(spec)
+    assert FieldExtraction(
+        name="target", value="Improve by 10%", evidence=numeric_evidence
+    ).is_satisfied(spec)
 
 
 def test_scoring_is_deterministic(rubric):

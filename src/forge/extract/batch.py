@@ -235,7 +235,7 @@ def _consolidate_fragments(
                 (
                     field
                     for field in candidates
-                    if field.is_satisfied(field_spec.reject_values)
+                    if field.is_satisfied(field_spec)
                 ),
                 None,
             )

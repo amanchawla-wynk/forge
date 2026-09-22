@@ -1,0 +1,262 @@
+{
+  "criteria": [
+    {
+      "criterion_id": "problem_statement",
+      "fields": [
+        {
+          "name": "problem",
+          "value": "Refund settlement takes 9 days on average",
+          "evidence": {
+            "quote": "Small-business sellers wait 9 days on average for marketplace refunds to settle."
+          }
+        },
+        {
+          "name": "affected_users",
+          "value": "Small-business sellers and finance operations analysts",
+          "evidence": {
+            "quote": "Finance operations analysts handle the resulting disputes manually."
+          }
+        },
+        {
+          "name": "evidence",
+          "value": "41% of surveyed sellers paused restocking",
+          "evidence": {
+            "quote": "41% of surveyed sellers said delayed refunds forced them to pause restocking."
+          }
+        },
+        {
+          "name": "cost_of_inaction",
+          "value": "About 120 sellers lost per quarter",
+          "evidence": {
+            "quote": "we expect to keep losing roughly 120 sellers per quarter to competing marketplaces"
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "success_metrics",
+      "fields": [
+        {
+          "name": "primary_metric",
+          "value": "Median refund settlement time",
+          "evidence": {
+            "quote": "The primary metric is median refund settlement time."
+          }
+        },
+        {
+          "name": "baseline",
+          "value": "9 days",
+          "evidence": {"quote": "It is currently 9 days."}
+        },
+        {
+          "name": "target",
+          "value": "2 days",
+          "evidence": {"quote": "We will reduce it to 2 days."}
+        },
+        {
+          "name": "measurement_window",
+          "value": "90 days after general availability",
+          "evidence": {
+            "quote": "Success is judged over the 90 days after general availability."
+          }
+        },
+        {
+          "name": "guardrail_metric",
+          "value": "Dispute contact rate below 3%",
+          "evidence": {
+            "quote": "Dispute contact rate must not regress above 3%."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "non_goals",
+      "fields": [
+        {
+          "name": "non_goals",
+          "value": ["Cross-border refunds", "Chargeback process changes"],
+          "evidence": {
+            "quote": "Cross-border refunds are explicitly out of scope for this release."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "functional_requirements",
+      "fields": [
+        {
+          "name": "requirements",
+          "value": [
+            "Sellers can request a refund from the order detail screen",
+            "The system validates order eligibility before submitting",
+            "Refunds over 500 USD require manager approval"
+          ],
+          "evidence": {
+            "quote": "Sellers can request a refund from the order detail screen."
+          }
+        },
+        {
+          "name": "prioritisation",
+          "value": "Request and validation are must-have; manager approval is should-have",
+          "evidence": {
+            "quote": "The request and validation flows are must-have for launch, and manager approval is a should-have."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "acceptance_criteria",
+      "fields": [
+        {
+          "name": "criteria",
+          "value": [
+            "Eligible order settles within 2 business days",
+            "Ineligible order shows a rejection reason and creates no refund record"
+          ],
+          "evidence": {
+            "quote": "A refund request on an eligible order settles within 2 business days."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "edge_cases_and_states",
+      "fields": [
+        {
+          "name": "error_states",
+          "value": "Payment provider failure queues the request and shows a retry banner",
+          "evidence": {
+            "quote": "On payment provider failure the request is queued and the seller sees a retry banner."
+          }
+        },
+        {
+          "name": "empty_or_edge_states",
+          "value": "Seller with no refunds sees an empty state",
+          "evidence": {
+            "quote": "A seller with no refunds sees an empty state explaining eligibility rules."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "instrumentation",
+      "fields": [
+        {
+          "name": "events",
+          "value": ["refund_requested", "refund_settled", "refund_rejected"],
+          "evidence": {
+            "quote": "We will log refund_requested, refund_settled, and refund_rejected events."
+          }
+        },
+        {
+          "name": "metric_link",
+          "value": "Settlement time computed between refund_requested and refund_settled",
+          "evidence": {
+            "quote": "Median settlement time is computed from the interval between refund_requested and refund_settled."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "dependencies",
+      "fields": [
+        {
+          "name": "dependencies",
+          "value": ["Payments platform team", "Ledger service", "Payout vendor"],
+          "evidence": {
+            "quote": "This depends on the Payments platform team, the Ledger service, and our payout vendor."
+          }
+        },
+        {
+          "name": "constraints",
+          "value": "Vendor daily cut-off at 18:00 UTC",
+          "evidence": {
+            "quote": "Settlement cannot exceed the vendor daily cut-off of 18:00 UTC."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "risk_compliance",
+      "fields": [
+        {
+          "name": "data_handled",
+          "value": "Seller bank account identifiers and transaction records",
+          "evidence": {
+            "quote": "The flow handles seller bank account identifiers and transaction records."
+          }
+        },
+        {
+          "name": "review_status",
+          "value": "Privacy review requested and scheduled before build",
+          "evidence": {
+            "quote": "A privacy review has been requested and is scheduled before build starts."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "rollout",
+      "fields": [
+        {
+          "name": "rollout_mechanism",
+          "value": "Feature flag to 5% of sellers",
+          "evidence": {
+            "quote": "We will release behind the rapid_refund feature flag to 5% of sellers first."
+          }
+        },
+        {
+          "name": "rollback_plan",
+          "value": "Disable the flag to revert to the legacy refund path",
+          "evidence": {
+            "quote": "The flag can be disabled to revert all traffic to the legacy refund path."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "open_questions_owned",
+      "fields": [
+        {
+          "name": "open_questions",
+          "value": [
+            "Are partial refunds included",
+            "Vendor contract renewal date"
+          ],
+          "evidence": {
+            "quote": "Whether partial refunds are included is unresolved and owned by Priya Raman."
+          }
+        },
+        {
+          "name": "owners",
+          "value": ["Priya Raman", "Daniel Okafor"],
+          "evidence": {
+            "quote": "The vendor contract renewal date is unconfirmed and owned by Daniel Okafor."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "alternatives_considered",
+      "fields": [
+        {
+          "name": "alternatives",
+          "value": ["Extend batch settlement job", "Manual finance workflow"],
+          "evidence": {
+            "quote": "We considered extending the existing batch settlement job."
+          }
+        },
+        {
+          "name": "rejection_reasons",
+          "value": [
+            "Cannot meet a 2 day target",
+            "Does not scale beyond 200 refunds per week"
+          ],
+          "evidence": {
+            "quote": "That was rejected because it cannot meet a 2 day target."
+          }
+        }
+      ]
+    }
+  ]
+}

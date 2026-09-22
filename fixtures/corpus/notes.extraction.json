@@ -1,0 +1,28 @@
+{
+  "criteria": [
+    {
+      "criterion_id": "problem_statement",
+      "fields": [
+        {
+          "name": "problem",
+          "value": "Refunds take too long",
+          "evidence": {
+            "quote": "Sellers keep complaining about refunds taking forever."
+          }
+        },
+        {"name": "affected_users", "value": null, "evidence": null},
+        {"name": "evidence", "value": null, "evidence": null},
+        {"name": "cost_of_inaction", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "success_metrics",
+      "fields": [
+        {"name": "primary_metric", "value": null, "evidence": null},
+        {"name": "baseline", "value": null, "evidence": null},
+        {"name": "target", "value": null, "evidence": null},
+        {"name": "measurement_window", "value": null, "evidence": null}
+      ]
+    }
+  ]
+}
