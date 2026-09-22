@@ -1,0 +1,245 @@
+id: prd
+version: "0.1.0-untuned"
+doc_type: prd
+description: >
+  Generic PRD completeness & actionability rubric. Grades whether each
+  downstream consumer can act without a follow-up meeting. NOT yet tuned to
+  company template and NOT yet calibrated against human labels -- treat scores
+  from this version as indicative only.
+
+extraction_runs: 3
+
+bands:
+  - id: not_a_prd
+    label: "Not a PRD"
+    min_score: 0.0
+    description: >
+      Missing the structural minimum. This is a pitch, a brief, or notes.
+  - id: needs_work
+    label: "Needs work"
+    min_score: 0.45
+    description: >
+      Communicates intent but downstream teams cannot start. Expect multiple
+      clarification cycles.
+  - id: ready_with_gaps
+    label: "Ready with gaps"
+    min_score: 0.70
+    description: >
+      Most teams can start. Specific, named gaps remain and are owned.
+  - id: ready_to_build
+    label: "Ready to build"
+    min_score: 0.88
+    description: >
+      Every downstream consumer can act from the document alone.
+
+criteria:
+  - id: problem_statement
+    name: "Problem is stated with evidence"
+    rationale: >
+      Without a named affected user and evidence of the problem, nobody
+      downstream can make a tradeoff call when reality diverges from the plan.
+    consumers: [leadership, design, engineering]
+    weight: 3
+    gate: caps_at_needs_work
+    fields:
+      - name: problem
+        description: "The user or business problem, stated as a problem not a solution."
+      - name: affected_users
+        description: "Who specifically experiences it."
+      - name: evidence
+        description: "Data, research, or incident that demonstrates the problem is real."
+      - name: cost_of_inaction
+        description: "What happens if this is not built."
+        required: false
+    remediation_prompt: >
+      What is the evidence that this problem is real, and who specifically
+      experiences it?
+
+  - id: success_metrics
+    name: "Success is measurable"
+    rationale: >
+      A metric without a baseline, target and window cannot be evaluated after
+      launch, so the bet can never be settled.
+    consumers: [data, leadership]
+    weight: 3
+    gate: caps_at_needs_work
+    fields:
+      - name: primary_metric
+        description: "The single headline metric."
+      - name: baseline
+        description: "Current value of that metric."
+      - name: target
+        description: "Target value."
+      - name: measurement_window
+        description: "Over what period success is judged."
+      - name: guardrail_metric
+        description: "Metric that must not regress."
+        required: false
+    remediation_prompt: >
+      What is the primary success metric, its current baseline, the target
+      value, and the window over which you will judge it?
+
+  - id: non_goals
+    name: "Explicit non-goals / out of scope"
+    rationale: >
+      Scope stated only as inclusions is unbounded. Non-goals are what stop
+      scope creep during build.
+    consumers: [engineering, design, qa]
+    weight: 2
+    gate: caps_at_ready_with_gaps
+    fields:
+      - name: non_goals
+        description: "Explicitly excluded capabilities or user segments."
+        type: "string[]"
+    remediation_prompt: >
+      What is explicitly out of scope for this release?
+
+  - id: functional_requirements
+    name: "Requirements are decomposable and testable"
+    rationale: >
+      Engineering cannot estimate, and QA cannot write cases, from prose
+      describing an experience rather than behaviours.
+    consumers: [engineering, qa]
+    weight: 3
+    fields:
+      - name: requirements
+        description: >
+          Discrete, individually-testable behaviour statements (not paragraphs
+          of narrative).
+        type: "string[]"
+      - name: prioritisation
+        description: "Must/should/could or equivalent ranking across requirements."
+    remediation_prompt: >
+      Can you list the required behaviours as discrete, individually testable
+      statements, and mark which are must-have for launch?
+
+  - id: acceptance_criteria
+    name: "Acceptance criteria exist"
+    rationale: >
+      This is the single strongest predictor of whether QA can begin without a
+      meeting.
+    consumers: [qa, engineering]
+    weight: 3
+    gate: caps_at_ready_with_gaps
+    fields:
+      - name: criteria
+        description: "Observable pass/fail conditions for the feature."
+        type: "string[]"
+    remediation_prompt: >
+      What are the observable pass/fail conditions that mean this is done?
+
+  - id: edge_cases_and_states
+    name: "Edge cases, error and empty states"
+    rationale: >
+      Unspecified states are where design and engineering silently diverge and
+      the divergence surfaces in QA.
+    consumers: [design, qa, engineering]
+    weight: 2
+    fields:
+      - name: error_states
+        description: "Behaviour on failure."
+      - name: empty_or_edge_states
+        description: "Empty, first-run, boundary or degraded states."
+    remediation_prompt: >
+      What should happen on error, and what do first-run/empty/boundary states
+      look like?
+
+  - id: instrumentation
+    name: "Instrumentation is specified"
+    rationale: >
+      A success metric that nobody has specified events for will not exist at
+      launch. This is the most common silent failure in otherwise good PRDs.
+    consumers: [data, engineering]
+    weight: 2
+    fields:
+      - name: events
+        description: "Events or properties to be logged."
+        type: "string[]"
+      - name: metric_link
+        description: "How those events compute the success metric."
+    remediation_prompt: >
+      Which events need to be logged, and how do they roll up into the success
+      metric?
+
+  - id: dependencies
+    name: "Dependencies and constraints named"
+    rationale: >
+      Unnamed cross-team or technical dependencies are the main source of
+      schedule slip discovered late.
+    consumers: [engineering, leadership]
+    weight: 2
+    fields:
+      - name: dependencies
+        description: "Teams, services, vendors or data this relies on."
+        type: "string[]"
+      - name: constraints
+        description: "Technical, legal, or timing constraints."
+        required: false
+    remediation_prompt: >
+      What other teams, systems or vendors does this depend on?
+
+  - id: risk_compliance
+    name: "Privacy / security / compliance surface"
+    rationale: >
+      Risk functions need to know their surface area early; late discovery is
+      the most expensive kind.
+    consumers: [risk, engineering]
+    weight: 2
+    allow_not_applicable: true
+    fields:
+      - name: data_handled
+        description: "Personal, financial or regulated data touched."
+      - name: review_status
+        description: "Whether risk review is needed, requested, or complete."
+    remediation_prompt: >
+      Does this touch personal, financial or regulated data, and has risk
+      review been engaged?
+
+  - id: rollout
+    name: "Rollout and reversibility"
+    rationale: >
+      Engineering needs to know the release mechanism; leadership needs to know
+      how the bet is unwound if it fails.
+    consumers: [engineering, gtm, leadership]
+    weight: 2
+    fields:
+      - name: rollout_mechanism
+        description: "Flag, phased, cohort, big-bang."
+      - name: rollback_plan
+        description: "How this is turned off or reverted."
+    remediation_prompt: >
+      How will this be rolled out, and how do you turn it off if it goes wrong?
+
+  - id: open_questions_owned
+    name: "Open questions have owners and dates"
+    rationale: >
+      An unowned open question is an unmanaged risk. Owned ones are fine, and
+      a document with none at all is usually hiding them.
+    consumers: [leadership, engineering]
+    weight: 1
+    fields:
+      - name: open_questions
+        description: "Unresolved questions."
+        type: "string[]"
+      - name: owners
+        description: "Named owner per open question."
+        type: "string[]"
+    remediation_prompt: >
+      What is still unresolved, and who owns closing each one?
+
+  - id: alternatives_considered
+    name: "Alternatives and why rejected"
+    rationale: >
+      Prevents relitigating the decision mid-build, and reveals whether the
+      solution space was actually explored.
+    consumers: [leadership, engineering, design]
+    weight: 1
+    fields:
+      - name: alternatives
+        description: "Other approaches considered."
+        type: "string[]"
+      - name: rejection_reasons
+        description: "Why each was not chosen."
+        type: "string[]"
+    remediation_prompt: >
+      What other approaches did you consider, and why were they rejected?
