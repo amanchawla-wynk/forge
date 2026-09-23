@@ -86,14 +86,23 @@
           "evidence": {
             "quote": "A new seller with no payouts sees onboarding guidance instead of an empty table."
           }
-        }
+        },
+        {
+          "name": "transitional_or_degraded_states",
+          "value": "Cached degraded view when the service is unavailable",
+          "evidence": {
+            "quote": "If the payout service is unavailable the dashboard shows a cached view with a stale-data notice."
+          }
+        },
+        {"name": "platform_and_accessibility_states", "value": null, "evidence": null}
       ]
     },
     {
       "criterion_id": "instrumentation",
       "fields": [
         {"name": "events", "value": null, "evidence": null},
-        {"name": "metric_link", "value": null, "evidence": null}
+        {"name": "metric_link", "value": null, "evidence": null},
+        {"name": "operational_signals", "value": null, "evidence": null}
       ]
     },
     {
@@ -113,7 +122,8 @@
       "criterion_id": "risk_compliance",
       "fields": [
         {"name": "data_handled", "value": null, "evidence": null},
-        {"name": "review_status", "value": null, "evidence": null}
+        {"name": "review_status", "value": null, "evidence": null},
+        {"name": "data_lifecycle", "value": null, "evidence": null}
       ]
     },
     {

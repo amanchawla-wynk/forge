@@ -59,6 +59,9 @@ product bet itself is strategically correct.
 6. The answer is added as explicit supplemental evidence and the PRD is
    rescored.
 7. Steps 5 and 6 repeat until no material question remains or the user stops.
+8. On explicit approval, Forge writes the accumulated answers into a new
+   editable PRD revision. The original remains unchanged, and the revision can
+   be reassessed without supplemental evidence.
 
 ## Review Coverage
 

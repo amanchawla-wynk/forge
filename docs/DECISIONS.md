@@ -262,7 +262,8 @@ supersedes the old one.
   synthetic PRDs without those labels may expand format and adversarial test
   coverage but cannot serve as calibration truth. Calibration suites contain
   predictions and reviewer verdicts, not source-document text, and are bound to
-  an exact rubric version.
+  an exact rubric version. Reviewers receive blinded sheets without Forge's
+  prediction; labels are merged with predictions only after review.
 - Reason: The evaluated Kaggle corpus is combinatorial synthetic structured data
   with no per-document quality label and contradictory license metadata. The
   evaluated Hugging Face corpus is repetitive generated prompt/response text
@@ -294,3 +295,44 @@ supersedes the old one.
   checks such as performance, observability, accessibility, retention, and
   consent may be added as configurable coverage later, but cannot affect the
   readiness band without evidence rules and human-labelled calibration.
+
+## D-026: Escalate Disagreement Without Inflating Confidence
+
+- Status: accepted
+- Decision: Keep three native sampling runs as the baseline. If their criterion
+  verdicts disagree, report the disputed criteria and recommend up to two
+  additional complete fallback runs. Confidence remains observed agreement and
+  may decrease when broader sampling reveals instability.
+- Reason: Repeating a call solely to produce a larger number would manufacture
+  confidence. Five independent runs provide a more robust majority and expose
+  ambiguous extraction, but cannot establish correctness without external
+  labels.
+- Consequence: Forge never selects favourable runs or rounds confidence upward.
+  The user-answer loop is the preferred way to turn ambiguous implicit content
+  into explicit, consistently extractable evidence.
+
+## D-027: Materialize Approved Answers Into A New Revision
+
+- Status: accepted
+- Decision: Conversational answers remain supplemental evidence during review.
+  On explicit request, Forge may append them to a new DOCX, Markdown, or text
+  revision grouped by criterion. It refuses to overwrite the source or an
+  existing output and does not modify PDFs.
+- Reason: Rescoring answers is useful, but authors also need the improved PRD as
+  a durable artifact. An explicit new-copy operation preserves provenance and
+  avoids silently pretending the original contained later clarification.
+
+## D-028: Adopt Expert-Prior Coverage, Not External Weights
+
+- Status: accepted
+- Decision: Advance the bundled rubric to `0.3.0-expert-prior` with required
+  evidence for transitional/degraded and platform/accessibility states,
+  operational monitoring/support signals, and data-lifecycle controls. Retain
+  Forge's deterministic verdict credits and existing criterion weights.
+- Reason: These dimensions from `multi-agent-prd-reviewer` directly affect
+  whether design, engineering, QA, operations, and risk can act. Its keyword
+  matching, severity weights, passing score, and specialist-generated judgments
+  remain too gameable and unsupported to borrow.
+- Consequence: The new version is a stronger expert prior, not a calibrated
+  rubric. Its behavior is locked by adversarial fixtures and must be revisited
+  when representative labels become available.

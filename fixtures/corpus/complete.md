@@ -36,11 +36,14 @@ An ineligible order shows a rejection reason and does not create a refund record
 
 On payment provider failure the request is queued and the seller sees a retry banner.
 A seller with no refunds sees an empty state explaining eligibility rules.
+While eligibility is checked the seller sees a loading state, and an interrupted request can be resumed from the queued state.
+The web and mobile flows must meet WCAG 2.1 AA before launch.
 
 ## 7. Instrumentation
 
 We will log refund_requested, refund_settled, and refund_rejected events.
 Median settlement time is computed from the interval between refund_requested and refund_settled.
+Operations monitors settlement queue depth on a dashboard and receives an alert when queued refunds exceed 100.
 
 ## 8. Dependencies
 
@@ -51,6 +54,7 @@ Settlement cannot exceed the vendor daily cut-off of 18:00 UTC.
 
 The flow handles seller bank account identifiers and transaction records.
 A privacy review has been requested and is scheduled before build starts.
+Transaction audit records are retained for 7 years, while bank account identifiers are deleted 30 days after settlement.
 
 ## 10. Rollout
 

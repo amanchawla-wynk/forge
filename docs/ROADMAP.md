@@ -58,12 +58,23 @@
   Forge's verified deterministic architecture and adopted its strongest
   presentation idea as exhaustive structured gaps grouped by downstream
   consumer, without adding provider keys or free-text scoring agents.
+- Ran three independent, quote-verified extraction passes on two internal PRDs
+  and prepared separate blinded label sheets for two reviewers. Predictions are
+  stored apart and cannot be merged until review is complete.
+- Added disagreement-aware confidence escalation: disputed criteria are exposed
+  and up to two additional complete runs are recommended without inflating the
+  observed agreement value.
+- Added explicit DOCX/Markdown/text revision materialization from approved
+  conversational answers while preserving the original document.
+- Advanced the generic rubric to `0.3.0-expert-prior` with concrete degraded
+  state, accessibility/platform, observability/support, and data-lifecycle
+  coverage adapted from the external multi-agent reviewer without its weights.
 
 ## Current Build
 
 - Grow the regression corpus with a multi-batch document.
-- Label the existing real PRD with at least two independent reviewers and run
-  the first calibration report.
+- Run the one-question remediation loop on both internal PRDs, materialize the
+  approved answers, and measure score and extraction-agreement movement.
 - Evaluate local OCR output as separately provenanced, quote-verifiable evidence.
 - Harden extraction validation against duplicate or unknown criterion fields.
 - Ingest DOCX header and footer text, which is currently skipped.

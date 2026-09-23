@@ -28,13 +28,44 @@ class CalibrationCase(BaseModel):
     source_kind: Literal["internal", "public", "synthetic"]
     source_ref: str | None = None
     prediction: Assessment
-    labels: list[HumanLabel] = Field(min_length=1)
+    labels: list[HumanLabel] = Field(default_factory=list)
 
 
 class CalibrationSuite(BaseModel):
     rubric_id: str
     rubric_version: str
     cases: list[CalibrationCase] = Field(min_length=1)
+
+
+class ReviewerCriterionLabel(BaseModel):
+    criterion_id: str
+    criterion_name: str
+    standard: str
+    required_fields: dict[str, str]
+    verdict: Verdict | None = None
+    rationale: str | None = None
+
+
+class ReviewerBandDefinition(BaseModel):
+    id: str
+    label: str
+    description: str
+
+
+class ReviewerCaseLabel(BaseModel):
+    case_id: str
+    source_ref: str | None = None
+    band: str | None = None
+    criteria: list[ReviewerCriterionLabel]
+    rationale: str | None = None
+
+
+class ReviewerLabelSheet(BaseModel):
+    rubric_id: str
+    rubric_version: str
+    reviewer_id: str = Field(min_length=1)
+    bands: list[ReviewerBandDefinition]
+    cases: list[ReviewerCaseLabel] = Field(min_length=1)
 
 
 class Agreement(BaseModel):
@@ -74,34 +105,92 @@ class CalibrationReport(BaseModel):
 
 def make_label_template(
     assessment: Assessment,
+    rubric: Rubric,
     *,
     case_id: str,
     reviewer_id: str,
-    source_kind: Literal["internal", "public", "synthetic"] = "internal",
     source_ref: str | None = None,
-) -> CalibrationSuite:
-    """Create an exhaustive blank label without retaining source document text."""
-    return CalibrationSuite(
+) -> ReviewerLabelSheet:
+    """Create a blinded label sheet without predictions or document text."""
+    if (assessment.rubric_id, assessment.rubric_version) != (
+        rubric.id,
+        rubric.version,
+    ):
+        raise ValueError("assessment does not match the label rubric version")
+    return ReviewerLabelSheet(
         rubric_id=assessment.rubric_id,
         rubric_version=assessment.rubric_version,
+        reviewer_id=reviewer_id,
+        bands=[
+            ReviewerBandDefinition(
+                id=band.id,
+                label=band.label,
+                description=band.description.strip(),
+            )
+            for band in rubric.bands_descending()
+        ],
         cases=[
-            CalibrationCase(
+            ReviewerCaseLabel(
                 case_id=case_id,
-                source_kind=source_kind,
                 source_ref=source_ref,
-                prediction=assessment,
-                labels=[
-                    HumanLabel(
-                        reviewer_id=reviewer_id,
-                        criteria={
-                            result.criterion_id: None
-                            for result in assessment.criteria
+                criteria=[
+                    ReviewerCriterionLabel(
+                        criterion_id=criterion.id,
+                        criterion_name=criterion.name,
+                        standard=criterion.rationale.strip(),
+                        required_fields={
+                            field.name: field.description.strip()
+                            for field in criterion.required_fields
                         },
                     )
+                    for criterion in rubric.criteria
                 ],
             )
         ],
     )
+
+
+def merge_reviewer_labels(
+    predictions: CalibrationSuite,
+    sheets: list[ReviewerLabelSheet],
+) -> CalibrationSuite:
+    """Attach completed blinded sheets to a prediction bundle by case id."""
+    if not sheets:
+        raise ValueError("at least one reviewer label sheet is required")
+    expected_cases = {case.case_id for case in predictions.cases}
+    reviewers = [sheet.reviewer_id for sheet in sheets]
+    if len(reviewers) != len(set(reviewers)):
+        raise ValueError("reviewer label sheets contain duplicate reviewer ids")
+
+    labels_by_case: dict[str, list[HumanLabel]] = {
+        case_id: [] for case_id in expected_cases
+    }
+    for sheet in sheets:
+        if (sheet.rubric_id, sheet.rubric_version) != (
+            predictions.rubric_id,
+            predictions.rubric_version,
+        ):
+            raise ValueError("reviewer label sheet uses a different rubric version")
+        sheet_cases = {case.case_id for case in sheet.cases}
+        if sheet_cases != expected_cases:
+            raise ValueError("reviewer label sheet cases do not match predictions")
+        for case in sheet.cases:
+            labels_by_case[case.case_id].append(
+                HumanLabel(
+                    reviewer_id=sheet.reviewer_id,
+                    band=case.band,
+                    criteria={
+                        criterion.criterion_id: criterion.verdict
+                        for criterion in case.criteria
+                    },
+                    rationale=case.rationale,
+                )
+            )
+
+    merged = predictions.model_copy(deep=True)
+    for case in merged.cases:
+        case.labels = labels_by_case[case.case_id]
+    return merged
 
 
 def evaluate_calibration(
@@ -312,12 +401,13 @@ def main() -> None:
     template.add_argument("output", type=Path)
     template.add_argument("--case-id", required=True)
     template.add_argument("--reviewer", required=True)
-    template.add_argument(
-        "--source-kind",
-        choices=("internal", "public", "synthetic"),
-        default="internal",
-    )
+    template.add_argument("--rubric", default="prd")
     template.add_argument("--source-ref")
+
+    merge = subparsers.add_parser("merge")
+    merge.add_argument("predictions", type=Path)
+    merge.add_argument("output", type=Path)
+    merge.add_argument("labels", type=Path, nargs="+")
 
     evaluate = subparsers.add_parser("evaluate")
     evaluate.add_argument("suite", type=Path)
@@ -327,12 +417,24 @@ def main() -> None:
     if args.command == "template":
         suite = make_label_template(
             _load_assessment(args.assessment),
+            load_rubric(args.rubric),
             case_id=args.case_id,
             reviewer_id=args.reviewer,
-            source_kind=args.source_kind,
             source_ref=args.source_ref,
         )
         args.output.write_text(suite.model_dump_json(indent=2) + "\n")
+        return
+
+    if args.command == "merge":
+        predictions = CalibrationSuite.model_validate_json(
+            args.predictions.read_text()
+        )
+        sheets = [
+            ReviewerLabelSheet.model_validate_json(path.read_text())
+            for path in args.labels
+        ]
+        merged = merge_reviewer_labels(predictions, sheets)
+        args.output.write_text(merged.model_dump_json(indent=2) + "\n")
         return
 
     rubric = load_rubric(args.rubric)

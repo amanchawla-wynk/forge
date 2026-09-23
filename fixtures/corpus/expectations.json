@@ -7,15 +7,15 @@
   },
   "gaps": {
     "band": "needs_work",
-    "raw_score": 0.5,
+    "raw_score": 0.4615,
     "gates_failed": ["success_metrics", "non_goals", "acceptance_criteria"],
     "rationale": "Readable and partly actionable, but unmeasurable and unbounded."
   },
   "gaming": {
     "band": "needs_work",
-    "raw_score": 0.9423,
+    "raw_score": 0.8269,
     "gates_failed": ["success_metrics"],
-    "rationale": "Fluent template filler cannot satisfy quantified success metrics, but other generic fields remain a known source of raw-score inflation."
+    "rationale": "Fluent template filler fails quantified metrics plus concrete state, operational, and lifecycle requirements, but generic fields still inflate its score."
   },
   "notes": {
     "band": "not_a_prd",

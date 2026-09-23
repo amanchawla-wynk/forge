@@ -30,6 +30,7 @@ def test_mcp_exposes_sampling_and_fallback_tools():
         "observe_prd_visual",
         "prepare_prd_assessment",
         "score_prd_extraction",
+        "write_prd_revision",
         "describe_prd_rubric",
     }
     observe = next(tool for tool in tools if tool.name == "observe_prd_visual")
@@ -56,6 +57,12 @@ def test_mcp_exposes_sampling_and_fallback_tools():
     score = next(tool for tool in tools if tool.name == "score_prd_extraction")
     assert "supplemental_answers" in prepare.input_schema["properties"]
     assert "supplemental_answers" in score.input_schema["properties"]
+    revision = next(tool for tool in tools if tool.name == "write_prd_revision")
+    assert set(revision.input_schema["properties"]) == {
+        "source_path",
+        "output_path",
+        "supplemental_answers",
+    }
 
 
 @pytest.mark.anyio
@@ -97,6 +104,7 @@ async def test_assess_prd_borrows_client_model_three_times(tmp_path):
 
     assert calls == 3
     assert result.structured_content["run_count"] == 3
+    assert result.structured_content["recommended_additional_runs"] == 0
     assert result.structured_content["assessment"]["band"] == "not_a_prd"
     assert result.structured_content["report"]["headline"] == "Not a PRD"
     assert result.structured_content["report"]["next_step"] == (

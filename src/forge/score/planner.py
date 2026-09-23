@@ -19,6 +19,7 @@ class Question(BaseModel):
     criterion_name: str
     question: str
     missing_fields: list[str]
+    answer_requirements: list[str]
     is_gate: bool
     # Band this document would reach if this and all higher-priority
     # questions were answered fully.
@@ -88,6 +89,11 @@ def plan_questions(
                 criterion_name=result.name,
                 question=criterion.remediation_prompt.strip(),
                 missing_fields=result.missing,
+                answer_requirements=[
+                    f"{field.name}: {field.description.strip()}"
+                    for field in criterion.required_fields
+                    if field.name in result.missing
+                ],
                 is_gate=result.gate_triggered,
                 band_if_answered=_simulate(rubric, assessment, fixed),
                 unblocks_consumers=[c.value for c in result.consumers],

@@ -23,6 +23,8 @@ its bands are treated as reliable.
   for hosts without MCP sampling.
 - `score_prd_extraction`: verifies and scores extraction JSON produced by the
   calling agent.
+- `write_prd_revision`: writes approved supplemental answers into a new DOCX,
+  Markdown, or text revision while preserving the original.
 - `describe_prd_rubric`: describes the active criteria and consumers.
 
 ## Install Locally
@@ -203,6 +205,17 @@ separately from the PRD and may provide evidence only for their named criterion.
 Forge remains stateless and returns `next_question: null` when no rubric gap
 remains.
 
+Each question includes `answer_requirements` for the exact missing fields. The
+answer is rescored as criterion-bound supplemental evidence. Once the user
+approves the accumulated answers, call `write_prd_revision` with a new output
+path, then assess that revision without supplemental answers. Forge never
+silently overwrites the source document.
+
+`confidence` measures extraction-run agreement, not correctness. When the first
+three runs disagree, the response identifies `disputed_criteria` and recommends
+up to two additional complete runs. A lower result after more runs is useful
+evidence of instability and is never rounded upward or hidden.
+
 Every assessment returns `report` before the detailed `assessment` audit. The
 report contains the readiness headline, criterion summary, three highest-impact
 gaps, exhaustive structured gap records, consumer-specific gap views, blocked
@@ -218,15 +231,23 @@ blank label from either a full Forge response or its nested `assessment` object:
 
 ```bash
 uv run python -m forge.calibration template assessment.json labels.json \
-  --case-id prd-001 --reviewer reviewer-a --source-kind internal
+  --case-id prd-001 --reviewer reviewer-a
 ```
 
-Set the human `band` and every criterion verdict in `labels.json`. Add a second
-reviewer label to the same case before drawing conclusions about model
-agreement. Evaluate the suite with:
+The reviewer sheet deliberately excludes Forge's prediction to avoid anchoring.
+Set the human `band` and every criterion verdict, then create a separate sheet
+for each reviewer. Merge completed sheets into a prediction bundle before
+evaluation:
 
 ```bash
-uv run python -m forge.calibration evaluate labels.json
+uv run python -m forge.calibration merge predictions.json calibration-suite.json \
+  reviewer-a.json reviewer-b.json
+```
+
+Evaluate the merged suite with:
+
+```bash
+uv run python -m forge.calibration evaluate calibration-suite.json
 ```
 
 The report includes model-to-human and inter-reviewer agreement, ordinal band

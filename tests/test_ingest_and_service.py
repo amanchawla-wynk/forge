@@ -286,6 +286,7 @@ def test_service_only_credits_quotes_found_in_source(tmp_path):
     assert criterion.verdict is Verdict.PARTIAL
     assert criterion.missing == ["affected_users", "evidence"]
     assert response.run_count == 1
+    assert response.recommended_additional_runs == 2
     assert len(response.warnings) == 2
     assert response.report.headline == response.assessment.band_label
     assert response.report.summary.startswith("0 of 12 applicable criteria")
@@ -296,6 +297,10 @@ def test_service_only_credits_quotes_found_in_source(tmp_path):
     assert "engineering" in response.report.consumer_gaps
     assert "problem_statement" in response.report.consumer_gaps["engineering"]
     assert response.report.next_step == response.next_question.question
+    assert response.next_question.answer_requirements == [
+        "affected_users: Who specifically experiences it.",
+        "evidence: Data, research, or incident that demonstrates the problem is real.",
+    ]
     assert "stability is unknown" in response.report.confidence_note
 
 
@@ -359,6 +364,34 @@ def test_service_rescores_with_provenanced_supplemental_answers(tmp_path):
     assert affected_evidence is not None
     assert affected_evidence.provenance == "supplemental_answer"
     assert affected_evidence.source_block_id == "supplemental-answer-1"
+
+
+def test_service_recommends_two_more_runs_when_three_runs_disagree(tmp_path):
+    path = tmp_path / "prd.md"
+    path.write_text("Users cannot export invoices.")
+    supported = {
+        "criteria": [
+            {
+                "criterion_id": "problem_statement",
+                "fields": [
+                    {
+                        "name": "problem",
+                        "value": "Users cannot export invoices",
+                        "evidence": {"quote": "Users cannot export invoices."},
+                    }
+                ],
+            }
+        ]
+    }
+    empty = {"criteria": []}
+
+    response = assess_extraction_json(
+        str(path), json.dumps({"runs": [supported, empty, empty]})
+    )
+
+    assert response.disputed_criteria == ["problem_statement"]
+    assert response.recommended_additional_runs == 2
+    assert "problem_statement" in response.report.confidence_note
 
 
 def test_service_rejects_supplemental_answer_for_unknown_criterion(tmp_path):
@@ -458,17 +491,27 @@ def test_service_rejects_incomplete_long_document_fragments(tmp_path):
 
 def test_service_returns_no_question_when_every_criterion_is_present(tmp_path):
     path = tmp_path / "prd.md"
-    path.write_text("Complete answer 1.")
+    path.write_text(
+        "Complete answer 1 log dashboard WCAG mobile retention audit."
+    )
     rubric = load_rubric("prd")
     payload = {
         "criteria": [
             {
                 "criterion_id": criterion.id,
                 "fields": [
-                    {
-                        "name": field.name,
-                            "value": "Complete answer 1",
-                            "evidence": {"quote": "Complete answer 1."},
+                        {
+                            "name": field.name,
+                            "value": (
+                                "Complete answer 1 log dashboard WCAG mobile "
+                                "retention audit"
+                            ),
+                            "evidence": {
+                                "quote": (
+                                    "Complete answer 1 log dashboard WCAG mobile "
+                                    "retention audit."
+                                )
+                            },
                     }
                     for field in criterion.required_fields
                 ],

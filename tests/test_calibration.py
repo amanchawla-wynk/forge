@@ -10,6 +10,7 @@ from forge.calibration import (
     HumanLabel,
     evaluate_calibration,
     make_label_template,
+    merge_reviewer_labels,
 )
 from forge.rubric.loader import load_rubric
 from forge.service import assess_extraction_json
@@ -41,6 +42,7 @@ def test_label_template_is_exhaustive_and_contains_no_document_text():
 
     suite = make_label_template(
         assessment,
+        load_rubric("prd"),
         case_id="prd-001",
         reviewer_id="reviewer-a",
         source_ref="opaque-document-id",
@@ -48,12 +50,55 @@ def test_label_template_is_exhaustive_and_contains_no_document_text():
 
     case = suite.cases[0]
     assert case.source_ref == "opaque-document-id"
-    assert case.labels[0].band is None
-    assert set(case.labels[0].criteria) == {
+    assert case.band is None
+    assert {criterion.criterion_id for criterion in case.criteria} == {
         result.criterion_id for result in assessment.criteria
     }
-    assert set(case.labels[0].criteria.values()) == {None}
+    assert {criterion.verdict for criterion in case.criteria} == {None}
+    assert all(criterion.required_fields for criterion in case.criteria)
+    assert suite.bands[0].id == "ready_to_build"
     assert "Small-business sellers" not in suite.model_dump_json()
+    assert "prediction" not in suite.model_dump_json()
+
+
+def test_blinded_reviewer_sheets_merge_after_labelling():
+    rubric = load_rubric("prd")
+    assessment = _assessment("complete")
+    predictions = CalibrationSuite(
+        rubric_id=rubric.id,
+        rubric_version=rubric.version,
+        cases=[
+            CalibrationCase(
+                case_id="prd-001",
+                source_kind="internal",
+                prediction=assessment,
+            )
+        ],
+    )
+    sheets = [
+        make_label_template(
+            assessment,
+            rubric,
+            case_id="prd-001",
+            reviewer_id=reviewer,
+        )
+        for reviewer in ("reviewer-a", "reviewer-b")
+    ]
+    for sheet in sheets:
+        sheet.cases[0].band = "ready_to_build"
+        verdicts = {
+            result.criterion_id: result.verdict for result in assessment.criteria
+        }
+        for criterion in sheet.cases[0].criteria:
+            criterion.verdict = verdicts[criterion.criterion_id]
+
+    merged = merge_reviewer_labels(predictions, sheets)
+
+    assert [label.reviewer_id for label in merged.cases[0].labels] == [
+        "reviewer-a",
+        "reviewer-b",
+    ]
+    assert evaluate_calibration(rubric, merged).band_agreement.rate == 1.0
 
 
 def test_calibration_reports_false_ready_and_false_not_ready():

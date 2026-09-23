@@ -23,6 +23,8 @@ class AssessmentResponse(BaseModel):
     supplemental_answers: list[SupplementalAnswer]
     run_count: int
     expected_run_count: int
+    disputed_criteria: list[str]
+    recommended_additional_runs: int
     client_models: list[str]
     warnings: list[str]
 
@@ -41,6 +43,16 @@ def assess_extractions(
     runs = verify_extraction_batch(document_batches, batch, rubric)
     assessment = score(rubric, runs)
     questions = plan_questions(rubric, assessment)
+    disputed = [
+        result.criterion_id
+        for result in assessment.criteria
+        if result.agreement < 1.0
+    ]
+    recommended_additional_runs = (
+        rubric.extraction_runs - len(runs)
+        if len(runs) < rubric.extraction_runs
+        else max(0, 5 - len(runs)) if disputed else 0
+    )
 
     warnings = [
         "The bundled PRD rubric is generic, untuned, and not calibrated for your company."
@@ -70,6 +82,8 @@ def assess_extractions(
         supplemental_answers=answers,
         run_count=len(runs),
         expected_run_count=rubric.extraction_runs,
+        disputed_criteria=disputed,
+        recommended_additional_runs=recommended_additional_runs,
         client_models=client_models or [],
         warnings=warnings,
     )

@@ -21,13 +21,13 @@ def _full(criterion) -> CriterionExtraction:
             FieldExtraction(
                 name=f.name,
                 value=(
-                    f"1 value for {f.name}"
+                    f"1 log dashboard WCAG mobile retention audit value for {f.name}"
                     if f.value_pattern
                     else f"value for {f.name}"
                 ),
                 evidence=Evidence(
                     quote=(
-                        f"1 quoted {f.name}"
+                        f"1 log dashboard WCAG mobile retention audit quoted {f.name}"
                         if f.value_pattern
                         else f"quoted {f.name}"
                     ),

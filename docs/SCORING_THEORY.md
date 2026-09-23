@@ -90,6 +90,12 @@ Because Forge borrows the client model, results can vary by MCP host and model.
 The assessment must expose available model metadata and run agreement. Scores
 from different models are not assumed comparable until tested.
 
+If the initial three runs disagree, Forge identifies the disputed criteria and
+recommends up to two additional complete runs. Additional runs improve the
+estimate of stability; they do not guarantee a higher confidence value. A drop
+in agreement after broader sampling is reported as evidence that extraction is
+unstable, never hidden by selecting only favourable runs.
+
 ## Remediation
 
 Questions are ordered by:
@@ -112,6 +118,18 @@ Each answer is bound to the criterion that prompted it. A quote from a
 supplemental answer receives no credit for a different criterion. Verified
 evidence records whether it came from the source document or a supplemental
 answer so the two can never be presented as the same provenance.
+
+Questions expose plain-language requirements for each missing field. After the
+user approves the accumulated answers, Forge may materialize them into a new
+editable PRD revision under explicit user control. It never overwrites the
+source or claims that conversational evidence was originally present.
+
+The generic `0.3.0-expert-prior` rubric adds concrete coverage adapted from the
+reviewed multi-agent project: transitional/degraded and platform/accessibility
+states, production monitoring and support signals, and data-lifecycle controls.
+These fields use Forge's quote verification and objective value constraints;
+the external project's keyword weights and 0-100 score are not adopted. The
+version remains uncalibrated.
 
 ## Output Restraint
 
@@ -187,6 +205,10 @@ completed reviewers. Reviewer ties are reported as contested and excluded from
 model-to-human agreement rather than resolved pessimistically. This differs
 from repeated model extraction, where pessimistic tie-breaking is an intentional
 product rule.
+
+Human reviewers label blinded sheets that omit Forge's prediction. Predictions
+and completed reviewer sheets are merged only for evaluation, preventing the
+model result from anchoring the supposed ground truth.
 
 Public or synthetic PRDs without human readiness labels may be used for format
 coverage, robustness, and gaming tests. They cannot determine criterion

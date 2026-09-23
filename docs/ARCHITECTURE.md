@@ -62,6 +62,8 @@ The target public surface is:
 - `observe_prd_visual`: describe one rendered image through client sampling.
 - `prepare_prd_assessment`: create a sampling-independent extraction request.
 - `score_prd_extraction`: verify and score submitted extraction JSON.
+- `write_prd_revision`: materialize approved supplemental answers into a new
+  editable PRD copy without overwriting the source.
 - `describe_prd_rubric`: explain the active rubric without exposing a prompt
   that encourages point gaming.
 
@@ -87,6 +89,16 @@ is rendered as a distinct normalized block, and evidence verification rejects
 attempts to use that block for another criterion. Responses echo the accumulated
 answers and return `next_question` as either one question or `null` when the
 assessment has no remaining failed criterion.
+
+Questions include the configured descriptions of their missing required fields.
+`write_prd_revision` supports DOCX, Markdown, and text sources, requires a new
+same-format output path, and refuses to overwrite an existing file. PDF remains
+read-only because appending text would not preserve an editable source or its
+layout semantics.
+
+Assessment responses expose disputed criteria and recommend up to two more
+complete runs after initial disagreement. The fallback scorer already accepts
+additional complete runs; native sampling remains a fixed three-call baseline.
 
 Server-side session persistence remains deferred until the stateless
 conversation proves cumbersome.
@@ -128,8 +140,9 @@ Forge will not own SharePoint credentials as part of the scoring core.
 
 `forge.calibration` is a domain-side developer workflow, not an MCP assessment
 tool. It creates exhaustive reviewer-label templates from an `Assessment`
-without retaining source-document text, and compares fixed-version predictions
-with one or more human labels. Reports include band and criterion agreement,
+without retaining source-document text or exposing Forge's prediction, and
+compares fixed-version predictions with one or more human labels only after the
+completed blinded sheets are merged. Reports include band and criterion agreement,
 inter-reviewer agreement, ordinal band error, false-ready and false-not-ready
 rates, contested labels, source mix, and low-sample warnings.
 

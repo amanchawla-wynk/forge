@@ -134,7 +134,9 @@
           "evidence": {
             "quote": "Empty states should guide the customer toward the next logical action."
           }
-        }
+        },
+        {"name": "transitional_or_degraded_states", "value": null, "evidence": null},
+        {"name": "platform_and_accessibility_states", "value": null, "evidence": null}
       ]
     },
     {
@@ -153,7 +155,8 @@
           "evidence": {
             "quote": "These events will let us understand how the feature is performing."
           }
-        }
+        },
+        {"name": "operational_signals", "value": null, "evidence": null}
       ]
     },
     {
@@ -191,7 +194,8 @@
           "evidence": {
             "quote": "The relevant teams will be consulted as needed."
           }
-        }
+        },
+        {"name": "data_lifecycle", "value": null, "evidence": null}
       ]
     },
     {

@@ -31,6 +31,7 @@ from forge.ingest.batching import batch_document, plan_fingerprint
 from forge.ingest.models import SupplementalAnswer
 from forge.ingest.visuals import render_visual_asset
 from forge.rubric.loader import load_rubric
+from forge.revise import RevisionResult, materialize_prd_revision
 from forge.service import (
     AssessmentResponse,
     assess_extraction_json,
@@ -50,7 +51,8 @@ mcp = MCPServer(
         "complete every returned batch yourself, and submit the fragments to "
         "score_prd_extraction. Return next_question to the user and resubmit "
         "accumulated supplemental_answers after each reply, which invalidates "
-        "any earlier batch plan. Forge is advisory."
+        "any earlier batch plan. When the user approves the answers, call "
+        "write_prd_revision to create a new editable PRD copy. Forge is advisory."
     ),
 )
 
@@ -570,6 +572,19 @@ def score_prd_extraction(
         extraction_json,
         rubric_name=rubric_name,
         supplemental_answers=supplemental_answers,
+    )
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def write_prd_revision(
+    source_path: str,
+    output_path: str,
+    supplemental_answers: list[SupplementalAnswer],
+) -> RevisionResult:
+    """Write approved clarification answers into a new editable PRD copy."""
+    return materialize_prd_revision(
+        source_path, output_path, supplemental_answers
     )
 
 

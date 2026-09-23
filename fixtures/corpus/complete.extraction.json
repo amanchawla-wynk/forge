@@ -135,6 +135,20 @@
           "evidence": {
             "quote": "A seller with no refunds sees an empty state explaining eligibility rules."
           }
+        },
+        {
+          "name": "transitional_or_degraded_states",
+          "value": "Loading during eligibility checks and resume from queued state after interruption",
+          "evidence": {
+            "quote": "While eligibility is checked the seller sees a loading state, and an interrupted request can be resumed from the queued state."
+          }
+        },
+        {
+          "name": "platform_and_accessibility_states",
+          "value": "Web and mobile flows meet WCAG 2.1 AA",
+          "evidence": {
+            "quote": "The web and mobile flows must meet WCAG 2.1 AA before launch."
+          }
         }
       ]
     },
@@ -153,6 +167,13 @@
           "value": "Settlement time computed between refund_requested and refund_settled",
           "evidence": {
             "quote": "Median settlement time is computed from the interval between refund_requested and refund_settled."
+          }
+        },
+        {
+          "name": "operational_signals",
+          "value": "Queue-depth dashboard and alert above 100 queued refunds",
+          "evidence": {
+            "quote": "Operations monitors settlement queue depth on a dashboard and receives an alert when queued refunds exceed 100."
           }
         }
       ]
@@ -191,6 +212,13 @@
           "value": "Privacy review requested and scheduled before build",
           "evidence": {
             "quote": "A privacy review has been requested and is scheduled before build starts."
+          }
+        },
+        {
+          "name": "data_lifecycle",
+          "value": "Audit records retained 7 years; bank identifiers deleted after 30 days",
+          "evidence": {
+            "quote": "Transaction audit records are retained for 7 years, while bank account identifiers are deleted 30 days after settlement."
           }
         }
       ]

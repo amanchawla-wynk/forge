@@ -72,6 +72,13 @@ def build_narrative_report(
             f"Verdict agreement across {run_count} extraction runs was "
             f"{assessment.confidence:.0%}."
         )
+        disputed = [
+            result.criterion_id
+            for result in assessment.criteria
+            if result.agreement < 1.0
+        ]
+        if disputed:
+            confidence_note += " Disagreement remains for: " + ", ".join(disputed) + "."
 
     results_by_id = {
         result.criterion_id: result for result in assessment.criteria

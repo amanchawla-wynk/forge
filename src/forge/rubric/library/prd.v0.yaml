@@ -1,5 +1,5 @@
 id: prd
-version: "0.2.0-untuned"
+version: "0.3.0-expert-prior"
 doc_type: prd
 description: >
   Generic PRD completeness & actionability rubric. Grades whether each
@@ -146,9 +146,19 @@ criteria:
         description: "Behaviour on failure."
       - name: empty_or_edge_states
         description: "Empty, first-run, boundary or degraded states."
+      - name: transitional_or_degraded_states
+        description: >
+          Loading, offline, partial-completion, interruption, or recovery
+          behaviour relevant to this feature.
+      - name: platform_and_accessibility_states
+        description: >
+          Supported platforms and an explicit accessibility standard or review
+          expectation.
+        value_pattern: '(?i)(?:wcag|accessib|ios|android|web|mobile|desktop|screen reader|keyboard)'
+        value_requirement: "Must name a platform or accessibility expectation."
     remediation_prompt: >
-      What should happen on error, and what do first-run/empty/boundary states
-      look like?
+      What should happen on error, loading, empty, offline, partial-completion,
+      and recovery paths, and which platforms and accessibility standard apply?
 
   - id: instrumentation
     name: "Instrumentation is specified"
@@ -163,9 +173,15 @@ criteria:
         type: "string[]"
       - name: metric_link
         description: "How those events compute the success metric."
+      - name: operational_signals
+        description: >
+          Named production logs, dashboards, alerts, monitoring, or support
+          signals used to detect and diagnose failure.
+        value_pattern: '(?i)(?:log|metric|dashboard|alert|monitor|on-call|support)'
+        value_requirement: "Must name at least one operational signal."
     remediation_prompt: >
-      Which events need to be logged, and how do they roll up into the success
-      metric?
+      Which analytics events compute the success metric, and which production
+      logs, dashboards, alerts, or support signals detect failure?
 
   - id: dependencies
     name: "Dependencies and constraints named"
@@ -179,7 +195,9 @@ criteria:
         description: "Teams, services, vendors or data this relies on."
         type: "string[]"
       - name: constraints
-        description: "Technical, legal, or timing constraints."
+        description: >
+          Technical, performance, capacity, vendor, market, legal, or timing
+          constraints.
         required: false
     remediation_prompt: >
       What other teams, systems or vendors does this depend on?
@@ -196,10 +214,19 @@ criteria:
       - name: data_handled
         description: "Personal, financial or regulated data touched."
       - name: review_status
-        description: "Whether risk review is needed, requested, or complete."
+        description: >
+          Whether privacy, security, legal, compliance, or accessibility review
+          is needed, requested, or complete.
+      - name: data_lifecycle
+        description: >
+          Applicable retention, deletion, consent, or audit-trail controls, or
+          an explicit statement that no such obligation applies.
+        value_pattern: '(?i)(?:\d|retention|retain|delet|eras|consent|audit|no such obligation)'
+        value_requirement: "Must state a lifecycle control or explicit exemption."
     remediation_prompt: >
-      Does this touch personal, financial or regulated data, and has risk
-      review been engaged?
+      What personal, financial, or regulated data is involved; what retention,
+      deletion, consent, or audit controls apply; and which risk reviews are
+      needed?
 
   - id: rollout
     name: "Rollout and reversibility"

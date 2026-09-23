@@ -68,8 +68,9 @@ def test_template_gaming_is_capped_by_quantified_metric_requirements():
         if result.criterion_id == "success_metrics"
     )
 
-    assert response.assessment.uncapped_band == "ready_to_build"
+    assert response.assessment.uncapped_band == "ready_with_gaps"
     assert response.assessment.band == "needs_work"
+    assert response.assessment.raw_score < 0.88
     assert metrics.verdict.value == "partial"
     assert metrics.missing == ["baseline", "target", "measurement_window"]
 
