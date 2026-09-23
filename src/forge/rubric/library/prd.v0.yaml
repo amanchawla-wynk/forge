@@ -1,20 +1,50 @@
 id: prd
-version: "0.3.0-expert-prior"
+version: "0.4.0-expert-baseline"
 doc_type: prd
 description: >
-  Generic PRD completeness & actionability rubric. Grades whether each
-  downstream consumer can act without a follow-up meeting. NOT yet tuned to
-  company template and NOT yet calibrated against human labels -- treat scores
-  from this version as indicative only.
+  Source-backed cross-industry PRD completeness and actionability baseline.
+  Grades whether each downstream consumer can act without a follow-up meeting.
+  It is operational without company data, but organization-specific validation
+  still requires independent reviewer labels.
+calibration_status: expert_baseline
+sources:
+  - title: "Atlassian product requirements document template"
+    url: "https://www.atlassian.com/software/confluence/templates/product-requirements"
+    contribution: "Objectives, success metrics, assumptions, prioritized requirements, open questions, and explicit scope."
+  - title: "Shape Up: Write the Pitch"
+    url: "https://basecamp.com/shapeup/1.5-chapter-06"
+    contribution: "Specific problem evidence, bounded appetite, solution shape, rabbit holes, and no-gos."
+  - title: "GOV.UK Service Standard: Understand users and their needs"
+    url: "https://www.gov.uk/service-manual/service-standard/point-1-understand-user-needs"
+    contribution: "Research evidence, tested assumptions, analytics, and problem-first framing."
+  - title: "GOV.UK Service Standard: Make sure everyone can use the service"
+    url: "https://www.gov.uk/service-manual/service-standard/point-5-make-sure-everyone-can-use-the-service"
+    contribution: "Accessibility standards, inclusive research, and alternative access needs."
+  - title: "GOV.UK Service Standard: Create a secure service which protects users' privacy"
+    url: "https://www.gov.uk/service-manual/service-standard/point-9-create-a-secure-service"
+    contribution: "Security, privacy, third-party, ownership, and verification expectations."
+  - title: "GOV.UK Service Standard: Define what success looks like"
+    url: "https://www.gov.uk/service-manual/service-standard/point-10-define-success-publish-performance-data"
+    contribution: "Outcome metrics, collection methods, review cadence, and decision use."
+  - title: "GOV.UK Service Standard: Operate a reliable service"
+    url: "https://www.gov.uk/service-manual/service-standard/point-14-operate-a-reliable-service"
+    contribution: "Monitoring, sustainable response, production-like testing, and user-outcome monitoring."
+  - title: "Google SRE: Reliable Product Launches at Scale"
+    url: "https://sre.google/sre-book/reliable-product-launches/"
+    contribution: "Dependency readiness, failure modes, capacity, staged rollout, ownership, verification, and rollback."
+  - title: "ICO data minimisation and storage limitation guidance"
+    url: "https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/data-protection-principles/a-guide-to-the-data-protection-principles/"
+    contribution: "Purpose-limited collection, retention, deletion, and lifecycle controls."
 
 extraction_runs: 3
 
 bands:
   - id: not_a_prd
-    label: "Not a PRD"
+    label: "Insufficient actionable evidence"
     min_score: 0.0
     description: >
-      Missing the structural minimum. This is a pitch, a brief, or notes.
+      The document does not yet contain enough verified PRD evidence for
+      downstream teams to act.
   - id: needs_work
     label: "Needs work"
     min_score: 0.45
@@ -31,6 +61,7 @@ bands:
     min_score: 0.88
     description: >
       Every downstream consumer can act from the document alone.
+    requires_all_applicable_present: true
 
 criteria:
   - id: problem_statement
@@ -44,10 +75,13 @@ criteria:
     fields:
       - name: problem
         description: "The user or business problem, stated as a problem not a solution."
+        remediation_question: "What goes wrong for users today that this feature should fix?"
       - name: affected_users
         description: "Who specifically experiences it."
+        remediation_question: "Who runs into this problem?"
       - name: evidence
         description: "Data, research, or incident that demonstrates the problem is real."
+        remediation_question: "What have you seen that shows this is a real problem?"
       - name: cost_of_inaction
         description: "What happens if this is not built."
         required: false
@@ -66,16 +100,20 @@ criteria:
     fields:
       - name: primary_metric
         description: "The single headline metric."
+        remediation_question: "Which single metric will tell us whether this worked?"
       - name: baseline
         description: "Current value of that metric."
+        remediation_question: "What is that metric's current numeric value?"
         value_pattern: '\d'
         value_requirement: "Must contain a numeric current value."
       - name: target
         description: "Target value."
+        remediation_question: "What numeric value should that metric reach?"
         value_pattern: '\d'
         value_requirement: "Must contain a numeric target value."
       - name: measurement_window
         description: "Over what period success is judged."
+        remediation_question: "How long should we measure it before deciding whether this worked?"
         value_pattern: '(?i)(?:\d|daily|weekly|monthly|quarterly|annually|calendar)'
         value_requirement: "Must contain a numeric duration or calendar period."
       - name: guardrail_metric
@@ -97,6 +135,7 @@ criteria:
       - name: non_goals
         description: "Explicitly excluded capabilities or user segments."
         type: "string[]"
+        remediation_question: "What is explicitly out of scope for this release?"
     remediation_prompt: >
       What is explicitly out of scope for this release?
 
@@ -108,13 +147,21 @@ criteria:
     consumers: [engineering, qa]
     weight: 3
     fields:
+      - name: primary_flow
+        description: "The main actor or system flow from trigger to observable outcome."
+        remediation_question: "What is the main flow from the user's trigger to the result they should see?"
+      - name: preconditions
+        description: "Eligibility, permissions, inputs, or system state required before the flow starts."
+        remediation_question: "What must already be true before this flow can start?"
       - name: requirements
         description: >
           Discrete, individually-testable behaviour statements (not paragraphs
           of narrative).
         type: "string[]"
+        remediation_question: "What does the product need to do? List each behavior as a separate, testable statement."
       - name: prioritisation
         description: "Must/should/could or equivalent ranking across requirements."
+        remediation_question: "Which requirements are must-haves, and which can wait?"
     remediation_prompt: >
       Can you list the required behaviours as discrete, individually testable
       statements, and mark which are must-have for launch?
@@ -131,6 +178,11 @@ criteria:
       - name: criteria
         description: "Observable pass/fail conditions for the feature."
         type: "string[]"
+        remediation_question: "What observable pass/fail conditions would tell us this is done?"
+      - name: failure_and_boundary_criteria
+        description: "Observable acceptance conditions for failure, invalid input, permissions, or boundary cases."
+        type: "string[]"
+        remediation_question: "Which failure or boundary cases must pass before this can ship?"
     remediation_prompt: >
       What are the observable pass/fail conditions that mean this is done?
 
@@ -144,18 +196,23 @@ criteria:
     fields:
       - name: error_states
         description: "Behaviour on failure."
+        remediation_question: "What should users see or be able to do when this fails?"
       - name: empty_or_edge_states
         description: "Empty, first-run, boundary or degraded states."
+        remediation_question: "What should happen on first use, with no data, or at a boundary case?"
       - name: transitional_or_degraded_states
         description: >
           Loading, offline, partial-completion, interruption, or recovery
           behaviour relevant to this feature.
-      - name: platform_and_accessibility_states
-        description: >
-          Supported platforms and an explicit accessibility standard or review
-          expectation.
-        value_pattern: '(?i)(?:wcag|accessib|ios|android|web|mobile|desktop|screen reader|keyboard)'
-        value_requirement: "Must name a platform or accessibility expectation."
+        remediation_question: "What should happen while loading, offline, interrupted, partly complete, or recovering?"
+      - name: supported_platforms
+        description: "Supported platforms, channels, devices, or explicit platform exclusions."
+        remediation_question: "Which platforms, devices, or channels must this support?"
+      - name: accessibility_approach
+        description: "Applicable accessibility standard and how conformance will be checked."
+        value_pattern: '(?i)(?:wcag|accessib|screen reader|keyboard|assistive|conformance)'
+        value_requirement: "Must name an accessibility standard, test, or explicit applicability decision."
+        remediation_question: "Which accessibility standard applies, and how will we check it?"
     remediation_prompt: >
       What should happen on error, loading, empty, offline, partial-completion,
       and recovery paths, and which platforms and accessibility standard apply?
@@ -171,14 +228,17 @@ criteria:
       - name: events
         description: "Events or properties to be logged."
         type: "string[]"
+        remediation_question: "Which events and properties should we log?"
       - name: metric_link
         description: "How those events compute the success metric."
+        remediation_question: "How will those events calculate the success metric?"
       - name: operational_signals
         description: >
           Named production logs, dashboards, alerts, monitoring, or support
           signals used to detect and diagnose failure.
         value_pattern: '(?i)(?:log|metric|dashboard|alert|monitor|on-call|support)'
         value_requirement: "Must name at least one operational signal."
+        remediation_question: "What logs, dashboards, alerts, or support signals will tell us something is wrong?"
     remediation_prompt: >
       Which analytics events compute the success metric, and which production
       logs, dashboards, alerts, or support signals detect failure?
@@ -194,11 +254,15 @@ criteria:
       - name: dependencies
         description: "Teams, services, vendors or data this relies on."
         type: "string[]"
+        remediation_question: "Which teams, services, vendors, or data does this depend on?"
+      - name: dependency_readiness
+        description: "Owner, readiness condition, failure impact, and fallback for material dependencies."
+        remediation_question: "Who owns each material dependency, when must it be ready, and what happens if it is not?"
       - name: constraints
         description: >
           Technical, performance, capacity, vendor, market, legal, or timing
           constraints.
-        required: false
+        remediation_question: "What technical, performance, capacity, legal, vendor, or timing limits constrain the solution?"
     remediation_prompt: >
       What other teams, systems or vendors does this depend on?
 
@@ -213,16 +277,25 @@ criteria:
     fields:
       - name: data_handled
         description: "Personal, financial or regulated data touched."
+        remediation_question: "What personal, financial, or regulated data will this handle?"
+      - name: purpose_and_minimisation
+        description: "Why each sensitive data category is needed and the minimum data required."
+        remediation_question: "Why is each sensitive data item needed, and what is the minimum we can collect?"
+      - name: access_and_third_parties
+        description: "Who can access the data and which third parties receive or process it."
+        remediation_question: "Who can access this data, and which vendors or other third parties receive it?"
       - name: review_status
         description: >
           Whether privacy, security, legal, compliance, or accessibility review
           is needed, requested, or complete.
+        remediation_question: "Which privacy, security, legal, compliance, or accessibility reviews do we need?"
       - name: data_lifecycle
         description: >
           Applicable retention, deletion, consent, or audit-trail controls, or
           an explicit statement that no such obligation applies.
         value_pattern: '(?i)(?:\d|retention|retain|delet|eras|consent|audit|no such obligation)'
         value_requirement: "Must state a lifecycle control or explicit exemption."
+        remediation_question: "What retention, deletion, consent, or audit rules apply? If none apply, say so."
     remediation_prompt: >
       What personal, financial, or regulated data is involved; what retention,
       deletion, consent, or audit controls apply; and which risk reviews are
@@ -238,8 +311,19 @@ criteria:
     fields:
       - name: rollout_mechanism
         description: "Flag, phased, cohort, big-bang."
+        remediation_question: "How will we release this: behind a flag, in phases, to a cohort, or all at once?"
+      - name: launch_and_stop_criteria
+        description: "Entry, observation, promotion, pause, and stop thresholds for the rollout."
+        remediation_question: "What results let us expand the rollout, and what results make us pause or stop it?"
       - name: rollback_plan
         description: "How this is turned off or reverted."
+        remediation_question: "How will we turn this off or roll it back if something goes wrong?"
+      - name: rollout_owner
+        description: "Named owner for rollout decisions and rollback execution."
+        remediation_question: "Who owns the rollout and has authority to pause or reverse it?"
+      - name: support_and_communications
+        description: "Customer, support, documentation, migration, or go-to-market impact, including explicit none."
+        remediation_question: "What must customers, support, documentation, sales, or marketing know before launch?"
     remediation_prompt: >
       How will this be rolled out, and how do you turn it off if it goes wrong?
 
@@ -254,9 +338,17 @@ criteria:
       - name: open_questions
         description: "Unresolved questions."
         type: "string[]"
+        remediation_question: "What is still unresolved?"
       - name: owners
         description: "Named owner per open question."
         type: "string[]"
+        remediation_question: "Who owns each open question?"
+      - name: target_dates
+        description: "Decision date or blocking milestone for each open question."
+        type: "string[]"
+        value_pattern: '(?i)(?:\d|before|by |launch|build|design|review|milestone)'
+        value_requirement: "Must include a date or named blocking milestone."
+        remediation_question: "By what date or milestone must each open question be resolved?"
     remediation_prompt: >
       What is still unresolved, and who owns closing each one?
 
@@ -271,8 +363,67 @@ criteria:
       - name: alternatives
         description: "Other approaches considered."
         type: "string[]"
+        remediation_question: "What other approaches did you consider?"
       - name: rejection_reasons
         description: "Why each was not chosen."
         type: "string[]"
+        remediation_question: "Why did you decide against each alternative?"
     remediation_prompt: >
       What other approaches did you consider, and why were they rejected?
+
+  - id: assumptions_validation
+    name: "Assumptions are explicit and testable"
+    rationale: >
+      Hidden assumptions become late rework. Teams need to know which claims are
+      proven, which remain hypotheses, and how the riskiest ones will be tested.
+    consumers: [leadership, design, engineering, data]
+    weight: 2
+    fields:
+      - name: assumptions
+        description: "Material user, business, technical, or delivery assumptions."
+        type: "string[]"
+        remediation_question: "Which important assumptions are we making about users, the business, technology, or delivery?"
+      - name: validation
+        description: "Evidence already gathered or the method, owner, and timing for testing each risky assumption."
+        remediation_question: "How will we test the riskiest assumption, who owns that test, and when will we know the result?"
+    remediation_prompt: >
+      What are the material assumptions, and how will the riskiest ones be tested?
+
+  - id: operational_readiness
+    name: "Production ownership and recovery are defined"
+    rationale: >
+      Monitoring without an owner or response plan detects failure but does not
+      restore service. Production responsibilities must be actionable before launch.
+    consumers: [engineering, qa, leadership]
+    weight: 2
+    fields:
+      - name: service_expectations
+        description: "Applicable availability, latency, capacity, data-integrity, or recovery expectations."
+        remediation_question: "What production reliability, performance, capacity, or recovery expectations must this meet?"
+      - name: support_owner
+        description: "Team or role responsible for monitoring, support, and incident response."
+        remediation_question: "Who owns production monitoring, support, and incident response after launch?"
+      - name: recovery_plan
+        description: "Runbook, backup, restore, degraded-mode, or incident-recovery approach."
+        remediation_question: "How will the team diagnose and recover from a production failure?"
+    remediation_prompt: >
+      What production expectations apply, who owns them, and how will the team recover from failure?
+
+  - id: document_governance
+    name: "Document ownership and status are current"
+    rationale: >
+      Teams need to know who can resolve ambiguity and whether they are reading
+      the current approved decision rather than a stale draft.
+    consumers: [leadership, engineering, design, qa]
+    weight: 1
+    fields:
+      - name: document_owner
+        description: "Named owner accountable for the PRD and unresolved product decisions."
+        remediation_question: "Who owns this PRD and can make the remaining product decisions?"
+      - name: status_and_version
+        description: "Current status or version and the date it was last materially updated."
+        value_pattern: '(?i)(?:\d|draft|review|approved|final|version|v\d)'
+        value_requirement: "Must state a status or version and a date or numbered revision."
+        remediation_question: "What is this PRD's current status or version, and when was it last materially updated?"
+    remediation_prompt: >
+      Who owns this PRD, and what is its current status and revision date?

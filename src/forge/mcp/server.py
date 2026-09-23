@@ -28,7 +28,7 @@ from forge.rubric.models import Rubric
 from forge.extract.parse import parse_extraction
 from forge.extract.prompt import build_extraction_prompt
 from forge.ingest.batching import batch_document, plan_fingerprint
-from forge.ingest.models import SupplementalAnswer
+from forge.ingest.models import ProductContextTerm, SupplementalAnswer
 from forge.ingest.visuals import render_visual_asset
 from forge.rubric.loader import load_rubric
 from forge.revise import RevisionResult, materialize_prd_revision
@@ -99,6 +99,7 @@ class PreparedAssessment(BaseModel):
     rubric_version: str
     expected_runs: int
     supplemental_answers: list[SupplementalAnswer]
+    product_context: list[ProductContextTerm]
     extraction_batches: list[PreparedExtractionBatch]
     instructions: str
 
@@ -107,6 +108,8 @@ class RubricDescription(BaseModel):
     id: str
     version: str
     description: str
+    calibration_status: str
+    sources: list[dict[str, str]]
     criteria: list[dict[str, object]]
     warning: str
 
@@ -229,9 +232,10 @@ def _select_batch(
     batch_id: str,
     rubric_name: str,
     supplemental_answers: list[SupplementalAnswer] | None,
+    product_context: list[ProductContextTerm] | None,
 ) -> _SelectedBatch:
     document, rubric = prepare_assessment_input(
-        source_path, rubric_name, supplemental_answers
+        source_path, rubric_name, supplemental_answers, product_context
     )
     batches = batch_document(document)
     selected = next((batch for batch in batches if batch.id == batch_id), None)
@@ -252,9 +256,10 @@ def _sample_batch(
     batch_id: str,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
     selected = _select_batch(
-        source_path, batch_id, rubric_name, supplemental_answers
+        source_path, batch_id, rubric_name, supplemental_answers, product_context
     )
     _require_three_run_rubric(selected.rubric)
     prompt = build_extraction_prompt(
@@ -274,8 +279,11 @@ def _sample_batch_run_one(
     batch_id: str,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
-    return _sample_batch(source_path, batch_id, rubric_name, supplemental_answers)
+    return _sample_batch(
+        source_path, batch_id, rubric_name, supplemental_answers, product_context
+    )
 
 
 def _sample_batch_run_two(
@@ -283,8 +291,11 @@ def _sample_batch_run_two(
     batch_id: str,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
-    return _sample_batch(source_path, batch_id, rubric_name, supplemental_answers)
+    return _sample_batch(
+        source_path, batch_id, rubric_name, supplemental_answers, product_context
+    )
 
 
 def _sample_batch_run_three(
@@ -292,8 +303,11 @@ def _sample_batch_run_three(
     batch_id: str,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
-    return _sample_batch(source_path, batch_id, rubric_name, supplemental_answers)
+    return _sample_batch(
+        source_path, batch_id, rubric_name, supplemental_answers, product_context
+    )
 
 
 @_anticipated
@@ -301,9 +315,10 @@ def _sample(
     source_path: str,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
     document, rubric = prepare_assessment_input(
-        source_path, rubric_name, supplemental_answers
+        source_path, rubric_name, supplemental_answers, product_context
     )
     batches = batch_document(document)
     if len(batches) > 1:
@@ -331,24 +346,27 @@ def _sample_run_one(
     source_path: str,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
-    return _sample(source_path, rubric_name, supplemental_answers)
+    return _sample(source_path, rubric_name, supplemental_answers, product_context)
 
 
 def _sample_run_two(
     source_path: str,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
-    return _sample(source_path, rubric_name, supplemental_answers)
+    return _sample(source_path, rubric_name, supplemental_answers, product_context)
 
 
 def _sample_run_three(
     source_path: str,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
-    return _sample(source_path, rubric_name, supplemental_answers)
+    return _sample(source_path, rubric_name, supplemental_answers, product_context)
 
 
 def _require_three_run_rubric(rubric: Rubric) -> None:
@@ -376,6 +394,7 @@ async def assess_prd(
     run_three: Annotated[CreateMessageResult, Resolve(_sample_run_three)],
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> AssessmentResponse:
     """Assess a local PRD by borrowing the MCP client's model three times."""
     completions = [run_one, run_two, run_three]
@@ -387,6 +406,7 @@ async def assess_prd(
         rubric_name=rubric_name,
         client_models=models,
         supplemental_answers=supplemental_answers,
+        product_context=product_context,
     )
 
 
@@ -396,10 +416,11 @@ def list_prd_batches(
     source_path: str,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> DocumentBatchPlan:
     """List the exhaustive extraction batches Forge derived for a PRD."""
     document, rubric = prepare_assessment_input(
-        source_path, rubric_name, supplemental_answers
+        source_path, rubric_name, supplemental_answers, product_context
     )
     batches = batch_document(document)
     return DocumentBatchPlan(
@@ -437,10 +458,11 @@ async def assess_prd_batch(
     run_three: Annotated[CreateMessageResult, Resolve(_sample_batch_run_three)],
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> BatchExtractionResult:
     """Extract one PRD batch by borrowing the MCP client's model three times."""
     selected = _select_batch(
-        source_path, batch_id, rubric_name, supplemental_answers
+        source_path, batch_id, rubric_name, supplemental_answers, product_context
     )
     completions = [run_one, run_two, run_three]
     fragments = [
@@ -525,10 +547,13 @@ def prepare_prd_assessment(
     source_path: str,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> PreparedAssessment:
     """Prepare the extraction task for a client that lacks MCP sampling."""
     answers = supplemental_answers or []
-    document, rubric = prepare_assessment_input(source_path, rubric_name, answers)
+    document, rubric = prepare_assessment_input(
+        source_path, rubric_name, answers, product_context
+    )
     batches = batch_document(document)
     return PreparedAssessment(
         source_path=document.source_path,
@@ -536,6 +561,7 @@ def prepare_prd_assessment(
         rubric_version=rubric.version,
         expected_runs=rubric.extraction_runs,
         supplemental_answers=answers,
+        product_context=product_context or [],
         extraction_batches=[
             PreparedExtractionBatch(
                 batch_id=batch.id,
@@ -565,6 +591,7 @@ def score_prd_extraction(
     extraction_json: str,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> AssessmentResponse:
     """Verify and score extraction JSON produced by the connected agent."""
     return assess_extraction_json(
@@ -572,6 +599,7 @@ def score_prd_extraction(
         extraction_json,
         rubric_name=rubric_name,
         supplemental_answers=supplemental_answers,
+        product_context=product_context,
     )
 
 
@@ -597,6 +625,8 @@ def describe_prd_rubric(rubric_name: str = "prd") -> RubricDescription:
         id=rubric.id,
         version=rubric.version,
         description=rubric.description.strip(),
+        calibration_status=rubric.calibration_status,
+        sources=[source.model_dump() for source in rubric.sources],
         criteria=[
             {
                 "id": criterion.id,
@@ -607,7 +637,10 @@ def describe_prd_rubric(rubric_name: str = "prd") -> RubricDescription:
             }
             for criterion in rubric.criteria
         ],
-        warning="This bundled rubric is generic, untuned, and uncalibrated.",
+        warning=(
+            "This is a source-backed cross-industry expert baseline, not an "
+            "organization-validated rubric."
+        ),
     )
 
 

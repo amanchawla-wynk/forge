@@ -143,12 +143,14 @@ def test_calibration_reports_false_ready_and_false_not_ready():
     report = evaluate_calibration(rubric, suite)
 
     assert report.band_agreement.rate == 0.0
-    assert report.mean_band_distance == 1.5
-    assert report.false_ready.rate == 0.5
-    assert report.false_not_ready.rate == 0.5
+    assert report.mean_band_distance == 2.0
+    assert report.false_ready.rate == 1.0
+    assert report.false_not_ready.rate is None
     assert report.inter_reviewer_band_agreement.rate == 1.0
-    assert report.criteria["problem_statement"].model_human.rate == 0.5
+    assert report.criteria["problem_statement"].model_human.rate == 0.0
     assert report.source_counts == {"internal": 1, "synthetic": 1}
+    assert report.calibration_case_count == 1
+    assert any("Excluded 1" in warning for warning in report.warnings)
 
 
 def test_tied_human_labels_are_contested_not_resolved():
@@ -160,7 +162,7 @@ def test_tied_human_labels_are_contested_not_resolved():
         cases=[
             CalibrationCase(
                 case_id="contested",
-                source_kind="public",
+                source_kind="internal",
                 prediction=assessment,
                 labels=[
                     _label(assessment, "reviewer-a", "ready_to_build"),
@@ -181,6 +183,31 @@ def test_tied_human_labels_are_contested_not_resolved():
     assert report.contested_band_cases == 1
     assert report.inter_reviewer_band_agreement.rate == 0.0
     assert report.criteria["acceptance_criteria"].contested_cases == 1
+
+
+def test_public_cases_are_diagnostics_not_calibration_truth():
+    rubric = load_rubric("prd")
+    assessment = _assessment("complete")
+    suite = CalibrationSuite(
+        rubric_id=rubric.id,
+        rubric_version=rubric.version,
+        cases=[
+            CalibrationCase(
+                case_id="public-example",
+                source_kind="public",
+                prediction=assessment,
+                labels=[
+                    _label(assessment, "reviewer-a", "ready_to_build"),
+                    _label(assessment, "reviewer-b", "ready_to_build"),
+                ],
+            )
+        ],
+    )
+
+    report = evaluate_calibration(rubric, suite)
+
+    assert report.calibration_case_count == 0
+    assert report.band_agreement.rate is None
     assert any("No internal PRDs" in warning for warning in report.warnings)
 
 

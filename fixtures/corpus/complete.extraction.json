@@ -85,6 +85,20 @@
       "criterion_id": "functional_requirements",
       "fields": [
         {
+          "name": "primary_flow",
+          "value": "Authenticated seller requests an eligible refund and sees settlement status",
+          "evidence": {
+            "quote": "The primary flow starts when an authenticated seller opens an eligible order, requests a refund, and ends when the seller sees the settlement status."
+          }
+        },
+        {
+          "name": "preconditions",
+          "value": "Seller owns the order, has permission, and requests no more than the captured amount",
+          "evidence": {
+            "quote": "The seller must own the order, have refund permission, and provide an amount no greater than the captured payment."
+          }
+        },
+        {
           "name": "requirements",
           "value": [
             "Sellers can request a refund from the order detail screen",
@@ -116,6 +130,17 @@
           "evidence": {
             "quote": "A refund request on an eligible order settles within 2 business days."
           }
+        },
+        {
+          "name": "failure_and_boundary_criteria",
+          "value": [
+            "Reject requests without permission",
+            "Reject amounts above the captured payment",
+            "Reject duplicate requests without a second refund"
+          ],
+          "evidence": {
+            "quote": "Requests without permission, above the captured amount, or submitted twice must be rejected without creating a second refund."
+          }
         }
       ]
     },
@@ -144,10 +169,17 @@
           }
         },
         {
-          "name": "platform_and_accessibility_states",
-          "value": "Web and mobile flows meet WCAG 2.1 AA",
+          "name": "supported_platforms",
+          "value": "Responsive web, iOS, and Android",
           "evidence": {
-            "quote": "The web and mobile flows must meet WCAG 2.1 AA before launch."
+            "quote": "The supported platforms are responsive web, iOS, and Android; other channels are excluded from this release."
+          }
+        },
+        {
+          "name": "accessibility_approach",
+          "value": "WCAG 2.1 AA with keyboard and screen-reader checks",
+          "evidence": {
+            "quote": "The web and mobile flows must meet WCAG 2.1 AA, keyboard-navigation, and screen-reader checks before launch."
           }
         }
       ]
@@ -189,6 +221,13 @@
           }
         },
         {
+          "name": "dependency_readiness",
+          "value": "Payments ready by build, Ledger idempotency by QA, vendor outage falls back to queued legacy path",
+          "evidence": {
+            "quote": "Payments owns platform readiness by build start; Ledger owns idempotency by QA; if the vendor is unavailable, requests remain queued on the legacy path."
+          }
+        },
+        {
           "name": "constraints",
           "value": "Vendor daily cut-off at 18:00 UTC",
           "evidence": {
@@ -205,6 +244,20 @@
           "value": "Seller bank account identifiers and transaction records",
           "evidence": {
             "quote": "The flow handles seller bank account identifiers and transaction records."
+          }
+        },
+        {
+          "name": "purpose_and_minimisation",
+          "value": "Existing bank token is needed only to route the refund; no new bank details are collected",
+          "evidence": {
+            "quote": "Bank identifiers are required only to route the refund; the flow stores the existing token rather than collecting new bank details."
+          }
+        },
+        {
+          "name": "access_and_third_parties",
+          "value": "Finance Operations and Payments can access the token; payout vendor processes it",
+          "evidence": {
+            "quote": "Only Finance Operations and the Payments service can access the token; the payout vendor processes it under the existing data-processing agreement."
           }
         },
         {
@@ -234,10 +287,31 @@
           }
         },
         {
+          "name": "launch_and_stop_criteria",
+          "value": "Expand after 7 days at 2-day settlement and under 3% contacts; pause above queue depth 100 or 1% errors",
+          "evidence": {
+            "quote": "We expand after 7 days if median settlement is at most 2 days and dispute contacts stay below 3%; we pause if queue depth exceeds 100 or error rate exceeds 1%."
+          }
+        },
+        {
           "name": "rollback_plan",
           "value": "Disable the flag to revert to the legacy refund path",
           "evidence": {
             "quote": "The flag can be disabled to revert all traffic to the legacy refund path."
+          }
+        },
+        {
+          "name": "rollout_owner",
+          "value": "Maya Chen owns decisions and Payments on-call executes rollback",
+          "evidence": {
+            "quote": "Maya Chen owns rollout decisions and the Payments on-call lead can execute rollback."
+          }
+        },
+        {
+          "name": "support_and_communications",
+          "value": "Support guide and seller notice; no sales or marketing campaign",
+          "evidence": {
+            "quote": "Support receives a troubleshooting guide before pilot launch; affected sellers receive an in-product notice, while sales and marketing need no launch campaign."
           }
         }
       ]
@@ -252,14 +326,21 @@
             "Vendor contract renewal date"
           ],
           "evidence": {
-            "quote": "Whether partial refunds are included is unresolved and owned by Priya Raman."
+            "quote": "Whether partial refunds are included is unresolved, owned by Priya Raman"
           }
         },
         {
           "name": "owners",
           "value": ["Priya Raman", "Daniel Okafor"],
           "evidence": {
-            "quote": "The vendor contract renewal date is unconfirmed and owned by Daniel Okafor."
+            "quote": "owned by Daniel Okafor"
+          }
+        },
+        {
+          "name": "target_dates",
+          "value": ["2026-09-28", "2026-10-02"],
+          "evidence": {
+            "quote": "due before design sign-off on 2026-09-28"
           }
         }
       ]
@@ -282,6 +363,73 @@
           ],
           "evidence": {
             "quote": "That was rejected because it cannot meet a 2 day target."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "assumptions_validation",
+      "fields": [
+        {
+          "name": "assumptions",
+          "value": [
+            "At least 70% of delayed refunds qualify for the accelerated route",
+            "Sellers understand the existing settlement-status language"
+          ],
+          "evidence": {
+            "quote": "We assume at least 70% of delayed refunds are eligible for the accelerated vendor route and that sellers understand the existing settlement-status language."
+          }
+        },
+        {
+          "name": "validation",
+          "value": "Transaction-data analysis by Priya and seller research before design sign-off",
+          "evidence": {
+            "quote": "Priya Raman will validate route eligibility against August transaction data by 2026-09-27, and Design Research will test the status language with five sellers before design sign-off."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "operational_readiness",
+      "fields": [
+        {
+          "name": "service_expectations",
+          "value": "40 refunds per second, p95 below 500 ms, queued recovery within 30 minutes",
+          "evidence": {
+            "quote": "The service must sustain 40 refunds per second, keep refund API p95 latency below 500 ms, and recover queued requests within 30 minutes after a provider outage."
+          }
+        },
+        {
+          "name": "support_owner",
+          "value": "Payments on-call with Finance Operations escalation",
+          "evidence": {
+            "quote": "The Payments on-call team owns monitoring, first-line incident response, and escalation to Finance Operations."
+          }
+        },
+        {
+          "name": "recovery_plan",
+          "value": "Runbook covers diagnosis, rollback, queue replay, and Ledger reconciliation",
+          "evidence": {
+            "quote": "The rapid-refund runbook covers queue diagnosis, feature-flag rollback, replay from the durable queue, and reconciliation against Ledger records."
+          }
+        }
+      ]
+    },
+    {
+      "criterion_id": "document_governance",
+      "fields": [
+        {
+          "name": "document_owner",
+          "value": "Maya Chen",
+          "evidence": {
+            "quote": "Owner: Maya Chen."
+          }
+        },
+        {
+          "name": "status_and_version",
+          "value": "Approved v1.3, updated 2026-09-20",
+          "evidence": {
+            "quote": "Status: approved v1.3, last materially updated 2026-09-20."
           }
         }
       ]

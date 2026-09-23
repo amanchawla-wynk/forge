@@ -26,11 +26,13 @@ product bet itself is strategically correct.
 - Embedded images and diagrams are detected and can be described on request
   using the client's vision-capable model. Text can affect scoring; visual
   interpretation stays advisory until its evidence model is validated.
-- Company-tuned criteria and terminology.
+- A source-backed cross-industry expert baseline that works without company
+  inputs, with optional company-specific terminology and later validation.
 - A readiness band, downstream-consumer breakdown, evidence, confidence, and
   concise reasons.
 - A conversational question loop that asks for exactly one highest-impact
-  missing item, retains the answer as supplemental evidence, and then rescores.
+  missing field in concise language, retains the answer as supplemental
+  evidence, and then rescores.
 - Local MCP server distribution with no Forge-hosted service required.
 
 ## Non-goals For V1
@@ -63,6 +65,10 @@ product bet itself is strategically correct.
    editable PRD revision. The original remains unchanged, and the revision can
    be reassessed without supplemental evidence.
 
+When available, the caller may supply product terminology derived from an
+implementation repository or other background. It helps the extractor resolve
+names and aliases but is never treated as PRD evidence or credited by scoring.
+
 ## Review Coverage
 
 The broader engineering-review prompt supplied during discovery is a useful
@@ -88,6 +94,9 @@ The product is credible only when:
 - client/model variance is visible rather than hidden.
 
 ## Inputs Still Needed
+
+Forge does not require these inputs to operate. They are needed to validate and
+tune the expert baseline for organization-specific policy and language:
 
 - The company's current PRD template.
 - Internal guidance or examples of what "good" means.

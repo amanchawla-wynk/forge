@@ -8,6 +8,7 @@ from docx.opc.constants import RELATIONSHIP_TYPE
 
 from forge.ingest.models import (
     NormalizedDocument,
+    ProductContextTerm,
     SourceBlock,
     SupplementalAnswer,
     VisualAsset,
@@ -58,6 +59,13 @@ def add_supplemental_answers(
         for index, answer in enumerate(answers, start=1)
     )
     return document.model_copy(update={"blocks": blocks})
+
+
+def add_product_context(
+    document: NormalizedDocument, terms: list[ProductContextTerm]
+) -> NormalizedDocument:
+    """Attach non-evidence terminology context for extraction disambiguation."""
+    return document.model_copy(update={"product_context": terms})
 
 
 def _pdf_content(path: Path) -> tuple[list[SourceBlock], list[VisualAsset]]:

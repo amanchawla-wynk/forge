@@ -69,12 +69,28 @@
 - Advanced the generic rubric to `0.3.0-expert-prior` with concrete degraded
   state, accessibility/platform, observability/support, and data-lifecycle
   coverage adapted from the external multi-agent reviewer without its weights.
+- Added non-scoreable product terminology context, grounded the two sample PRDs
+  in the Xstream Play Rush implementation, and bound context changes into batch
+  fingerprints without allowing code facts to satisfy PRD fields.
+- Split remediation into one missing field per turn with concise prompts and
+  field-accurate band projections, while preserving the complete gap audit.
+- Rewrote every required-field question in plain conversational language,
+  preserving numeric and evidence constraints while removing mechanical
+  document-centric phrasing.
+- Replaced the generic warning-only rubric with a versioned, source-backed
+  cross-industry expert baseline covering 15 criteria and published rationale.
+- Required every applicable criterion for `ready_to_build`, preventing a high
+  weighted average from hiding a known gap.
+- Excluded public and synthetic examples from headline calibration metrics and
+  corrected false-ready and false-not-ready denominators.
 
 ## Current Build
 
 - Grow the regression corpus with a multi-batch document.
 - Run the one-question remediation loop on both internal PRDs, materialize the
   approved answers, and measure score and extraction-agreement movement.
+- Resolve the documented Rush quality contradictions: Data Saver precedence,
+  flag-off behavior, and the 360p fallback algorithm.
 - Evaluate local OCR output as separately provenanced, quote-verifiable evidence.
 - Harden extraction validation against duplicate or unknown criterion fields.
 - Ingest DOCX header and footer text, which is currently skipped.
@@ -90,8 +106,9 @@
 
 ## Blocked On Company Inputs
 
-- Tune terminology, criteria, weights, gates, and bands to the company PRD
-  template and guidance.
+- Validate and, where evidence supports it, tune terminology, weights, gates,
+  and bands to the company PRD template and guidance. The expert baseline works
+  without this validation.
 - Build adversarial and representative fixtures from real PRDs.
 - Expand the multi-reviewer labelled calibration set beyond the first real PRD.
 - Set acceptable agreement and false-ready thresholds.

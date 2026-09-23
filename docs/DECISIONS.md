@@ -336,3 +336,80 @@ supersedes the old one.
 - Consequence: The new version is a stronger expert prior, not a calibrated
   rubric. Its behavior is locked by adversarial fixtures and must be revisited
   when representative labels become available.
+
+## D-029: Keep Implementation Context Outside PRD Evidence
+
+- Status: accepted
+- Decision: Callers may provide a small terminology glossary grounded in an
+  implementation repository. The extractor may use it only to disambiguate
+  product names and internal terms. Context is excluded from source blocks,
+  quote verification, and score credit, and changes the batch-plan fingerprint.
+- Reason: The `movies_ios` repository establishes that both sample PRDs concern
+  Xstream Play's Rush/Microdrama product and clarifies terms such as Sampling,
+  My Shows, package/collection, and Data Saver. It also exposes contradictions
+  that code cannot resolve as product intent. Crediting implementation facts
+  would turn PRD completeness into implementation archaeology and hide missing
+  decisions from authors.
+- Consequence: Context can improve extraction stability and produce more
+  relevant questions, but business evidence, targets, acceptance rules, and
+  conflict resolution must still appear in the PRD or an explicit supplemental
+  answer before receiving credit.
+
+## D-030: Ask One Missing Field Per Turn
+
+- Status: accepted
+- Decision: Remediation selects the highest-priority failed criterion but asks
+  only for its first missing required field. Every question exposes a
+  `target_field` and one answer requirement while retaining the complete
+  criterion gap in `missing_fields`. The document is rescored after every turn.
+- Reason: Criterion-level prompts such as “state the problem, affected users,
+  evidence, and cost” are cognitively heavy and encourage incomplete answers.
+  Field-sized questions are easier to answer and let the next turn adapt when
+  one response happens to cover multiple fields.
+- Consequence: `band_if_answered` simulates only the targeted field. A
+  multi-field gate remains active until its final missing field is answered.
+  The bundled rubric advances to `0.3.1-expert-prior`.
+
+## D-031: Keep Remediation Questions Plain And Specific
+
+- Status: accepted
+- Decision: Every required bundled-rubric field has an explicit conversational
+  question. Questions ask for the missing fact or decision directly, avoid
+  internal identifiers and document-centric wording, and retain qualifiers
+  needed for deterministic validation. `answer_requirements` includes both the
+  field description and any configured value requirement.
+- Reason: Generic prompts such as “What should the PRD say about metric link?”
+  sound mechanical and make users translate implementation terminology before
+  answering. Plain, field-sized questions reduce that friction without changing
+  scoring semantics.
+- Evidence: Wording principles were informed by Humanizer v3.0.0 by Siqi Chen
+  (MIT), reviewed on 2026-09-23. Forge independently authors its PRD-specific
+  questions and does not bundle the external skill or runtime.
+- Consequence: The fallback remains defensive behavior for external rubrics;
+  tests require every required field in the bundled rubric to configure its own
+  question. The bundled rubric advances to `0.3.2-expert-prior`.
+
+## D-032: Ship A Source-Backed Expert Baseline
+
+- Status: accepted
+- Decision: Forge ships a cross-industry expert baseline that is usable without
+  company templates or labels. The rubric versions its published sources,
+  exposes `calibration_status: expert_baseline`, asks atomic evidence-checked
+  questions, and reserves `organization_validated` for later independent
+  internal review. The top readiness band requires every applicable criterion
+  to be present, not merely a high weighted average.
+- Reason: Users need a working reviewer before an organization can assemble a
+  labelled corpus. Published PRD templates alone omit material accessibility,
+  privacy, rollout, and operational concerns, so the baseline also uses GOV.UK
+  service standards, ICO lifecycle guidance, and Google SRE launch practice.
+  No reviewed public corpus combined real PRDs, clear reuse rights, and
+  independent quality labels; treating workflow status or synthetic examples as
+  calibration truth would manufacture confidence.
+- Evidence: Atlassian's PRD template; 37signals' worked Shape Up pitches;
+  GOV.UK Service Standard points 1, 5, 9, 10, and 14; Google SRE's reliable
+  launch guidance; and ICO data-principle guidance, reviewed 2026-09-23. The
+  exact URLs and contributions are recorded in `docs/EXPERT_BASELINE.md` and
+  `prd.v0.yaml`.
+- Consequence: The bundled rubric advances to `0.4.0-expert-baseline` with 15
+  criteria. Public and synthetic cases are excluded from headline calibration
+  metrics, while internal labels can later validate or tune the baseline.

@@ -6,20 +6,20 @@
     "rationale": "Every criterion is stated with verifiable evidence."
   },
   "gaps": {
-    "band": "needs_work",
-    "raw_score": 0.4615,
+    "band": "not_a_prd",
+    "raw_score": 0.3065,
     "gates_failed": ["success_metrics", "non_goals", "acceptance_criteria"],
     "rationale": "Readable and partly actionable, but unmeasurable and unbounded."
   },
   "gaming": {
     "band": "needs_work",
-    "raw_score": 0.8269,
-    "gates_failed": ["success_metrics"],
-    "rationale": "Fluent template filler fails quantified metrics plus concrete state, operational, and lifecycle requirements, but generic fields still inflate its score."
+    "raw_score": 0.5161,
+    "gates_failed": ["success_metrics", "acceptance_criteria"],
+    "rationale": "Fluent template filler fails quantified metrics, failure acceptance criteria, assumptions, operational ownership, and governance requirements."
   },
   "notes": {
     "band": "not_a_prd",
-    "raw_score": 0.0577,
+    "raw_score": 0.0484,
     "gates_failed": [
       "problem_statement",
       "success_metrics",

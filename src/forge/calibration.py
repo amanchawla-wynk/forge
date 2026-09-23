@@ -90,6 +90,7 @@ class CalibrationReport(BaseModel):
     rubric_id: str
     rubric_version: str
     case_count: int
+    calibration_case_count: int
     label_count: int
     source_counts: dict[str, int]
     band_agreement: Agreement
@@ -212,6 +213,7 @@ def evaluate_calibration(
     contested_bands = 0
     confusion: dict[str, Counter[str]] = defaultdict(Counter)
     false_ready = false_not_ready = 0
+    human_ready_count = human_not_ready_count = 0
     band_pairs_match = band_pairs_compared = 0
 
     criterion_matches = Counter[str]()
@@ -220,7 +222,12 @@ def evaluate_calibration(
     criterion_pair_compared = Counter[str]()
     criterion_contested = Counter[str]()
 
-    for case in suite.cases:
+    source_counts = Counter(case.source_kind for case in suite.cases)
+    calibration_cases = [
+        case for case in suite.cases if case.source_kind == "internal"
+    ]
+
+    for case in calibration_cases:
         predicted = {
             result.criterion_id: result.verdict
             for result in case.prediction.criteria
@@ -240,6 +247,8 @@ def evaluate_calibration(
             confusion[human_band][case.prediction.band] += 1
             model_ready = band_order.index(case.prediction.band) >= ready_index
             human_ready = band_order.index(human_band) >= ready_index
+            human_ready_count += human_ready
+            human_not_ready_count += not human_ready
             false_ready += model_ready and not human_ready
             false_not_ready += not model_ready and human_ready
 
@@ -273,7 +282,6 @@ def evaluate_calibration(
                         left_verdict == right_verdict
                     )
 
-    source_counts = Counter(case.source_kind for case in suite.cases)
     warnings: list[str] = []
     if source_counts["internal"] == 0:
         warnings.append(
@@ -287,11 +295,18 @@ def evaluate_calibration(
         warnings.append(
             "No case has two completed band labels; inter-reviewer agreement is unavailable."
         )
+    excluded = len(suite.cases) - len(calibration_cases)
+    if excluded:
+        warnings.append(
+            f"Excluded {excluded} public or synthetic case(s) from calibration "
+            "metrics; use them only for robustness diagnostics."
+        )
 
     return CalibrationReport(
         rubric_id=rubric.id,
         rubric_version=rubric.version,
         case_count=len(suite.cases),
+        calibration_case_count=len(calibration_cases),
         label_count=sum(len(case.labels) for case in suite.cases),
         source_counts=dict(source_counts),
         band_agreement=_agreement(band_matches, band_compared),
@@ -301,8 +316,8 @@ def evaluate_calibration(
         band_confusion={
             human: dict(predictions) for human, predictions in confusion.items()
         },
-        false_ready=_error_rate(false_ready, band_compared),
-        false_not_ready=_error_rate(false_not_ready, band_compared),
+        false_ready=_error_rate(false_ready, human_not_ready_count),
+        false_not_ready=_error_rate(false_not_ready, human_ready_count),
         inter_reviewer_band_agreement=_agreement(
             band_pairs_match, band_pairs_compared
         ),
@@ -366,7 +381,7 @@ def _consensus(values):
     counts = Counter(values)
     top = max(counts.values())
     winners = [value for value, count in counts.items() if count == top]
-    return winners[0] if len(winners) == 1 else None
+    return winners[0] if len(winners) == 1 and top > len(values) / 2 else None
 
 
 def _agreement(matches: int, compared: int) -> Agreement:

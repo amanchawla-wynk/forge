@@ -4,9 +4,10 @@ Forge is a local MCP server that checks whether a PRD is complete and
 actionable for its downstream consumers. It borrows the connected MCP client's
 LLM and never requires an LLM provider API key.
 
-The bundled rubric is an uncalibrated generic starting point. It must be tuned
-against the company's PRD template and real, human-reviewed documents before
-its bands are treated as reliable.
+The bundled rubric is a source-backed cross-industry expert baseline. It works
+without company data and returns evidence-based bands and questions immediately.
+Its output identifies that basis explicitly; organization-specific validation
+still requires independent labels from the organization's own reviewers.
 
 ## Current Tools
 
@@ -206,15 +207,28 @@ Forge remains stateless and returns `next_question: null` when no rubric gap
 remains.
 
 Each question includes `answer_requirements` for the exact missing fields. The
-answer is rescored as criterion-bound supplemental evidence. Once the user
+planner targets one missing field per turn through `target_field`, while keeping
+the complete `missing_fields` list in the audit. The answer is rescored as
+criterion-bound supplemental evidence. Once the user
 approves the accumulated answers, call `write_prd_revision` with a new output
 path, then assess that revision without supplemental answers. Forge never
 silently overwrites the source document.
+
+Every required field has a short, rubric-owned question written in plain,
+conversational language. Forge asks for the decision or fact directly rather
+than asking what "the PRD should say." Numeric and other objective requirements
+remain visible in `answer_requirements`.
 
 `confidence` measures extraction-run agreement, not correctness. When the first
 three runs disagree, the response identifies `disputed_criteria` and recommends
 up to two additional complete runs. A lower result after more runs is useful
 evidence of instability and is never rounded upward or hidden.
+
+Assessment tools also accept optional `product_context` terms with `term`,
+`meaning`, and `source_ref`. This background can disambiguate product language
+such as “Rush,” “Microdrama,” or “package,” but it is excluded from normalized
+evidence and cannot earn score credit. Any quoted evidence must still occur in
+the PRD or criterion-bound supplemental answer.
 
 Every assessment returns `report` before the detailed `assessment` audit. The
 report contains the readiness headline, criterion summary, three highest-impact
@@ -253,8 +267,12 @@ uv run python -m forge.calibration evaluate calibration-suite.json
 The report includes model-to-human and inter-reviewer agreement, ordinal band
 distance, false-ready and false-not-ready rates, criterion-level agreement,
 contested cases, source mix, and sample-size warnings. Synthetic or public PRDs
-can exercise robustness, but only representative human-labelled company PRDs
-can calibrate the company rubric.
+can exercise robustness, but they are excluded from headline calibration
+metrics. Only representative, independently labelled internal PRDs can validate
+the baseline for organization-specific use.
+
+See `docs/EXPERT_BASELINE.md` for the published standards and public corpus
+research behind the bundled rubric.
 
 ## Troubleshooting
 

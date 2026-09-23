@@ -56,6 +56,7 @@ class ConsumerReadiness(BaseModel):
 class Assessment(BaseModel):
     rubric_id: str
     rubric_version: str
+    calibration_status: str
     raw_score: float           # 0..1, weighted, before gates
     band: str                  # after gates
     band_label: str
@@ -70,10 +71,15 @@ class Assessment(BaseModel):
         return self.band != self.uncapped_band
 
 
-def _band_for(rubric: Rubric, score: float) -> Band:
+def _band_for(
+    rubric: Rubric, score: float, *, all_applicable_present: bool
+) -> Band:
     for band in rubric.bands_descending():
-        if score >= band.min_score:
-            return band
+        if score < band.min_score:
+            continue
+        if band.requires_all_applicable_present and not all_applicable_present:
+            continue
+        return band
     return rubric.bands_descending()[-1]
 
 
@@ -170,13 +176,20 @@ def score(rubric: Rubric, runs: list[list[CriterionExtraction]]) -> Assessment:
         )
 
     raw = earned / possible if possible else 0.0
-    uncapped = _band_for(rubric, raw)
+    all_applicable_present = all(
+        verdict in (Verdict.PRESENT, Verdict.NOT_APPLICABLE)
+        for verdict in verdicts.values()
+    )
+    uncapped = _band_for(
+        rubric, raw, all_applicable_present=all_applicable_present
+    )
     final_id = BAND_ORDER[min(BAND_ORDER.index(uncapped.id), cap_index)]
     final = next(b for b in rubric.bands if b.id == final_id)
 
     return Assessment(
         rubric_id=rubric.id,
         rubric_version=rubric.version,
+        calibration_status=rubric.calibration_status,
         raw_score=round(raw, 4),
         band=final.id,
         band_label=final.label,

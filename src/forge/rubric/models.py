@@ -69,6 +69,8 @@ class FieldSpec(BaseModel):
     value_pattern: str | None = None
     # Shown to the extractor so it does not claim a field it cannot satisfy.
     value_requirement: str | None = None
+    # Optional user-facing prompt for the one-field-at-a-time remediation loop.
+    remediation_question: str | None = None
 
     @model_validator(mode="after")
     def _compile_value_pattern(self) -> FieldSpec:
@@ -130,6 +132,17 @@ class Band(BaseModel):
     label: str
     min_score: float  # inclusive, on the 0..1 weighted scale
     description: str
+    # The highest readiness claim is stronger than a weighted average. When
+    # enabled, every applicable criterion must be present for this band.
+    requires_all_applicable_present: bool = False
+
+
+class RubricSource(BaseModel):
+    """Published guidance used to construct an expert-baseline rubric."""
+
+    title: str
+    url: str
+    contribution: str
 
 
 class Rubric(BaseModel):
@@ -137,6 +150,8 @@ class Rubric(BaseModel):
     version: str
     doc_type: Literal["prd", "brd"]
     description: str
+    calibration_status: Literal["expert_baseline", "organization_validated"]
+    sources: list[RubricSource] = Field(min_length=1)
     criteria: list[Criterion]
     bands: list[Band]
     # Number of independent extraction runs. Disagreement lowers confidence
@@ -150,6 +165,13 @@ class Rubric(BaseModel):
             raise ValueError("duplicate criterion ids")
         if not self.bands:
             raise ValueError("rubric needs at least one band")
+        band_ids = [band.id for band in self.bands]
+        if len(band_ids) != len(set(band_ids)):
+            raise ValueError("duplicate band ids")
+        if any(not 0 <= band.min_score <= 1 for band in self.bands):
+            raise ValueError("band min_score must be between 0 and 1")
+        if min(band.min_score for band in self.bands) != 0:
+            raise ValueError("rubric needs a band with min_score 0")
         return self
 
     def criterion(self, criterion_id: str) -> Criterion:

@@ -46,11 +46,26 @@ class SupplementalAnswer(BaseModel):
         return value
 
 
+class ProductContextTerm(BaseModel):
+    term: str = Field(min_length=1)
+    meaning: str = Field(min_length=1)
+    source_ref: str | None = None
+
+    @field_validator("term", "meaning")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
 class NormalizedDocument(BaseModel):
     source_path: str
     source_type: str
     blocks: list[SourceBlock]
     visual_assets: list[VisualAsset] = Field(default_factory=list)
+    product_context: list[ProductContextTerm] = Field(default_factory=list)
 
     @property
     def text(self) -> str:

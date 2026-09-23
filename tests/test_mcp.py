@@ -46,17 +46,21 @@ def test_mcp_exposes_sampling_and_fallback_tools():
         "batch_id",
         "rubric_name",
         "supplemental_answers",
+        "product_context",
     }
     assess = next(tool for tool in tools if tool.name == "assess_prd")
     assert set(assess.input_schema["properties"]) == {
         "source_path",
         "rubric_name",
         "supplemental_answers",
+        "product_context",
     }
     prepare = next(tool for tool in tools if tool.name == "prepare_prd_assessment")
     score = next(tool for tool in tools if tool.name == "score_prd_extraction")
     assert "supplemental_answers" in prepare.input_schema["properties"]
     assert "supplemental_answers" in score.input_schema["properties"]
+    assert "product_context" in prepare.input_schema["properties"]
+    assert "product_context" in score.input_schema["properties"]
     revision = next(tool for tool in tools if tool.name == "write_prd_revision")
     assert set(revision.input_schema["properties"]) == {
         "source_path",
@@ -106,7 +110,9 @@ async def test_assess_prd_borrows_client_model_three_times(tmp_path):
     assert result.structured_content["run_count"] == 3
     assert result.structured_content["recommended_additional_runs"] == 0
     assert result.structured_content["assessment"]["band"] == "not_a_prd"
-    assert result.structured_content["report"]["headline"] == "Not a PRD"
+    assert result.structured_content["report"]["headline"] == (
+        "Insufficient actionable evidence"
+    )
     assert result.structured_content["report"]["next_step"] == (
         result.structured_content["next_question"]["question"]
     )

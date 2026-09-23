@@ -68,10 +68,24 @@ def test_gate_caps_an_otherwise_excellent_document(rubric):
     ]
     result = score(rubric, [run])
     assert result.raw_score > 0.88          # would have been top band
-    assert result.uncapped_band == "ready_to_build"
+    assert result.uncapped_band == "ready_with_gaps"
     assert result.band == "needs_work"      # gate clamps it
     assert result.was_capped
     assert "success_metrics" in result.gates_failed
+
+
+def test_ready_to_build_requires_every_applicable_criterion(rubric):
+    run = [
+        _empty(c) if c.id == "document_governance" else _full(c)
+        for c in rubric.criteria
+    ]
+
+    result = score(rubric, [run])
+
+    assert result.raw_score > 0.88
+    assert result.gates_failed == []
+    assert result.band == "ready_with_gaps"
+    assert result.calibration_status == "expert_baseline"
 
 
 def test_partial_extraction_yields_partial_verdict(rubric):
@@ -166,11 +180,26 @@ def test_questions_are_gate_first_and_band_aware(rubric):
     result = score(rubric, [run])
     questions = plan_questions(rubric, result, limit=5)
     assert questions[0].is_gate
-    # Band must be monotonically non-decreasing down the question list.
-    from forge.score.engine import BAND_ORDER
+    assert questions[0].target_field == "problem"
+    assert questions[0].missing_fields == [
+        "problem",
+        "affected_users",
+        "evidence",
+    ]
+    # One answer cannot clear a multi-field gate by itself.
+    assert questions[0].band_if_answered == result.band
+    assert not questions[0].answer_requirements[0].startswith("problem:")
 
-    indices = [BAND_ORDER.index(q.band_if_answered) for q in questions]
-    assert indices == sorted(indices)
+
+def test_every_required_field_has_a_human_question(rubric):
+    missing = [
+        f"{criterion.id}.{field.name}"
+        for criterion in rubric.criteria
+        for field in criterion.required_fields
+        if not field.remediation_question
+    ]
+
+    assert missing == []
 
 
 def test_list_valued_fields_are_accepted(rubric):

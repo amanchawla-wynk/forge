@@ -6,8 +6,16 @@ from pydantic import BaseModel
 
 from forge.extract.batch import ExtractionBatch, verify_extraction_batch
 from forge.ingest.batching import batch_document
-from forge.ingest.document import add_supplemental_answers, ingest_document
-from forge.ingest.models import NormalizedDocument, SupplementalAnswer
+from forge.ingest.document import (
+    add_product_context,
+    add_supplemental_answers,
+    ingest_document,
+)
+from forge.ingest.models import (
+    NormalizedDocument,
+    ProductContextTerm,
+    SupplementalAnswer,
+)
 from forge.rubric.loader import load_rubric
 from forge.rubric.models import Rubric
 from forge.score.engine import Assessment, score
@@ -26,6 +34,7 @@ class AssessmentResponse(BaseModel):
     disputed_criteria: list[str]
     recommended_additional_runs: int
     client_models: list[str]
+    product_context: list[ProductContextTerm]
     warnings: list[str]
 
 
@@ -36,9 +45,13 @@ def assess_extractions(
     rubric_name: str = "prd",
     client_models: list[str] | None = None,
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> AssessmentResponse:
     answers = supplemental_answers or []
-    document, rubric = prepare_assessment_input(source_path, rubric_name, answers)
+    terms = product_context or []
+    document, rubric = prepare_assessment_input(
+        source_path, rubric_name, answers, terms
+    )
     document_batches = batch_document(document)
     runs = verify_extraction_batch(document_batches, batch, rubric)
     assessment = score(rubric, runs)
@@ -55,7 +68,9 @@ def assess_extractions(
     )
 
     warnings = [
-        "The bundled PRD rubric is generic, untuned, and not calibrated for your company."
+        "This assessment uses Forge's source-backed cross-industry expert "
+        "baseline. It is operational without company data, but has not been "
+        "validated against your organization's independent reviewer labels."
     ]
     if document.visual_assets:
         warnings.append(
@@ -67,6 +82,11 @@ def assess_extractions(
         warnings.append(
             f"Only {len(runs)} extraction run(s) were supplied; "
             f"the rubric expects {rubric.extraction_runs}. Confidence does not measure test/retest stability."
+        )
+    if terms:
+        warnings.append(
+            "Product terminology context was used only to disambiguate names; "
+            "it was excluded from evidence verification and scoring."
         )
 
     return AssessmentResponse(
@@ -85,6 +105,7 @@ def assess_extractions(
         disputed_criteria=disputed,
         recommended_additional_runs=recommended_additional_runs,
         client_models=client_models or [],
+        product_context=terms,
         warnings=warnings,
     )
 
@@ -95,6 +116,7 @@ def assess_extraction_json(
     *,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> AssessmentResponse:
     payload = json.loads(extraction_json)
     if "runs" not in payload:
@@ -104,6 +126,7 @@ def assess_extraction_json(
         ExtractionBatch.model_validate(payload),
         rubric_name=rubric_name,
         supplemental_answers=supplemental_answers,
+        product_context=product_context,
     )
 
 
@@ -111,6 +134,7 @@ def prepare_assessment_input(
     source_path: str,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
 ) -> tuple[NormalizedDocument, Rubric]:
     rubric = load_rubric(rubric_name)
     answers = supplemental_answers or []
@@ -122,4 +146,5 @@ def prepare_assessment_input(
         raise ValueError(
             "supplemental answers reference unknown criteria: " + ", ".join(unknown)
         )
-    return add_supplemental_answers(ingest_document(source_path), answers), rubric
+    document = add_supplemental_answers(ingest_document(source_path), answers)
+    return add_product_context(document, product_context or []), rubric

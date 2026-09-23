@@ -103,6 +103,10 @@ def plan_fingerprint(batches: list[DocumentBatch], rubric_version: str) -> str:
     """
     digest = hashlib.sha256()
     digest.update(rubric_version.encode("utf-8"))
+    if batches:
+        for term in batches[0].document.product_context:
+            digest.update(b"\x00context\x00")
+            digest.update(term.model_dump_json().encode("utf-8"))
     for batch in batches:
         digest.update(b"\x00")
         digest.update(batch.id.encode("utf-8"))

@@ -61,7 +61,8 @@ objective, mechanically checkable requirement. Both the extracted value and
 its verified quote must match. The generic rubric uses this only to require
 quantified baselines and targets, and a numeric duration or named calendar
 cadence for measurement windows. These constraints are rubric configuration,
-not scoring-code heuristics, and remain uncalibrated.
+not scoring-code heuristics, and remain subject to organization-specific
+validation.
 
 ## Aggregation
 
@@ -72,6 +73,29 @@ not scoring-code heuristics, and remain uncalibrated.
 - The external result emphasizes a readiness band and role breakdown. A raw
   ratio may be retained for auditability but must not imply scientific
   precision.
+- The highest band additionally requires every applicable criterion to be
+  `present`. A high weighted average cannot support a claim that every
+  downstream consumer can act while a known applicable gap remains.
+
+## Expert Baseline
+
+The bundled rubric is operational as a cross-industry expert baseline. Its
+criteria are synthesized from published PRD guidance and worked examples,
+service standards, accessibility and privacy guidance, and production-launch
+practice. The source list is versioned with the rubric and exposed by
+`describe_prd_rubric`.
+
+The baseline provides a defensible default when an organization has supplied no
+template or labels. It is not a statistical claim that its weights or band
+thresholds predict a particular organization's reviewer decisions. Assessment
+responses therefore identify `calibration_status: expert_baseline` rather than
+using the ambiguous word "calibrated."
+
+Public PRDs and templates are useful for coverage and adversarial regression.
+No public corpus found during the 2026-09 review combined real PRDs, clear reuse
+rights, and independent readiness labels. Public and synthetic cases are
+therefore excluded from headline calibration metrics. Representative internal
+cases remain the only basis for an `organization_validated` status.
 
 ## Gates
 
@@ -114,6 +138,18 @@ the accumulated original and supplemental evidence is rescored before the next
 question is selected. This keeps the conversation focused and allows each turn
 to respond to the document's new state.
 
+Each turn targets one missing required field, even when the selected criterion
+has several gaps. The response retains the full missing-field list for audit but
+shows one field-specific question and requirement. Band projection assumes only
+that field is answered: an absent criterion may become partial, and a gate is
+cleared only when the final required field becomes present.
+
+Questions use configured, field-specific language rather than generated prose
+or internal field identifiers. They ask for the missing fact directly, use
+active and familiar wording, and preserve qualifiers that affect validation,
+such as `single`, `current`, `numeric`, and `explicit`. The answer requirement
+also includes any objective value constraint.
+
 Each answer is bound to the criterion that prompted it. A quote from a
 supplemental answer receives no credit for a different criterion. Verified
 evidence records whether it came from the source document or a supplemental
@@ -124,12 +160,24 @@ user approves the accumulated answers, Forge may materialize them into a new
 editable PRD revision under explicit user control. It never overwrites the
 source or claims that conversational evidence was originally present.
 
-The generic `0.3.0-expert-prior` rubric adds concrete coverage adapted from the
+The generic `0.3.0-expert-prior` rubric added concrete coverage adapted from the
 reviewed multi-agent project: transitional/degraded and platform/accessibility
 states, production monitoring and support signals, and data-lifecycle controls.
 These fields use Forge's quote verification and objective value constraints;
-the external project's keyword weights and 0-100 score are not adopted. The
-version remains uncalibrated.
+the external project's keyword weights and 0-100 score are not adopted.
+
+The `0.4.0-expert-baseline` rubric extends that work with source-backed primary
+flows and preconditions, failure acceptance criteria, accessibility validation,
+dependency readiness, data minimisation and access, rollout thresholds and
+ownership, assumption validation, production recovery, and document governance.
+It also requires all applicable criteria for the top band.
+
+Implementation repositories may provide non-evidence terminology context. This
+can clarify that two names refer to the same product or explain internal domain
+terms, but it cannot satisfy a field. Context is excluded from normalized source
+blocks, exact-quote lookup, and scoring. Contradictions between a PRD and code
+remain questions for the owner; Forge never lets current implementation silently
+rewrite intended requirements.
 
 ## Output Restraint
 
@@ -181,10 +229,10 @@ templates score zero, padding and section reordering do not move a score,
 injected instructions cannot award credit, unverifiable quotes lose theirs,
 and vague metric prose cannot satisfy configured quantitative constraints.
 
-The corpus is a regression guard, not calibration. Its expected bands are
-derived from the current uncalibrated rubric, so they record present behaviour
-rather than validated truth. Human-labelled company PRDs remain required before
-any band is treated as reliable.
+The corpus is a regression guard, not calibration. Its expected bands record the
+versioned expert baseline's intended behaviour rather than organization-specific
+truth. Human-labelled internal PRDs remain required before claiming that the
+bands reproduce a particular organization's reviewer decisions.
 
 ## Validation Plan
 
@@ -199,12 +247,13 @@ Build a labelled internal corpus with multiple reviewers and roles. Measure:
   injection;
 - whether answering recommended questions improves human-rated actionability.
 
-The offline calibration evaluator records source type and warns when there are
-no internal labels, fewer than 20 resolved human bands, or no cases with two
-completed reviewers. Reviewer ties are reported as contested and excluded from
-model-to-human agreement rather than resolved pessimistically. This differs
-from repeated model extraction, where pessimistic tie-breaking is an intentional
-product rule.
+The offline calibration evaluator records source type, excludes public and
+synthetic examples from headline calibration metrics, and warns when there are
+no internal labels, fewer than 20 resolved internal human bands, or no internal
+cases with two completed reviewers. Reviewer results require a strict majority;
+ties and pluralities are reported as contested and excluded from model-to-human
+agreement. This differs from repeated model extraction, where pessimistic
+tie-breaking is an intentional product rule.
 
 Human reviewers label blinded sheets that omit Forge's prediction. Predictions
 and completed reviewer sheets are merged only for evaluation, preventing the

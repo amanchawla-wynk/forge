@@ -44,9 +44,13 @@ the inference, then submits structured data to deterministic Forge code.
 
 - File paths are local inputs and must be validated before reading.
 - PRD content is untrusted data and may contain prompt injection.
+- Product terminology context is untrusted, non-evidence background and cannot
+  satisfy a rubric field.
 - LLM extraction is untrusted until schema and evidence validation pass.
 - Rubric configuration is trusted project configuration but must pass Pydantic
   validation.
+- The bundled rubric carries a calibration status and versioned published-source
+  list. This metadata is returned to clients and never changes evidence credit.
 - Scoring code is the authority for verdicts and bands.
 
 ## MCP Tool Direction
@@ -71,6 +75,12 @@ Assessment responses return one highest-impact remediation question. The client
 keeps the conversation state and resubmits accumulated answers on each turn.
 Forge marks those answers as supplemental user evidence and includes them in
 normalization and quote verification without rewriting the source PRD.
+
+The selected question names one `target_field`, one concise field-specific
+prompt, and one answer requirement. It also retains all `missing_fields` for the
+criterion audit. Rescoring after the answer determines whether the next turn
+stays on that criterion or advances; the planner never presents a batch of
+subquestions in one turn.
 
 The response places a concise `report` before the detailed `assessment`. Report
 generation is deterministic and consumes only scored verdicts, failed gates,
@@ -99,6 +109,12 @@ layout semantics.
 Assessment responses expose disputed criteria and recommend up to two more
 complete runs after initial disagreement. The fallback scorer already accepts
 additional complete runs; native sampling remains a fixed three-call baseline.
+
+Assessment and batching tools accept optional `ProductContextTerm` records.
+They are carried separately on `NormalizedDocument`, rendered into a clearly
+marked non-evidence prompt section, and included in the batch-plan fingerprint.
+They are never rendered as `SourceBlock`s, so `locate_quote` cannot verify a
+context-only claim. Changing context invalidates prior extraction fragments.
 
 Server-side session persistence remains deferred until the stateless
 conversation proves cumbersome.
@@ -150,6 +166,10 @@ Calibration suites are bound to an exact rubric id and version. Mismatched
 criteria, duplicate reviewers, unknown bands, and cross-version predictions are
 rejected rather than silently compared. Tied human votes remain contested; the
 system does not resolve disagreement in its own favour.
+
+Headline calibration metrics include only `internal` cases. Public and
+synthetic examples remain robustness diagnostics because implementation status,
+popularity, or template provenance is not an independent readiness label.
 
 ## Portability
 
