@@ -182,11 +182,20 @@ it costs nothing extra and always resolves to a working path.
   ```
   It should print nothing and hang waiting for stdio input; `Ctrl-C` to stop.
   Any Python traceback here is an installation problem, not a Cursor problem.
-- **`assess_prd` fails with a sampling-related error**: your Cursor version
-  doesn't support MCP sampling. Use the fallback prompt above, or explicitly
-  ask for `prepare_prd_assessment` + `score_prd_extraction` (see
-  [Troubleshooting](#troubleshooting) below) — this always works regardless
-  of sampling support, since Cursor's own agent performs the extraction.
+- **`assess_prd`, `detect_prd_framing`, or another sampling tool fails with
+  "has not declared the 'sampling' capability"**: your Cursor version doesn't
+  support MCP sampling. For `assess_prd`/`assess_prd_batch`, the error itself
+  names the fallback — use the prompt above, or explicitly ask for
+  `prepare_prd_assessment` + `score_prd_extraction` (see
+  [Troubleshooting](#troubleshooting) below), which always works regardless
+  of sampling support since Cursor's own agent performs the extraction.
+  `detect_prd_framing`, `discover_edge_case_question`,
+  `assess_edge_case_coverage`, and `contextualize_next_question` have no
+  fallback yet — the error says so; just continue with `score_prd_extraction`
+  or `assess_prd` alone and skip that enrichment. (If you instead see a raw
+  `MCP error -32021: Client did not declare the sampling capability...`,
+  you're on an older Forge checkout — `git pull` and reinstall; current
+  versions always translate this into the readable message above.)
 
 ## Connect Claude Code
 
@@ -307,18 +316,30 @@ opencode mcp list
 
 ### First prompt to try in OpenCode
 
-As with any MCP client, if `assess_prd` errors because sampling isn't
-available, fall back to the two-step flow. A prompt that works either way:
+**Confirmed:** OpenCode does not support MCP sampling, so `assess_prd` fails
+there. Go straight to the fallback workflow — either of these works:
 
 ```text
 Use the forge MCP server to assess the PRD at /absolute/path/to/document.pdf.
-Try assess_prd first. If that tool errors or isn't available because this
-client doesn't support MCP sampling, instead call prepare_prd_assessment,
+This client doesn't support MCP sampling, so call prepare_prd_assessment,
 perform each returned extraction yourself, and submit the result to
 score_prd_extraction. Then show me the report and ask me the single
 next_question, retaining my answers as supplemental evidence, until no
 material question remains.
 ```
+
+or just ask directly:
+
+```text
+Use Forge to assess the PRD at /absolute/path/to/document.pdf using the
+fallback (non-sampling) workflow, then walk me through the remediation
+questions one at a time.
+```
+
+OpenCode's own agent will otherwise try `assess_prd` first, see it fail, and
+self-correct to the fallback tools anyway (this is exactly the behavior
+reported in practice), so either prompt gets you there — the explicit one
+just skips the failed first attempt.
 
 ## Use Forge
 
@@ -529,8 +550,16 @@ first; the issues below apply to every MCP client.
   terminal to expose installation or path errors.
 - If `assess_prd` cannot run because the client does not support MCP sampling,
   use the `prepare_prd_assessment` and `score_prd_extraction` fallback workflow.
+  Forge detects this itself and returns a message naming that fallback,
+  rather than a raw protocol error.
 - If `assess_prd` reports that a document requires multiple batches, use the
   same prepare/score fallback workflow and complete every returned batch.
+- `detect_prd_framing`, `discover_edge_case_question`,
+  `assess_edge_case_coverage`, and `contextualize_next_question` are all
+  sampling-only with no fallback yet: on a client without sampling, they fail
+  with a message saying so explicitly. This is expected — continue with
+  `score_prd_extraction`/`assess_prd` alone; you just don't get framing-aware
+  wording or edge-case enrichment on that client.
 - Always pass an absolute PRD path. Forge runs with your local user permissions
   and must be able to read that file.
 - Forge detects embedded PDF and DOCX visuals and reports a warning. Text remains

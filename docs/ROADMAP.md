@@ -108,6 +108,15 @@
   or project-scoped) so registering Forge needs no manual JSON editing or
   path lookup, plus fallback-aware prompts and client-specific
   troubleshooting notes in the README.
+- Confirmed in a real OpenCode session that `assess_prd` fails because
+  OpenCode does not support MCP sampling; the connected agent self-corrects
+  to `prepare_prd_assessment`/`score_prd_extraction` as reported by a user.
+  README's OpenCode section now states this directly instead of hedging.
+- Replaced the raw `MCP error -32021: Client did not declare the sampling
+  capability...` (reported in practice against `detect_prd_framing`) with a
+  proactive capability check in every sampling resolver: a clear, catchable
+  error naming the fallback tool when one exists, or stating plainly that
+  none exists yet for the four advisory tools (D-039).
 
 ## Current Build
 
@@ -122,13 +131,23 @@
 
 ## Next
 
-- Confirm, in real running Cursor and OpenCode sessions, whether `assess_prd`
-  native sampling works or whether the client requires the
+- Confirm, in a real running Cursor session, whether `assess_prd` native
+  sampling works or whether Cursor also requires the
   `prepare_prd_assessment` / `score_prd_extraction` fallback (setup and a
-  fallback-aware prompt are documented and automated via `forge-setup-cursor`
-  and `forge-setup-opencode`, but live sampling behavior has not been
-  observed firsthand in either). Test installation and behavior in GitHub
-  Copilot similarly.
+  fallback-aware prompt are documented and automated via `forge-setup-cursor`,
+  but live sampling behavior has not been observed firsthand there; OpenCode
+  is now confirmed not to support it). Test installation and behavior in
+  GitHub Copilot similarly.
+- Add non-sampling fallback tools for `detect_prd_framing`,
+  `discover_edge_case_question`, `assess_edge_case_coverage`, and
+  `contextualize_next_question`, mirroring `prepare_prd_assessment` +
+  `score_prd_extraction`, so clients without sampling (confirmed: at least
+  one OpenCode build) can still use framing and edge-case features instead of
+  losing them outright (D-039).
+- Investigate SEP-2577 (the installed MCP SDK marks the whole `sampling`
+  capability `@deprecated` as of protocol revision 2026-07-28) and whether
+  Forge's client-borrowed-model architecture (D-006/D-007) should move to
+  whatever replaces it.
 - Test the dashboard's `dashboard` extra install and BYOK flow against real
   Anthropic, OpenAI, and Gemini keys on a clean machine.
 - Compare a direct Docling adapter with current PDF and DOCX normalization on

@@ -10,7 +10,7 @@ from inspect import iscoroutinefunction
 from typing import ParamSpec, TypeVar
 
 from mcp.server import MCPServer
-from mcp.server.mcpserver import Resolve, Sample
+from mcp.server.mcpserver import Context, Resolve, Sample
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import (
     CreateMessageResult,
@@ -132,6 +132,40 @@ def _anticipated(func: Callable[_P, _R]) -> Callable[_P, _R]:
     return wrapper
 
 
+_SAMPLING_FALLBACK_HINT = (
+    "Call prepare_prd_assessment, perform each returned extraction yourself, "
+    "and submit the result to score_prd_extraction instead."
+)
+
+_NO_SAMPLING_FALLBACK_HINT = (
+    "There is currently no non-sampling fallback for this tool (see "
+    "docs/ROADMAP.md); skip it and continue with score_prd_extraction or "
+    "assess_prd alone."
+)
+
+
+def _require_sampling(context: Context, tool_name: str, fallback_hint: str) -> None:
+    """Fail with an actionable message instead of a raw MCP protocol error.
+
+    Without this check, a client that has not declared the `sampling`
+    capability trips the SDK's own resolver guard, which raises a bare
+    `MCPError` (surfaced to users as e.g. "MCP error -32021: Client did not
+    declare the sampling capability...") before this tool's body -- and
+    `@_anticipated` -- ever run. Checking here instead turns that into a
+    normal, catchable `ValueError`/`ToolError` with guidance the calling
+    agent can act on. Confirmed to matter in practice: at least one OpenCode
+    build has no sampling support; Cursor's support is unverified. See
+    docs/ROADMAP.md and docs/ARCHITECTURE.md "Agent-driven fallback".
+    """
+    capabilities = context.client_capabilities
+    if capabilities is not None and capabilities.sampling is not None:
+        return
+    raise ValueError(
+        "This MCP client has not declared the 'sampling' capability, so "
+        f"{tool_name} cannot borrow its model here. {fallback_hint}"
+    )
+
+
 class PreparedExtractionBatch(BaseModel):
     batch_id: str
     extraction_prompt: str
@@ -236,9 +270,11 @@ ASSET: {asset.id} ({location}, {asset.media_type})
 def _sample_visual(
     source_path: str,
     asset_id: str,
+    context: Context,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
 ) -> Sample:
+    _require_sampling(context, "observe_prd_visual", _NO_SAMPLING_FALLBACK_HINT)
     document, _ = prepare_assessment_input(
         source_path, rubric_name, supplemental_answers
     )
@@ -300,10 +336,12 @@ def _select_batch(
 def _sample_batch(
     source_path: str,
     batch_id: str,
+    context: Context,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
+    _require_sampling(context, "assess_prd_batch", _SAMPLING_FALLBACK_HINT)
     selected = _select_batch(
         source_path, batch_id, rubric_name, supplemental_answers, product_context
     )
@@ -323,46 +361,51 @@ def _sample_batch(
 def _sample_batch_run_one(
     source_path: str,
     batch_id: str,
+    context: Context,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
     return _sample_batch(
-        source_path, batch_id, rubric_name, supplemental_answers, product_context
+        source_path, batch_id, context, rubric_name, supplemental_answers, product_context
     )
 
 
 def _sample_batch_run_two(
     source_path: str,
     batch_id: str,
+    context: Context,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
     return _sample_batch(
-        source_path, batch_id, rubric_name, supplemental_answers, product_context
+        source_path, batch_id, context, rubric_name, supplemental_answers, product_context
     )
 
 
 def _sample_batch_run_three(
     source_path: str,
     batch_id: str,
+    context: Context,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
     return _sample_batch(
-        source_path, batch_id, rubric_name, supplemental_answers, product_context
+        source_path, batch_id, context, rubric_name, supplemental_answers, product_context
     )
 
 
 @_anticipated
 def _sample(
     source_path: str,
+    context: Context,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
+    _require_sampling(context, "assess_prd", _SAMPLING_FALLBACK_HINT)
     document, rubric = prepare_assessment_input(
         source_path, rubric_name, supplemental_answers, product_context
     )
@@ -390,29 +433,32 @@ def _sample(
 # three requests. The prompts remain identical so modern MCP retries are stable.
 def _sample_run_one(
     source_path: str,
+    context: Context,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
-    return _sample(source_path, rubric_name, supplemental_answers, product_context)
+    return _sample(source_path, context, rubric_name, supplemental_answers, product_context)
 
 
 def _sample_run_two(
     source_path: str,
+    context: Context,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
-    return _sample(source_path, rubric_name, supplemental_answers, product_context)
+    return _sample(source_path, context, rubric_name, supplemental_answers, product_context)
 
 
 def _sample_run_three(
     source_path: str,
+    context: Context,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
-    return _sample(source_path, rubric_name, supplemental_answers, product_context)
+    return _sample(source_path, context, rubric_name, supplemental_answers, product_context)
 
 
 def _require_three_run_rubric(rubric: Rubric) -> None:
@@ -799,12 +845,14 @@ def _prepare_framing_plan(
 @_anticipated
 def _sample_framing(
     source_path: str,
+    context: Context,
     extraction_json: str | dict[str, object] | None = None,
     assessment_json: str | dict[str, object] | None = None,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
+    _require_sampling(context, "detect_prd_framing", _NO_SAMPLING_FALLBACK_HINT)
     plan = _prepare_framing_plan(
         source_path,
         extraction_json,
@@ -973,12 +1021,14 @@ def _prepare_coverage_plan(
 @_anticipated
 def _sample_edge_case_coverage(
     source_path: str,
+    context: Context,
     extraction_json: str | dict[str, object] | None = None,
     assessment_json: str | dict[str, object] | None = None,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
+    _require_sampling(context, "assess_edge_case_coverage", _NO_SAMPLING_FALLBACK_HINT)
     plan = _prepare_coverage_plan(
         source_path,
         extraction_json,
@@ -1000,6 +1050,7 @@ def _sample_edge_case_coverage(
 
 def _sample_edge_case_coverage_run_one(
     source_path: str,
+    context: Context,
     extraction_json: str | dict[str, object] | None = None,
     assessment_json: str | dict[str, object] | None = None,
     rubric_name: str = "prd",
@@ -1008,6 +1059,7 @@ def _sample_edge_case_coverage_run_one(
 ) -> Sample:
     return _sample_edge_case_coverage(
         source_path,
+        context,
         extraction_json,
         assessment_json,
         rubric_name,
@@ -1018,6 +1070,7 @@ def _sample_edge_case_coverage_run_one(
 
 def _sample_edge_case_coverage_run_two(
     source_path: str,
+    context: Context,
     extraction_json: str | dict[str, object] | None = None,
     assessment_json: str | dict[str, object] | None = None,
     rubric_name: str = "prd",
@@ -1026,6 +1079,7 @@ def _sample_edge_case_coverage_run_two(
 ) -> Sample:
     return _sample_edge_case_coverage(
         source_path,
+        context,
         extraction_json,
         assessment_json,
         rubric_name,
@@ -1036,6 +1090,7 @@ def _sample_edge_case_coverage_run_two(
 
 def _sample_edge_case_coverage_run_three(
     source_path: str,
+    context: Context,
     extraction_json: str | dict[str, object] | None = None,
     assessment_json: str | dict[str, object] | None = None,
     rubric_name: str = "prd",
@@ -1044,12 +1099,15 @@ def _sample_edge_case_coverage_run_three(
 ) -> Sample:
     return _sample_edge_case_coverage(
         source_path,
+        context,
         extraction_json,
         assessment_json,
         rubric_name,
         supplemental_answers,
         product_context,
     )
+
+
 @mcp.tool(structured_output=True)
 @_anticipated
 async def assess_edge_case_coverage(
@@ -1223,6 +1281,7 @@ def _prepare_edge_case_plan(
 @_anticipated
 def _sample_edge_case_choice(
     source_path: str,
+    context: Context,
     extraction_json: str | dict[str, object] | None = None,
     assessment_json: str | dict[str, object] | None = None,
     rubric_name: str = "prd",
@@ -1230,6 +1289,7 @@ def _sample_edge_case_choice(
     product_context: list[ProductContextTerm] | None = None,
     framing: str | None = None,
 ) -> Sample:
+    _require_sampling(context, "discover_edge_case_question", _NO_SAMPLING_FALLBACK_HINT)
     plan = _prepare_edge_case_plan(
         source_path,
         extraction_json,
@@ -1381,12 +1441,14 @@ def _prepare_contextualization(
 def _sample_context_choice(
     source_path: str,
     extraction_json: str,
+    context: Context,
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
     criterion_id: str | None = None,
     framing: str | None = None,
 ) -> Sample:
+    _require_sampling(context, "contextualize_next_question", _NO_SAMPLING_FALLBACK_HINT)
     plan = _prepare_contextualization(
         source_path,
         extraction_json,

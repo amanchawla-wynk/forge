@@ -46,6 +46,25 @@ protocol:
 This is not a server-side model fallback. The connected agent still performs
 the inference, then submits structured data to deterministic Forge code.
 
+Confirmed in practice: OpenCode does not support MCP sampling, so `assess_prd`
+fails there and the two-step fallback is the only working path. Cursor's
+sampling support has not yet been confirmed either way in a live session (see
+`docs/ROADMAP.md`).
+
+Every sampling resolver checks the connected client's declared capabilities
+itself (via the injected `Context`, see D-039) before building a `Sample`
+request, and raises a plain, catchable error naming the fallback tool when
+`sampling` isn't declared. Without this check, the SDK's own capability guard
+fires first and raises a bare protocol-level error (`MCP error -32021:
+Client did not declare the sampling capability...`) that bypasses Forge's
+normal `ToolError` handling entirely, leaving the agent nothing useful to
+read. `assess_prd`/`assess_prd_batch` point the agent at
+`prepare_prd_assessment`; `detect_prd_framing`,
+`discover_edge_case_question`, `assess_edge_case_coverage`, and
+`contextualize_next_question` have no non-sampling fallback yet, so their
+error says so explicitly and tells the agent to continue without that
+enrichment rather than block the assessment.
+
 ## Trust Boundaries
 
 - File paths are local inputs and must be validated before reading.

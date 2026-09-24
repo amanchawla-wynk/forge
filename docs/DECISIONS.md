@@ -626,3 +626,43 @@ supersedes the old one.
   The rubric advances to `0.5.0-expert-baseline`. This changes scoring behavior
   when a coverage ledger is supplied and therefore requires organization data
   before thresholds or applicability mappings can be considered calibrated.
+
+## D-039: Check The Sampling Capability Before Sending A Request
+
+- Status: accepted
+- Decision: Every `Resolve`-based sampling resolver (`_sample`, `_sample_batch`,
+  `_sample_visual`, `_sample_context_choice`, `_sample_framing`,
+  `_sample_edge_case_choice`, `_sample_edge_case_coverage`, and their per-run
+  wrappers) now takes the injected `Context` and calls a shared
+  `_require_sampling` guard before building or returning a `Sample` marker.
+  If the connected client has not declared the `sampling` capability, this
+  raises a plain `ValueError` naming the tool and, when one exists, the
+  non-sampling fallback tool to use instead. `@_anticipated` turns that into a
+  normal `ToolError` the same way it already handles a missing file or a
+  stale batch plan.
+- Reason: Without this guard, a client lacking `sampling` never reaches our
+  code at all — the SDK's own `_require_capability` fires first and raises a
+  bare `MCPError` (`MISSING_REQUIRED_CLIENT_CAPABILITY`, wire code `-32021`),
+  surfaced to users verbatim as e.g. "MCP error -32021: Client did not declare
+  the sampling capability required by resolver
+  'forge.mcp.server:_sample_framing'". This is confirmed to happen in
+  practice: a user reported it while calling `detect_prd_framing` on a client
+  (OpenCode) already confirmed by D-038-era testing not to support sampling.
+  For `assess_prd`/`assess_prd_batch` this only produced a cryptic error the
+  agent had to interpret before self-correcting to the documented fallback;
+  for `detect_prd_framing`, `discover_edge_case_question`,
+  `assess_edge_case_coverage`, and `contextualize_next_question` — which have
+  no fallback tool at all — it was a dead end with no actionable next step.
+- Consequence: Every sampling tool now fails the same understandable way on
+  every host, including hosts not yet tested (this directly addresses the
+  user's "this could happen in Cursor as well"). The four advisory tools
+  still have no non-sampling fallback; their error explicitly says so and
+  tells the agent to continue with `score_prd_extraction`/`assess_prd` alone
+  rather than blocking the whole assessment. Building real fallbacks for
+  those four tools (mirroring `prepare_prd_assessment` +
+  `score_prd_extraction`) remains open in `docs/ROADMAP.md`. Separately, this
+  investigation surfaced that the installed MCP SDK marks the entire
+  `sampling` capability `@deprecated` as of protocol revision 2026-07-28
+  (SEP-2577); Forge has not yet investigated what SEP-2577 proposes in its
+  place, and D-006/D-007's reliance on sampling should be revisited once that
+  replacement is understood.

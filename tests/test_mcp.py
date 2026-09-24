@@ -280,6 +280,121 @@ async def test_anticipated_failures_reach_the_agent(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_assess_prd_without_sampling_gives_an_actionable_fallback_error(
+    tmp_path,
+):
+    """Confirmed in practice (at least one OpenCode build): a client that
+    doesn't declare `sampling` must get a clear, catchable error naming the
+    fallback tools -- not a raw 'MCP error -32021: Client did not declare the
+    sampling capability...' straight from the SDK's own resolver guard.
+    """
+    path = tmp_path / "prd.md"
+    path.write_text("A short product note.")
+
+    # No sampling_callback => the client declares no sampling capability,
+    # exactly like the reported host.
+    async with Client(mcp) as client:
+        result = await client.call_tool("assess_prd", {"source_path": str(path)})
+
+    assert result.is_error
+    text = result.content[0].text
+    assert "-32021" not in text
+    assert "has not declared the 'sampling' capability" in text
+    assert "prepare_prd_assessment" in text
+    assert "score_prd_extraction" in text
+
+
+@pytest.mark.anyio
+async def test_assess_prd_batch_without_sampling_gives_an_actionable_fallback_error(
+    tmp_path,
+):
+    path = tmp_path / "long-prd.md"
+    path.write_text(("A requirement sentence. " * 7_000).strip())
+
+    async with Client(mcp) as client:
+        plan = await client.call_tool("list_prd_batches", {"source_path": str(path)})
+        batch_id = plan.structured_content["batches"][0]["batch_id"]
+        result = await client.call_tool(
+            "assess_prd_batch", {"source_path": str(path), "batch_id": batch_id}
+        )
+
+    assert result.is_error
+    text = result.content[0].text
+    assert "-32021" not in text
+    assert "has not declared the 'sampling' capability" in text
+    assert "prepare_prd_assessment" in text
+
+
+@pytest.mark.anyio
+async def test_detect_prd_framing_without_sampling_gives_an_actionable_no_fallback_error(
+    tmp_path,
+):
+    """No non-sampling fallback exists yet for this tool; the error must say
+    so plainly rather than surfacing a raw protocol error."""
+    path = tmp_path / "prd.md"
+    path.write_text("A short product note.")
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "detect_prd_framing",
+            {
+                "source_path": str(path),
+                "extraction_json": json.dumps({"runs": [{"criteria": []}]}),
+            },
+        )
+
+    assert result.is_error
+    text = result.content[0].text
+    assert "-32021" not in text
+    assert "has not declared the 'sampling' capability" in text
+    assert "no non-sampling fallback for this tool" in text
+
+
+@pytest.mark.anyio
+async def test_assess_edge_case_coverage_without_sampling_gives_an_actionable_error(
+    tmp_path,
+):
+    """Also covers the three-resolver (run_one/two/three) shape."""
+    path = tmp_path / "prd.md"
+    requirement = "Playback progress syncs with the backend every 10 seconds."
+    path.write_text(requirement)
+    extraction = json.dumps(
+        {
+            "runs": [
+                {
+                    "criteria": [
+                        {
+                            "criterion_id": "functional_requirements",
+                            "fields": [
+                                {"name": "primary_flow", "value": None},
+                                {"name": "preconditions", "value": None},
+                                {
+                                    "name": "requirements",
+                                    "value": [requirement],
+                                    "evidence": {"quote": requirement},
+                                },
+                                {"name": "prioritisation", "value": None},
+                            ],
+                        }
+                    ]
+                }
+            ]
+        }
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "assess_edge_case_coverage",
+            {"source_path": str(path), "extraction_json": extraction},
+        )
+
+    assert result.is_error
+    text = result.content[0].text
+    assert "-32021" not in text
+    assert "has not declared the 'sampling' capability" in text
+
+
+@pytest.mark.anyio
 async def test_observe_prd_visual_sends_the_image_to_the_client_model(tmp_path):
     path = tmp_path / "visual-prd.pdf"
     pdf = pymupdf.open()
