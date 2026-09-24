@@ -37,10 +37,14 @@ def test_mcp_exposes_sampling_and_fallback_tools():
         "discover_edge_case_question",
         "assess_edge_case_coverage",
         "begin_prd_remediation",
+        "start_prd_review",
         "record_prd_answer",
         "prepare_prd_checkpoint",
         "apply_prd_checkpoint",
         "delete_prd_remediation",
+        "find_prd_reviews",
+        "resume_prd_review",
+        "get_prd_review_status",
         "preview_prd_revision",
         "write_integrated_prd_revision",
     }
@@ -84,7 +88,9 @@ def test_mcp_exposes_sampling_and_fallback_tools():
     }
     record = next(tool for tool in tools if tool.name == "record_prd_answer")
     assert set(record.input_schema["properties"]) == {
-        "session_id",
+        "review_session_id",
+        "session_version",
+        "operation_id",
         "answer",
         "force_checkpoint",
     }
@@ -203,34 +209,71 @@ async def test_remediation_collects_answers_before_one_delta_checkpoint(tmp_path
     )
 
     async with Client(mcp, raise_exceptions=True) as client:
+        # A new chat must be able to see that no review exists yet.
+        discovery = await client.call_tool(
+            "find_prd_reviews", {"source_path": str(path)}
+        )
+        assert discovery.structured_content["matches"] == []
+
         started = await client.call_tool(
             "begin_prd_remediation",
             {"source_path": str(path), "extraction_json": extraction},
         )
-        session_id = started.structured_content["session_id"]
+        session_id = started.structured_content["review_session_id"]
+        version = started.structured_content["session_version"]
+        assert started.structured_content["next_action"]["type"] == "ask_question"
+
         answers = [
             "GenZ users lack short-form stories.",
             "Mobile-first GenZ viewers.",
             "38 interviews requested this format.",
         ]
         recorded = None
-        for answer in answers:
+        for index, answer in enumerate(answers):
             recorded = await client.call_tool(
                 "record_prd_answer",
-                {"session_id": session_id, "answer": answer},
+                {
+                    "review_session_id": session_id,
+                    "session_version": version,
+                    "operation_id": f"answer-{index}",
+                    "answer": answer,
+                },
             )
+            version = recorded.structured_content["session_version"]
         assert recorded is not None
         assert recorded.structured_content["turn"]["checkpoint_due"] is True
+        assert recorded.structured_content["next_action"]["tool"] == (
+            "prepare_prd_checkpoint"
+        )
+
+        # The same document now resolves to exactly one resumable review.
+        discovery = await client.call_tool(
+            "find_prd_reviews", {"source_path": str(path)}
+        )
+        assert len(discovery.structured_content["matches"]) == 1
+        assert discovery.structured_content["choices"] == [
+            "resume_review",
+            "start_new_review",
+            "cancel",
+        ]
 
         prepared = await client.call_tool(
-            "prepare_prd_checkpoint", {"session_id": session_id}
+            "prepare_prd_checkpoint",
+            {
+                "review_session_id": session_id,
+                "session_version": version,
+                "operation_id": "prepare-1",
+            },
         )
-        assert "An incomplete product note." not in prepared.structured_content[
+        version = prepared.structured_content["session_version"]
+        plan = prepared.structured_content["plan"]
+        assert prepared.structured_content["next_action"]["type"] == "submit_delta"
+        assert "An incomplete product note." not in plan[
             "extraction_prompt"
         ]
         values = dict(zip(["problem", "affected_users", "evidence"], answers))
         delta = {
-            "delta_fingerprint": prepared.structured_content["delta_fingerprint"],
+            "delta_fingerprint": plan["delta_fingerprint"],
             "criteria": [
                 {
                     "criterion_id": problem.id,
@@ -251,10 +294,15 @@ async def test_remediation_collects_answers_before_one_delta_checkpoint(tmp_path
         }
         applied = await client.call_tool(
             "apply_prd_checkpoint",
-            {"session_id": session_id, "extraction_json": json.dumps(delta)},
+            {
+                "review_session_id": session_id,
+                "session_version": version,
+                "operation_id": "checkpoint-1",
+                "extraction_json": json.dumps(delta),
+            },
         )
         await client.call_tool(
-            "delete_prd_remediation", {"session_id": session_id}
+            "delete_prd_remediation", {"review_session_id": session_id}
         )
 
     result = applied.structured_content["result"]
@@ -1037,3 +1085,166 @@ async def test_observe_prd_visual_reports_an_unknown_asset(tmp_path):
 
     assert result.is_error
     assert "this document has none" in result.content[0].text
+
+
+def _bare_extraction() -> str:
+    problem = load_rubric("prd").criterion("problem_statement")
+    return json.dumps(
+        {
+            "criteria": [
+                {
+                    "criterion_id": problem.id,
+                    "fields": [
+                        {"name": field.name, "value": None, "evidence": None}
+                        for field in problem.fields
+                    ],
+                }
+            ]
+        }
+    )
+
+
+@pytest.mark.anyio
+async def test_review_rejects_out_of_order_and_stale_calls(tmp_path):
+    path = tmp_path / "prd.md"
+    path.write_text("An incomplete product note.")
+
+    async with Client(mcp) as client:
+        started = await client.call_tool(
+            "begin_prd_remediation",
+            {"source_path": str(path), "extraction_json": _bare_extraction()},
+        )
+        session_id = started.structured_content["review_session_id"]
+        version = started.structured_content["session_version"]
+
+        # A checkpoint is not legal while the queue is still being answered.
+        premature = await client.call_tool(
+            "prepare_prd_checkpoint",
+            {
+                "review_session_id": session_id,
+                "session_version": version,
+                "operation_id": "premature-prepare",
+            },
+        )
+        assert premature.is_error
+        assert "not allowed while this review is" in premature.content[0].text
+
+        await client.call_tool(
+            "record_prd_answer",
+            {
+                "review_session_id": session_id,
+                "session_version": version,
+                "operation_id": "answer-1",
+                "answer": "GenZ viewers lack short-form stories.",
+            },
+        )
+
+        # Reusing the superseded version must not silently overwrite state.
+        stale = await client.call_tool(
+            "record_prd_answer",
+            {
+                "review_session_id": session_id,
+                "session_version": version,
+                "operation_id": "answer-2",
+                "answer": "A second answer from a stale client.",
+            },
+        )
+        assert stale.is_error
+        assert "stale session_version" in stale.content[0].text
+
+        status = await client.call_tool(
+            "get_prd_review_status", {"review_session_id": session_id}
+        )
+        assert status.structured_content["pending_answer_count"] == 1
+
+
+@pytest.mark.anyio
+async def test_repeated_answer_operation_id_is_recorded_once(tmp_path):
+    path = tmp_path / "prd.md"
+    path.write_text("An incomplete product note.")
+
+    async with Client(mcp, raise_exceptions=True) as client:
+        started = await client.call_tool(
+            "begin_prd_remediation",
+            {"source_path": str(path), "extraction_json": _bare_extraction()},
+        )
+        session_id = started.structured_content["review_session_id"]
+        payload = {
+            "review_session_id": session_id,
+            "session_version": started.structured_content["session_version"],
+            "operation_id": "retried-answer",
+            "answer": "GenZ viewers lack short-form stories.",
+        }
+
+        first = await client.call_tool("record_prd_answer", payload)
+        retry = await client.call_tool("record_prd_answer", payload)
+
+    assert first.structured_content["session_version"] == 2
+    assert retry.structured_content["session_version"] == 2
+    assert retry.structured_content["turn"]["pending_answer_count"] == 1
+
+
+@pytest.mark.anyio
+async def test_resuming_in_another_client_requires_confirmation(tmp_path):
+    path = tmp_path / "prd.md"
+    path.write_text("An incomplete product note.")
+
+    async with Client(mcp) as client:
+        started = await client.call_tool(
+            "begin_prd_remediation",
+            {
+                "source_path": str(path),
+                "extraction_json": _bare_extraction(),
+                "client_name": "opencode",
+            },
+        )
+        session_id = started.structured_content["review_session_id"]
+
+        blocked = await client.call_tool(
+            "resume_prd_review",
+            {
+                "review_session_id": session_id,
+                "source_path": str(path),
+                "operation_id": "resume-1",
+                "client_name": "cursor",
+            },
+        )
+        assert blocked.is_error
+        assert "confirm_client_change" in blocked.content[0].text
+
+        resumed = await client.call_tool(
+            "resume_prd_review",
+            {
+                "review_session_id": session_id,
+                "source_path": str(path),
+                "operation_id": "resume-2",
+                "client_name": "cursor",
+                "confirm_client_change": True,
+            },
+        )
+
+    assert resumed.structured_content["next_action"]["type"] == "ask_question"
+
+
+@pytest.mark.anyio
+async def test_starting_parallel_review_requires_explicit_start_new(tmp_path):
+    path = tmp_path / "prd.md"
+    path.write_text("An incomplete product note.")
+    payload = {"source_path": str(path), "extraction_json": _bare_extraction()}
+
+    async with Client(mcp) as client:
+        first = await client.call_tool("start_prd_review", payload)
+        assert not first.is_error
+
+        blocked = await client.call_tool("start_prd_review", payload)
+        assert blocked.is_error
+        assert "start_new=true" in blocked.content[0].text
+
+        separate = await client.call_tool(
+            "start_prd_review", {**payload, "start_new": True}
+        )
+        assert not separate.is_error
+        assert (
+            separate.structured_content["review_session_id"]
+            != first.structured_content["review_session_id"]
+        )

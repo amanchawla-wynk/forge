@@ -32,6 +32,10 @@ class DocumentStore:
         self._documents: dict[str, StoredDocument] = {}
         self._lock = Lock()
 
+    @property
+    def root(self) -> Path:
+        return self._root
+
     def save(self, filename: str, content: bytes) -> StoredDocument:
         suffix = Path(filename).suffix.lower()
         if suffix not in SUPPORTED_EXTENSIONS:

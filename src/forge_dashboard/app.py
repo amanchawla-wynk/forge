@@ -27,19 +27,29 @@ from forge_dashboard.models import (
     DashboardAssessmentResponse,
     DashboardCheckpointResponse,
     DashboardRemediationTurn,
+    DashboardReviewDiscovery,
     DashboardRevisionPreview,
     DashboardRevisionResponse,
     LLMConfig,
     RecordAnswerRequest,
+    ResumeReviewRequest,
     MaterializeRevisionRequest,
     RevisionPreviewRequest,
     UploadResponse,
 )
 from forge.remediation import (
-    RemediationSessionStore,
+    RemediationCheckpointResult,
     apply_checkpoint,
+    current_turn,
     prepare_checkpoint,
     record_answer,
+)
+from forge.sessions import (
+    ClientBinding,
+    ReviewSessionRepository,
+    WorkflowState,
+    turn_for_session,
+    workflow_for_turn,
 )
 from forge.revise import (
     RevisionPlan,
@@ -86,8 +96,25 @@ app.add_middleware(
 )
 
 _store = DocumentStore()
-_remediation_store = RemediationSessionStore()
+_review_repository: ReviewSessionRepository | None = None
 _revision_plans: dict[str, tuple[str, RevisionPlan]] = {}
+
+
+def _reviews() -> ReviewSessionRepository:
+    global _review_repository
+    if _review_repository is None:
+        _review_repository = ReviewSessionRepository()
+    return _review_repository
+
+
+def _require_workflow(
+    workflow_state: WorkflowState, allowed: set[WorkflowState], operation: str
+) -> None:
+    if workflow_state not in allowed:
+        raise ValueError(
+            f"{operation} is not allowed while this review is "
+            f"'{workflow_state.value}'"
+        )
 
 
 @app.get("/api/health")
@@ -135,6 +162,16 @@ async def create_assessment(request: AssessRequest) -> DashboardAssessmentRespon
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
+    matches = _reviews().find(str(stored.path), workspace_root=str(_store.root))
+    if matches and not request.start_new:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "matching reviews exist; explicitly resume one, start a new "
+                "review, or cancel"
+            ),
+        )
+
     try:
         result, remediation_state = await run_assessment_with_remediation(
             str(stored.path),
@@ -155,12 +192,98 @@ async def create_assessment(request: AssessRequest) -> DashboardAssessmentRespon
     payload = result.model_dump()
     payload["source_path"] = stored.filename
     payload["document_id"] = stored.document_id
-    payload["remediation_session_id"] = (
-        _remediation_store.create(remediation_state)
+    session = (
+        _reviews().create(
+            remediation_state,
+            workspace_root=str(_store.root),
+            client_binding=ClientBinding(client_name="dashboard"),
+        )
         if remediation_state is not None
         else None
     )
+    payload["review_session_id"] = session.review_session_id if session else None
+    payload["session_version"] = session.session_version if session else None
+    payload["workflow_state"] = session.workflow_state if session else None
+    payload["next_action"] = session.next_action if session else None
     return DashboardAssessmentResponse.model_validate(payload)
+
+
+@app.get(
+    "/api/documents/{document_id}/reviews",
+    response_model=DashboardReviewDiscovery,
+)
+def find_document_reviews(document_id: str) -> DashboardReviewDiscovery:
+    try:
+        stored = _store.get(document_id)
+        matches = _reviews().find(
+            str(stored.path), workspace_root=str(_store.root)
+        )
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (ValueError, FileNotFoundError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return DashboardReviewDiscovery(
+        document_id=document_id,
+        matches=matches,
+        choices=["resume_review", "start_new_review", "cancel"],
+    )
+
+
+@app.post(
+    "/api/documents/{document_id}/reviews/{review_session_id}/resume",
+    response_model=DashboardAssessmentResponse,
+)
+def resume_document_review(
+    document_id: str,
+    review_session_id: str,
+    request: ResumeReviewRequest,
+) -> DashboardAssessmentResponse:
+    try:
+        stored = _store.get(document_id)
+        session = _reviews().get(review_session_id)
+        session = _reviews().resume(
+            review_session_id,
+            source_path=str(stored.path),
+            client_binding=ClientBinding(client_name="dashboard"),
+            confirm_client_change=request.confirm_client_change,
+            expected_version=session.session_version,
+            operation_id=request.operation_id,
+            workspace_root=str(_store.root),
+        )
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (ValueError, FileNotFoundError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    turn = turn_for_session(session)
+    disputed = [
+        item.criterion_id
+        for item in session.state.assessment.criteria
+        if item.agreement < 1.0
+    ]
+    return DashboardAssessmentResponse(
+        source_path=stored.filename,
+        document_id=document_id,
+        report=session.state.report,
+        assessment=session.state.assessment,
+        next_question=turn.next_question,
+        supplemental_answers=session.state.verified_answers,
+        run_count=session.state.run_count,
+        expected_run_count=session.state.expected_run_count,
+        disputed_criteria=disputed,
+        recommended_additional_runs=max(0, 5 - session.state.run_count)
+        if disputed
+        else 0,
+        client_models=session.state.client_models,
+        product_context=session.state.product_context,
+        framing=session.state.framing,
+        edge_case_coverage=session.state.edge_case_coverage,
+        warnings=[],
+        extraction_errors=[],
+        review_session_id=session.review_session_id,
+        session_version=session.session_version,
+        workflow_state=session.workflow_state,
+        next_action=session.next_action,
+    )
 
 
 @app.post(
@@ -171,16 +294,48 @@ def record_remediation_answer(
     session_id: str, request: RecordAnswerRequest
 ) -> DashboardRemediationTurn:
     try:
-        state = _remediation_store.get(session_id)
+        cached = _reviews().operation_result(session_id, request.operation_id)
+        if cached is not None:
+            session = _reviews().get(session_id)
+            return DashboardRemediationTurn(
+                review_session_id=session_id,
+                session_version=session.session_version,
+                workflow_state=session.workflow_state,
+                next_action=session.next_action,
+                turn=turn_for_session(session),
+            )
+        session = _reviews().get(session_id)
+        _require_workflow(
+            session.workflow_state,
+            {WorkflowState.AWAITING_ANSWER, WorkflowState.COLLECTING_ANSWERS},
+            "record answer",
+        )
         turn = record_answer(
-            state,
+            session.state,
             request.answer,
             force_checkpoint=request.force_checkpoint,
         )
-        _remediation_store.put(session_id, turn.state)
-    except (KeyError, ValueError, FileNotFoundError) as error:
+        session = _reviews().update(
+            session_id,
+            expected_version=request.session_version,
+            operation_id=request.operation_id,
+            state=turn.state,
+            workflow_state=workflow_for_turn(turn),
+            event_type="answer_recorded",
+            result_json=turn.model_dump_json(),
+            event_payload={"checkpoint_due": turn.checkpoint_due},
+        )
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (ValueError, FileNotFoundError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    return DashboardRemediationTurn(session_id=session_id, turn=turn)
+    return DashboardRemediationTurn(
+        review_session_id=session_id,
+        session_version=session.session_version,
+        workflow_state=session.workflow_state,
+        next_action=session.next_action,
+        turn=turn_for_session(session),
+    )
 
 
 @app.post(
@@ -191,32 +346,66 @@ async def checkpoint_remediation(
     session_id: str, request: CheckpointRequest
 ) -> DashboardCheckpointResponse:
     try:
-        state = _remediation_store.get(session_id)
-        plan = prepare_checkpoint(state)
+        cached = _reviews().operation_result(session_id, request.operation_id)
+        if cached is not None:
+            session = _reviews().get(session_id)
+            return DashboardCheckpointResponse(
+                review_session_id=session_id,
+                session_version=session.session_version,
+                workflow_state=session.workflow_state,
+                next_action=session.next_action,
+                result=RemediationCheckpointResult.model_validate_json(cached),
+            )
+        session = _reviews().get(session_id)
+        _require_workflow(
+            session.workflow_state,
+            {WorkflowState.CHECKPOINT_REQUIRED, WorkflowState.AWAITING_DELTA_EXTRACTION},
+            "checkpoint",
+        )
+        plan = prepare_checkpoint(session.state)
         completion = await call_model(
             request.llm,
             plan.extraction_prompt,
             max_tokens=4_000,
             temperature=0,
         )
-        result = apply_checkpoint(state, completion.text)
-        _remediation_store.put(session_id, result.state)
+        result = apply_checkpoint(session.state, completion.text)
+        turn = current_turn(result.state)
+        session = _reviews().update(
+            session_id,
+            expected_version=request.session_version,
+            operation_id=request.operation_id,
+            state=result.state,
+            workflow_state=workflow_for_turn(turn),
+            event_type="checkpoint_applied",
+            result_json=result.model_dump_json(),
+            event_payload={
+                "credited_answer_ids": result.credited_answer_ids,
+                "uncredited_answer_ids": result.uncredited_answer_ids,
+            },
+        )
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except LLMCallError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     except (ValueError, FileNotFoundError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    return DashboardCheckpointResponse(session_id=session_id, result=result)
+    return DashboardCheckpointResponse(
+        review_session_id=session_id,
+        session_version=session.session_version,
+        workflow_state=session.workflow_state,
+        next_action=session.next_action,
+        result=result,
+    )
 
 
 @app.delete("/api/remediation/{session_id}")
 def delete_remediation(session_id: str) -> dict[str, object]:
     try:
-        _remediation_store.delete(session_id)
+        _reviews().delete(session_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    return {"session_id": session_id, "deleted": True}
+    return {"review_session_id": session_id, "deleted": True}
 
 
 @app.post(
@@ -285,11 +474,19 @@ async def create_revision(
     payload = result.model_dump()
     payload["source_path"] = filename
     payload["document_id"] = generated.document_id
-    payload["remediation_session_id"] = (
-        _remediation_store.create(remediation_state)
+    session = (
+        _reviews().create(
+            remediation_state,
+            workspace_root=str(_store.root),
+            client_binding=ClientBinding(client_name="dashboard"),
+        )
         if remediation_state is not None
         else None
     )
+    payload["review_session_id"] = session.review_session_id if session else None
+    payload["session_version"] = session.session_version if session else None
+    payload["workflow_state"] = session.workflow_state if session else None
+    payload["next_action"] = session.next_action if session else None
     assessment = DashboardAssessmentResponse.model_validate(payload)
     return DashboardRevisionResponse(
         document_id=generated.document_id,

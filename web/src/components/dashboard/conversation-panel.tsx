@@ -55,8 +55,9 @@ export function ConversationPanel() {
   async function handleSubmit() {
     if (!question || !answer.trim() || !assessment || !llm || !document) return;
     setIsSubmitting(true);
-    const sessionId = assessment.remediation_session_id;
-    if (!sessionId) {
+    const sessionId = assessment.review_session_id;
+    const sessionVersion = assessment.session_version;
+    if (!sessionId || !sessionVersion) {
       toast.error("Start a new assessment to use checkpointed remediation.");
       setIsSubmitting(false);
       return;
@@ -64,32 +65,48 @@ export function ConversationPanel() {
     try {
       const recorded = await recordRemediationAnswer(
         sessionId,
+        sessionVersion,
+        crypto.randomUUID(),
         answer.trim(),
       );
       appendHistory({ question, answer: answer.trim() });
       setAnswer("");
       setPendingCount(recorded.turn.pending_answer_count);
+      const recordedAssessment = {
+        ...assessment,
+        next_question: recorded.turn.next_question,
+        review_session_id: recorded.review_session_id,
+        session_version: recorded.session_version,
+        workflow_state: recorded.workflow_state,
+        next_action: recorded.next_action,
+      };
+      setAssessment(recordedAssessment);
       if (recorded.turn.checkpoint_due) {
-        const checkpoint = await checkpointRemediation(sessionId, llm);
+        const checkpoint = await checkpointRemediation(
+          sessionId,
+          recorded.session_version,
+          crypto.randomUUID(),
+          llm,
+        );
         const state = checkpoint.result.state;
         setAssessment({
-          ...assessment,
+          ...recordedAssessment,
           assessment: state.assessment,
           report: state.report,
           next_question: checkpoint.result.next_question,
           supplemental_answers: state.verified_answers,
           framing: state.framing,
           edge_case_coverage: state.edge_case_coverage,
+          review_session_id: checkpoint.review_session_id,
+          session_version: checkpoint.session_version,
+          workflow_state: checkpoint.workflow_state,
+          next_action: checkpoint.next_action,
         });
         setPendingCount(0);
         toast.success("Checkpoint scored", {
           description: `${checkpoint.result.previous_band} → ${checkpoint.result.current_band}`,
         });
       } else {
-        setAssessment({
-          ...assessment,
-          next_question: recorded.turn.next_question,
-        });
         toast.success("Answer saved", {
           description: `${recorded.turn.pending_answer_count} of 5 answers collected`,
         });

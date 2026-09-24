@@ -218,7 +218,45 @@ export interface AssessmentResponse {
   warnings: string[];
   document_id: string;
   extraction_errors: string[];
-  remediation_session_id?: string | null;
+  review_session_id?: string | null;
+  session_version?: number | null;
+  workflow_state?: WorkflowState | null;
+  next_action?: NextAction | null;
+}
+
+export type WorkflowState =
+  | "awaiting_answer"
+  | "collecting_answers"
+  | "checkpoint_required"
+  | "awaiting_delta_extraction"
+  | "revision_ready"
+  | "awaiting_revision_approval"
+  | "final_assessment_required"
+  | "complete"
+  | "paused";
+
+export interface NextAction {
+  type: string;
+  tool: string | null;
+}
+
+export interface ReviewSessionSummary {
+  review_session_id: string;
+  display_name: string;
+  source_path: string;
+  source_sha256: string;
+  current_band: string;
+  workflow_state: WorkflowState;
+  verified_answer_count: number;
+  pending_answer_count: number;
+  client_name: string | null;
+  updated_at: number;
+}
+
+export interface ReviewDiscovery {
+  document_id: string;
+  matches: ReviewSessionSummary[];
+  choices: Array<"resume_review" | "start_new_review" | "cancel">;
 }
 
 export interface RemediationState {
@@ -232,7 +270,10 @@ export interface RemediationState {
 }
 
 export interface RemediationTurnResponse {
-  session_id: string;
+  review_session_id: string;
+  session_version: number;
+  workflow_state: WorkflowState;
+  next_action: NextAction;
   turn: {
     state: RemediationState;
     next_question: Question | null;
@@ -245,7 +286,10 @@ export interface RemediationTurnResponse {
 }
 
 export interface RemediationCheckpointResponse {
-  session_id: string;
+  review_session_id: string;
+  session_version: number;
+  workflow_state: WorkflowState;
+  next_action: NextAction;
   result: {
     state: RemediationState;
     next_question: Question | null;

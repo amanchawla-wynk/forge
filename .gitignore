@@ -4,6 +4,7 @@
 *.pyc
 graphify-out/
 sampleDoc/
+.forge/
 
 # Optional local dashboard (see docs/DECISIONS.md D-033)
 web/node_modules/

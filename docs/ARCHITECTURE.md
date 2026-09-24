@@ -113,9 +113,9 @@ The target public surface is:
 Assessment responses return one highest-impact remediation question. The
 checkpoint workflow keeps a `RemediationState` containing the source/rubric identity,
 immutable verified baseline extraction, last assessment, framing, queued
-questions, accepted answers, pending answers, and any edge-case ledger. An MCP
-or dashboard adapter may retain that state locally behind an opaque session id;
-the domain workflow remains independent of transport and model provider.
+questions, accepted answers, pending answers, and any edge-case ledger. MCP and
+dashboard adapters persist that state in local SQLite behind a Forge-owned opaque
+review id; the domain workflow remains independent of transport and model provider.
 
 Submitting an answer records the user's exact text and returns the next queued
 question without invoking extraction or scoring. By default, a checkpoint runs
@@ -213,11 +213,39 @@ They are never rendered as `SourceBlock`s, so `locate_quote` cannot verify a
 context-only claim. Changing context invalidates prior extraction fragments.
 
 The one-answer/full-re-extraction loop proved cumbersome and expensive on a
-real long PRD. A lightweight local remediation-session store now backs the MCP
-and dashboard checkpoint APIs instead of a general workflow framework. Sessions contain no provider keys,
-are addressed by opaque ids, bind state to the source hash and rubric version,
-and have explicit expiry/deletion behavior. Adapters may continue to support a
-fully client-held state object where persistence is undesirable.
+real long PRD. A lightweight SQLite review-session repository now backs the MCP
+and dashboard checkpoint APIs instead of a general workflow framework. Sessions
+contain no provider keys, are addressed by opaque ids, bind state to the source
+hash, rubric version, workspace, and local user, and have explicit expiry and
+deletion behavior. It separates three identities:
+
+- `review_session_id`: Forge-owned, opaque, and authoritative for workflow
+  state;
+- MCP transport session or optional host conversation id: advisory binding and
+  audit metadata only, because MCP does not standardize a client chat id in
+  `tools/call`;
+- authenticated subject and tenant: mandatory ownership boundary if Forge gains
+  remote or multi-user transport.
+
+Every mutation carries `review_session_id`, `session_version`, and an idempotent
+`operation_id`. SQLite updates the session and event log in one transaction.
+Stale versions, duplicate operations, source/rubric/workspace mismatches, and
+illegal workflow transitions are rejected with the current state and allowed
+actions. A model or MCP client never chooses a session by filename or recency.
+
+New conversations use a discovery/resume protocol. `find_prd_reviews` receives
+an exact source path or dashboard document id, computes the current source hash,
+and returns only matching session summaries. `resume_prd_review` requires the
+chosen id and explicit confirmation when the client binding changed. With one
+match Forge still offers **Resume**, **Start new**, and **Cancel**; multiple
+matches are never resolved automatically. `start_prd_review` supports an
+explicit `start_new` flag so two independent reviews of the same PRD remain
+separate. A successful resume records a `client_binding_changed` event when
+applicable and returns the authoritative `next_action` and next question.
+
+LangGraph remains deferred. If adopted later, its `thread_id` maps to
+`review_session_id`, never to a vendor chat id. GraphRAG has no role in session
+identity or scoring-state persistence.
 
 `prepare_prd_assessment` returns `extraction_batches` rather than a single
 `extraction_prompt`, because a long document requires several exhaustive
@@ -297,9 +325,11 @@ the resulting boundary.
   `forge.extract.batch`, and deterministic scoring in `forge.score` are reused
   unmodified through `forge.service`. The dashboard backend only replaces MCP
   sampling with a direct LiteLLM call as the source of extraction completions.
-- The dashboard keeps Forge's stateless supplemental-answer design (D-014):
-  the browser accumulates `supplemental_answers` and resubmits the full list
-  on every turn; the backend does not persist a conversation session.
+- The dashboard uses the same durable SQLite review repository as MCP. The
+  browser retains `review_session_id`, `session_version`, workflow state, and
+  `next_action` in per-tab `sessionStorage`; it never persists the provider key
+  server-side. A newly uploaded exact document triggers explicit review
+  discovery and Resume / Start new / Cancel choices rather than auto-resume.
 - Uploaded documents are written to a local, gitignored working directory for
   the lifetime of the process only, addressed by an opaque document id; the
   backend does not expose raw filesystem paths to the browser.

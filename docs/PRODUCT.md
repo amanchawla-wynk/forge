@@ -93,6 +93,34 @@ product bet itself is strategically correct.
     supplemental evidence. This final pass validates the durable artifact rather
     than conversational state.
 
+### Continuing In A New Chat Or Client
+
+Forge review identity is independent of an OpenCode, Cursor, Claude Code, or
+dashboard conversation. A review receives an opaque `review_session_id` and is
+bound to the exact source hash, rubric version, workspace, and local user. Client
+name and a host conversation id, when one is available, are additional audit
+metadata rather than the primary key.
+
+When a user opens a new chat and asks to continue a review, the client supplies
+the PRD path (or selects the document in the dashboard) and Forge searches only
+for sessions whose source hash and workspace match. Forge returns concise
+candidate summaries containing the document name, last update, verified and
+pending answer counts, current band, and workflow state. It never silently
+attaches the new conversation to a candidate.
+
+The user chooses one of:
+
+- **Resume review**: continue from the saved next question after confirming any
+  client change, such as OpenCode to Cursor.
+- **Start a new review**: create a separate session for the same document and
+  leave the previous review paused and recoverable.
+- **Cancel**: make no state change.
+
+If exactly one session matches, Forge still asks for confirmation. If several
+match, the user chooses by display label and last-updated time. A user may also
+provide the `review_session_id` directly. Starting a new chat must never merge
+answers, checkpoints, or revision approvals across review sessions.
+
 When available, the caller may supply product terminology derived from an
 implementation repository or other background. It helps the extractor resolve
 names and aliases but is never treated as PRD evidence or credited by scoring.

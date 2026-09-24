@@ -4,6 +4,7 @@ import type {
   LLMConfig,
   RemediationCheckpointResponse,
   RemediationTurnResponse,
+  ReviewDiscovery,
   RevisionAction,
   RevisionPreview,
   RevisionResponse,
@@ -57,6 +58,7 @@ export interface CreateAssessmentPayload {
   product_context?: { term: string; meaning: string; source_ref?: string | null }[];
   framing?: string | null;
   edge_case_coverage?: EdgeCaseCoverageLedger | null;
+  start_new?: boolean;
 }
 
 export async function createAssessment(
@@ -76,6 +78,8 @@ export async function createAssessment(
 
 export async function recordRemediationAnswer(
   sessionId: string,
+  sessionVersion: number,
+  operationId: string,
   answer: string,
   forceCheckpoint = false,
 ): Promise<RemediationTurnResponse> {
@@ -84,7 +88,12 @@ export async function recordRemediationAnswer(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answer, force_checkpoint: forceCheckpoint }),
+      body: JSON.stringify({
+        session_version: sessionVersion,
+        operation_id: operationId,
+        answer,
+        force_checkpoint: forceCheckpoint,
+      }),
     },
   );
   if (!response.ok) {
@@ -95,6 +104,8 @@ export async function recordRemediationAnswer(
 
 export async function checkpointRemediation(
   sessionId: string,
+  sessionVersion: number,
+  operationId: string,
   llm: LLMConfig,
 ): Promise<RemediationCheckpointResponse> {
   const response = await fetch(
@@ -102,7 +113,42 @@ export async function checkpointRemediation(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ llm }),
+      body: JSON.stringify({
+        llm,
+        session_version: sessionVersion,
+        operation_id: operationId,
+      }),
+    },
+  );
+  if (!response.ok) {
+    throw new ApiError(response.status, await parseErrorDetail(response));
+  }
+  return response.json();
+}
+
+export async function findDocumentReviews(
+  documentId: string,
+): Promise<ReviewDiscovery> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/documents/${documentId}/reviews`,
+    { cache: "no-store" },
+  );
+  if (!response.ok) {
+    throw new ApiError(response.status, await parseErrorDetail(response));
+  }
+  return response.json();
+}
+
+export async function resumeDocumentReview(
+  documentId: string,
+  reviewSessionId: string,
+): Promise<AssessmentResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/documents/${documentId}/reviews/${reviewSessionId}/resume`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation_id: crypto.randomUUID() }),
     },
   );
   if (!response.ok) {

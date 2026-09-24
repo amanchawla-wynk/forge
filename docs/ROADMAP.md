@@ -133,6 +133,20 @@
   resolution, no-overwrite new copies, audit appendices, dashboard download,
   and automatic full reassessment of the generated dashboard artifact without
   supplemental answers.
+- Replaced the in-memory remediation store with durable local SQLite review
+  sessions (D-042), bound to exact source hash, rubric version, workspace, and
+  local user, with optimistic versions, idempotent operation ids, transactional
+  event history, expiry, and deletion.
+- Added explicit workflow states and machine-readable `next_action` values to
+  MCP and dashboard responses, with transition guards for answer and checkpoint
+  operations and stale-version rejection across concurrent conversations.
+- Added `find_prd_reviews`, `resume_prd_review`, `start_prd_review`, and
+  `get_prd_review_status`; exact matches always require Resume / Start new /
+  Cancel, cross-client resume requires confirmation, and the dashboard carries
+  the review id and authoritative version in per-tab `sessionStorage`.
+- Added restart, stale-version, duplicate-operation, wrong-document,
+  exact-document discovery, explicit parallel-review, and OpenCode-to-Cursor
+  resume regression coverage.
 
 ## Current Build
 
@@ -171,7 +185,6 @@
   representative fixtures before expanding to multimodal document content.
 - Add qualitative risk records only where source evidence or a rubric omission
   supports them; do not invent probability or numeric risk scores.
-- Add local session storage only if the stateless workflow proves cumbersome.
 
 ## Blocked On Company Inputs
 

@@ -44,12 +44,24 @@ from forge.revise import (
 from forge.remediation import (
     CheckpointPolicy,
     RemediationCheckpointResult,
-    RemediationSessionStore,
     RemediationTurn,
     apply_checkpoint,
     begin_remediation,
+    current_turn,
     prepare_checkpoint,
     record_answer,
+)
+from forge.sessions import (
+    ClientBinding,
+    NextAction,
+    ReviewSession,
+    ReviewSessionRepository,
+    ReviewSessionSummary,
+    ReviewStatus,
+    WorkflowState,
+    status_for,
+    turn_for_session,
+    workflow_for_turn,
 )
 from forge.extract.delta import DeltaExtractionPlan
 from forge.score.contextualize import (
@@ -106,10 +118,15 @@ mcp = MCPServer(
         "detect_prd_framing with its assessment JSON (or the fallback "
         "extraction JSON), then pass the returned framing on later assessment "
         "calls. Return next_question to the user. For token-efficient follow-up, "
-        "call begin_prd_remediation with the verified initial extraction, then "
-        "record_prd_answer after each reply. Ask one question at a time without "
-        "rescoring until checkpoint_due is true; then call prepare_prd_checkpoint, "
-        "complete its bounded answer-only prompt, and call apply_prd_checkpoint. "
+        "call find_prd_reviews first and let the user choose resume/start-new/"
+        "cancel; never resume automatically. Then call resume_prd_review or "
+        "start_prd_review, and record_prd_answer after each reply. Every "
+        "mutating call echoes review_session_id, session_version, and "
+        "next_action: always send back the latest session_version plus a fresh "
+        "operation_id, and follow next_action rather than guessing the next "
+        "tool. Ask one question at a time without rescoring until next_action "
+        "is prepare_checkpoint; then call prepare_prd_checkpoint, complete its "
+        "bounded answer-only prompt, and call apply_prd_checkpoint. "
         "When edge_cases_and_states lacks behavioural "
         "coverage, call assess_edge_case_coverage and pass its ledger into "
         "later score_prd_extraction/assess_prd calls; bind each answer to the "
@@ -245,21 +262,101 @@ class BatchExtractionResult(BaseModel):
 
 
 class RemediationSessionResponse(BaseModel):
-    session_id: str
+    review_session_id: str
+    session_version: int
+    workflow_state: WorkflowState
+    next_action: NextAction
     turn: RemediationTurn
 
 
 class RemediationCheckpointResponse(BaseModel):
-    session_id: str
+    review_session_id: str
+    session_version: int
+    workflow_state: WorkflowState
+    next_action: NextAction
     result: RemediationCheckpointResult
 
 
+class PreparedCheckpointResponse(BaseModel):
+    review_session_id: str
+    session_version: int
+    workflow_state: WorkflowState
+    next_action: NextAction
+    plan: DeltaExtractionPlan
+
+
 class DeletedRemediationSession(BaseModel):
-    session_id: str
+    review_session_id: str
     deleted: bool
 
 
-_remediation_sessions = RemediationSessionStore()
+class ReviewDiscovery(BaseModel):
+    source_path: str
+    matches: list[ReviewSessionSummary]
+    choices: list[str]
+    instructions: str
+
+
+_review_repository: ReviewSessionRepository | None = None
+
+
+def _reviews_store() -> ReviewSessionRepository:
+    """Open the durable review store lazily.
+
+    Deferred so importing the server never creates a database file, which lets
+    tests and alternate deployments point `FORGE_SESSION_DB` somewhere else.
+    """
+    global _review_repository
+    if _review_repository is None:
+        _review_repository = ReviewSessionRepository()
+    return _review_repository
+
+# Which workflow states may perform which mutation. Enforced mechanically so a
+# client agent cannot reach a tool out of order by reading instructions wrong.
+_ALLOWED_STATES: dict[str, set[WorkflowState]] = {
+    "record_prd_answer": {
+        WorkflowState.AWAITING_ANSWER,
+        WorkflowState.COLLECTING_ANSWERS,
+    },
+    "prepare_prd_checkpoint": {
+        WorkflowState.CHECKPOINT_REQUIRED,
+    },
+    "apply_prd_checkpoint": {
+        WorkflowState.AWAITING_DELTA_EXTRACTION,
+    },
+}
+
+
+def _require_state(session: ReviewSession, tool_name: str) -> None:
+    allowed = _ALLOWED_STATES[tool_name]
+    if session.workflow_state in allowed:
+        return
+    raise ValueError(
+        f"{tool_name} is not allowed while this review is "
+        f"'{session.workflow_state.value}'. Current next_action is "
+        f"'{session.next_action.type}'"
+        + (
+            f" via {session.next_action.tool}."
+            if session.next_action.tool
+            else "."
+        )
+    )
+
+
+def _session_response(session: ReviewSession) -> RemediationSessionResponse:
+    """Build every remediation response from durable state only.
+
+    The turn is re-derived from what was persisted rather than from a value
+    computed before the write, so an idempotent replay or a concurrent update
+    can never report answers that were not actually stored.
+    """
+    return RemediationSessionResponse(
+        review_session_id=session.review_session_id,
+        session_version=session.session_version,
+        workflow_state=session.workflow_state,
+        next_action=session.next_action,
+        turn=turn_for_session(session),
+    )
 
 
 class VisualAssetSummary(BaseModel):
@@ -758,7 +855,73 @@ def score_prd_extraction(
 
 @mcp.tool(structured_output=True)
 @_anticipated
-def begin_prd_remediation(
+def find_prd_reviews(
+    source_path: str,
+    workspace_root: str | None = None,
+) -> ReviewDiscovery:
+    """Find existing reviews for this exact PRD before starting a new one.
+
+    Matching uses the document's current SHA-256 plus workspace and local user,
+    never its filename. Always show the user the choices and let them decide;
+    never resume a review automatically, even when exactly one matches.
+    """
+    matches = _reviews_store().find(source_path, workspace_root=workspace_root)
+    return ReviewDiscovery(
+        source_path=source_path,
+        matches=matches,
+        choices=["resume_review", "start_new_review", "cancel"],
+        instructions=(
+            "Show these matches to the user and ask which they want. Call "
+            "resume_prd_review with the chosen review_session_id, or "
+            "start_prd_review to start a separate review. Never pick a "
+            "match automatically, even if there is only one."
+        ),
+    )
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def get_prd_review_status(review_session_id: str) -> ReviewStatus:
+    """Report the authoritative workflow state, next action, and next question."""
+    return status_for(_reviews_store().get(review_session_id))
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def resume_prd_review(
+    review_session_id: str,
+    source_path: str,
+    operation_id: str,
+    client_name: str | None = None,
+    client_version: str | None = None,
+    host_conversation_id: str | None = None,
+    confirm_client_change: bool = False,
+    workspace_root: str | None = None,
+) -> RemediationSessionResponse:
+    """Continue an existing review after the user explicitly chose to resume.
+
+    Requires the user's choice, not an inferred match. Resuming from a
+    different client (for example OpenCode to Cursor) additionally requires
+    `confirm_client_change` and is recorded in the review's event log.
+    """
+    session = _reviews_store().get(review_session_id)
+    session = _reviews_store().resume(
+        review_session_id,
+        source_path=source_path,
+        client_binding=ClientBinding(
+            client_name=client_name,
+            client_version=client_version,
+            host_conversation_id=host_conversation_id,
+        ),
+        confirm_client_change=confirm_client_change,
+        expected_version=session.session_version,
+        operation_id=operation_id,
+        workspace_root=workspace_root,
+    )
+    return _session_response(session)
+
+
+def _start_review(
     source_path: str,
     extraction_json: str,
     rubric_name: str = "prd",
@@ -766,8 +929,18 @@ def begin_prd_remediation(
     framing: str | None = None,
     edge_case_coverage: EdgeCaseCoverageLedger | None = None,
     checkpoint_size: int = 5,
+    workspace_root: str | None = None,
+    client_name: str | None = None,
+    client_version: str | None = None,
+    host_conversation_id: str | None = None,
+    start_new: bool = False,
 ) -> RemediationSessionResponse:
-    """Start a local, token-efficient clarification session."""
+    matches = _reviews_store().find(source_path, workspace_root=workspace_root)
+    if matches and not start_new:
+        raise ValueError(
+            "matching reviews exist; ask the user to resume one, start a new "
+            "review, or cancel. Set start_new=true only after that explicit choice."
+        )
     turn = begin_remediation(
         source_path,
         extraction_json,
@@ -777,50 +950,216 @@ def begin_prd_remediation(
         edge_case_coverage=edge_case_coverage,
         checkpoint_policy=CheckpointPolicy(max_pending_answers=checkpoint_size),
     )
-    session_id = _remediation_sessions.create(turn.state)
-    return RemediationSessionResponse(session_id=session_id, turn=turn)
+    session = _reviews_store().create(
+        turn.state,
+        workspace_root=workspace_root,
+        client_binding=ClientBinding(
+            client_name=client_name,
+            client_version=client_version,
+            host_conversation_id=host_conversation_id,
+        ),
+    )
+    return _session_response(session)
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def start_prd_review(
+    source_path: str,
+    extraction_json: str,
+    rubric_name: str = "prd",
+    product_context: list[ProductContextTerm] | None = None,
+    framing: str | None = None,
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None,
+    checkpoint_size: int = 5,
+    workspace_root: str | None = None,
+    client_name: str | None = None,
+    client_version: str | None = None,
+    host_conversation_id: str | None = None,
+    start_new: bool = False,
+) -> RemediationSessionResponse:
+    """Start a review after discovery and an explicit user choice.
+
+    If an exact review already exists, `start_new` must be true. This ensures a
+    new conversation cannot silently create or attach to a parallel review.
+    """
+    return _start_review(
+        source_path,
+        extraction_json,
+        rubric_name,
+        product_context,
+        framing,
+        edge_case_coverage,
+        checkpoint_size,
+        workspace_root,
+        client_name,
+        client_version,
+        host_conversation_id,
+        start_new,
+    )
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def begin_prd_remediation(
+    source_path: str,
+    extraction_json: str,
+    rubric_name: str = "prd",
+    product_context: list[ProductContextTerm] | None = None,
+    framing: str | None = None,
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None,
+    checkpoint_size: int = 5,
+    workspace_root: str | None = None,
+    client_name: str | None = None,
+    client_version: str | None = None,
+    host_conversation_id: str | None = None,
+    start_new: bool = False,
+) -> RemediationSessionResponse:
+    """Compatibility name for `start_prd_review`; use the explicit tool name."""
+    return _start_review(
+        source_path,
+        extraction_json,
+        rubric_name,
+        product_context,
+        framing,
+        edge_case_coverage,
+        checkpoint_size,
+        workspace_root,
+        client_name,
+        client_version,
+        host_conversation_id,
+        start_new,
+    )
 
 
 @mcp.tool(structured_output=True)
 @_anticipated
 def record_prd_answer(
-    session_id: str,
+    review_session_id: str,
+    session_version: int,
+    operation_id: str,
     answer: str,
     force_checkpoint: bool = False,
 ) -> RemediationSessionResponse:
-    """Record one answer without invoking a model or rescoring the PRD."""
-    state = _remediation_sessions.get(session_id)
-    turn = record_answer(state, answer, force_checkpoint=force_checkpoint)
-    _remediation_sessions.put(session_id, turn.state)
-    return RemediationSessionResponse(session_id=session_id, turn=turn)
+    """Record one answer without invoking a model or rescoring the PRD.
+
+    `session_version` must match the value from the previous response, and
+    `operation_id` must be unique per answer so a retried call cannot record
+    the same answer twice.
+    """
+    cached = _reviews_store().operation_result(review_session_id, operation_id)
+    if cached is not None:
+        return _session_response(_reviews_store().get(review_session_id))
+    session = _reviews_store().get(review_session_id)
+    _require_state(session, "record_prd_answer")
+    turn = record_answer(session.state, answer, force_checkpoint=force_checkpoint)
+    updated = _reviews_store().update(
+        review_session_id,
+        expected_version=session_version,
+        operation_id=operation_id,
+        state=turn.state,
+        workflow_state=workflow_for_turn(turn),
+        event_type="answer_recorded",
+        result_json=turn.model_dump_json(),
+        event_payload={"checkpoint_due": turn.checkpoint_due},
+    )
+    return _session_response(updated)
 
 
 @mcp.tool(structured_output=True)
 @_anticipated
-def prepare_prd_checkpoint(session_id: str) -> DeltaExtractionPlan:
-    """Prepare one bounded answer-only extraction prompt for a checkpoint."""
-    return prepare_checkpoint(_remediation_sessions.get(session_id))
+def prepare_prd_checkpoint(
+    review_session_id: str,
+    session_version: int,
+    operation_id: str,
+) -> PreparedCheckpointResponse:
+    """Prepare a bounded delta and advance the review to `submit_delta`."""
+    cached = _reviews_store().operation_result(review_session_id, operation_id)
+    if cached is not None:
+        session = _reviews_store().get(review_session_id)
+        return PreparedCheckpointResponse(
+            review_session_id=session.review_session_id,
+            session_version=session.session_version,
+            workflow_state=session.workflow_state,
+            next_action=session.next_action,
+            plan=DeltaExtractionPlan.model_validate_json(cached),
+        )
+    session = _reviews_store().get(review_session_id)
+    _require_state(session, "prepare_prd_checkpoint")
+    plan = prepare_checkpoint(session.state)
+    session = _reviews_store().update(
+        review_session_id,
+        expected_version=session_version,
+        operation_id=operation_id,
+        state=session.state,
+        workflow_state=WorkflowState.AWAITING_DELTA_EXTRACTION,
+        event_type="checkpoint_prepared",
+        result_json=plan.model_dump_json(),
+    )
+    return PreparedCheckpointResponse(
+        review_session_id=session.review_session_id,
+        session_version=session.session_version,
+        workflow_state=session.workflow_state,
+        next_action=session.next_action,
+        plan=plan,
+    )
 
 
 @mcp.tool(structured_output=True)
 @_anticipated
 def apply_prd_checkpoint(
-    session_id: str,
+    review_session_id: str,
+    session_version: int,
+    operation_id: str,
     extraction_json: str,
 ) -> RemediationCheckpointResponse:
     """Verify a criterion-local delta, merge it, and deterministically rescore."""
-    state = _remediation_sessions.get(session_id)
-    result = apply_checkpoint(state, extraction_json)
-    _remediation_sessions.put(session_id, result.state)
-    return RemediationCheckpointResponse(session_id=session_id, result=result)
+    cached = _reviews_store().operation_result(review_session_id, operation_id)
+    if cached is not None:
+        session = _reviews_store().get(review_session_id)
+        return RemediationCheckpointResponse(
+            review_session_id=session.review_session_id,
+            session_version=session.session_version,
+            workflow_state=session.workflow_state,
+            next_action=session.next_action,
+            result=RemediationCheckpointResult.model_validate_json(cached),
+        )
+    session = _reviews_store().get(review_session_id)
+    _require_state(session, "apply_prd_checkpoint")
+    result = apply_checkpoint(session.state, extraction_json)
+    turn = current_turn(result.state)
+    updated = _reviews_store().update(
+        review_session_id,
+        expected_version=session_version,
+        operation_id=operation_id,
+        state=result.state,
+        workflow_state=workflow_for_turn(turn),
+        event_type="checkpoint_applied",
+        result_json=result.model_dump_json(),
+        event_payload={
+            "credited_answer_ids": result.credited_answer_ids,
+            "uncredited_answer_ids": result.uncredited_answer_ids,
+            "previous_band": result.previous_band,
+            "current_band": result.current_band,
+        },
+    )
+    return RemediationCheckpointResponse(
+        review_session_id=updated.review_session_id,
+        session_version=updated.session_version,
+        workflow_state=updated.workflow_state,
+        next_action=updated.next_action,
+        result=result,
+    )
 
 
 @mcp.tool(structured_output=True)
 @_anticipated
-def delete_prd_remediation(session_id: str) -> DeletedRemediationSession:
-    """Delete one local remediation session immediately."""
-    _remediation_sessions.delete(session_id)
-    return DeletedRemediationSession(session_id=session_id, deleted=True)
+def delete_prd_remediation(review_session_id: str) -> DeletedRemediationSession:
+    """Delete one local review session and its history immediately."""
+    _reviews_store().delete(review_session_id)
+    return DeletedRemediationSession(
+        review_session_id=review_session_id, deleted=True
+    )
 
 
 @mcp.tool(structured_output=True)

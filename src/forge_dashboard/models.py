@@ -9,6 +9,7 @@ from forge.score.edge_coverage import EdgeCaseCoverageLedger
 from forge.remediation import RemediationCheckpointResult, RemediationTurn
 from forge.revise import RevisionEdit, RevisionResult
 from forge.service import AssessmentResponse
+from forge.sessions import NextAction, ReviewSessionSummary, WorkflowState
 
 # "cursor" is not an LLM provider: it authenticates to Cursor's Cloud Agents
 # API with a Cursor-issued key and is handled separately from the LiteLLM
@@ -53,6 +54,7 @@ class AssessRequest(BaseModel):
     # resubmitted on every remediation turn so question phrasing cannot drift.
     framing: str | None = None
     edge_case_coverage: EdgeCaseCoverageLedger | None = None
+    start_new: bool = False
 
 
 class DashboardAssessmentResponse(AssessmentResponse):
@@ -60,26 +62,50 @@ class DashboardAssessmentResponse(AssessmentResponse):
 
     document_id: str
     extraction_errors: list[str] = Field(default_factory=list)
-    remediation_session_id: str | None = None
+    review_session_id: str | None = None
+    session_version: int | None = None
+    workflow_state: WorkflowState | None = None
+    next_action: NextAction | None = None
 
 
 class RecordAnswerRequest(BaseModel):
+    session_version: int = Field(ge=1)
+    operation_id: str = Field(min_length=1)
     answer: str = Field(min_length=1)
     force_checkpoint: bool = False
 
 
 class DashboardRemediationTurn(BaseModel):
-    session_id: str
+    review_session_id: str
+    session_version: int
+    workflow_state: WorkflowState
+    next_action: NextAction
     turn: RemediationTurn
 
 
 class CheckpointRequest(BaseModel):
     llm: LLMConfig
+    session_version: int = Field(ge=1)
+    operation_id: str = Field(min_length=1)
 
 
 class DashboardCheckpointResponse(BaseModel):
-    session_id: str
+    review_session_id: str
+    session_version: int
+    workflow_state: WorkflowState
+    next_action: NextAction
     result: RemediationCheckpointResult
+
+
+class DashboardReviewDiscovery(BaseModel):
+    document_id: str
+    matches: list[ReviewSessionSummary]
+    choices: list[Literal["resume_review", "start_new_review", "cancel"]]
+
+
+class ResumeReviewRequest(BaseModel):
+    operation_id: str = Field(min_length=1)
+    confirm_client_change: bool = False
 
 
 class RevisionPreviewRequest(BaseModel):

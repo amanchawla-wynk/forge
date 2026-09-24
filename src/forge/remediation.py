@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 import uuid
 from pathlib import Path
-from threading import Lock
 
 from pydantic import BaseModel, Field
 
@@ -298,6 +296,16 @@ def _turn(
     )
 
 
+def current_turn(state: RemediationState) -> RemediationTurn:
+    """Re-derive the current turn from durable state, with no model work.
+
+    Used when a session is loaded from storage: workflow state and the next
+    question are recomputed from the persisted state rather than stored
+    separately, so they can never drift from the verified assessment.
+    """
+    return _turn(state)
+
+
 def record_answer(
     state: RemediationState,
     answer: str,
@@ -409,38 +417,3 @@ def apply_checkpoint(
         previous_band=state.assessment.band,
         current_band=assessment.band,
     )
-
-
-class RemediationSessionStore:
-    def __init__(self, *, ttl_seconds: int = 86_400) -> None:
-        self._ttl_seconds = ttl_seconds
-        self._sessions: dict[str, tuple[float, RemediationState]] = {}
-        self._lock = Lock()
-
-    def create(self, state: RemediationState) -> str:
-        session_id = uuid.uuid4().hex
-        with self._lock:
-            self._sessions[session_id] = (time.monotonic(), state)
-        return session_id
-
-    def get(self, session_id: str) -> RemediationState:
-        with self._lock:
-            item = self._sessions.get(session_id)
-            if item is None:
-                raise KeyError(f"unknown remediation session {session_id!r}")
-            created, state = item
-            if time.monotonic() - created > self._ttl_seconds:
-                del self._sessions[session_id]
-                raise KeyError(f"expired remediation session {session_id!r}")
-            return state
-
-    def put(self, session_id: str, state: RemediationState) -> None:
-        with self._lock:
-            if session_id not in self._sessions:
-                raise KeyError(f"unknown remediation session {session_id!r}")
-            self._sessions[session_id] = (time.monotonic(), state)
-
-    def delete(self, session_id: str) -> None:
-        with self._lock:
-            if self._sessions.pop(session_id, None) is None:
-                raise KeyError(f"unknown remediation session {session_id!r}")

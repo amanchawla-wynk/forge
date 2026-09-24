@@ -723,3 +723,34 @@ supersedes the old one.
   proposal, never scored evidence before approval and materialization. Revision
   generation runs once per approved batch, not after every question, and its
   model usage is reported separately.
+
+## D-042: Forge Owns Review Identity And New Chats Resume Explicitly
+
+- Status: implemented
+- Decision: Persist review workflows in local SQLite under a cryptographically
+  random Forge `review_session_id`. Bind each session to the exact source hash,
+  rubric id/version, workspace fingerprint, and local user. Record client name,
+  version, MCP transport session, and a host conversation id when available, but
+  never use those vendor-specific values as the primary identity. Every mutation
+  also requires an optimistic `session_version` and idempotent `operation_id`.
+  New OpenCode, Cursor, Claude Code, or dashboard conversations discover reviews
+  by exact source/workspace binding and must explicitly choose **Resume review**,
+  **Start a new review**, or **Cancel**. Even one matching review is not resumed
+  automatically. Cross-client resume requires confirmation and records a client
+  binding change event. Missing or ambiguous identity is an error, never a cue
+  to select the most recent session.
+- Reason: MCP identifies a client application and may identify a transport
+  session, but `tools/call` does not standardize the host's chat/conversation id.
+  One MCP process can serve several chats, while one product review may
+  intentionally move between clients. Binding workflow state directly to either
+  side would cause accidental answer mixing or prevent legitimate resume.
+- Consequence: Add a SQLite session/event repository, explicit workflow-state
+  enum and transition guards, `find_prd_reviews`, `resume_prd_review`,
+  `start_prd_review`, and `get_prd_review_status`. Every response exposes one
+  machine-readable `next_action`; agents no longer infer the legal next tool from
+  prose. The dashboard retains its review id in browser `sessionStorage`, but a
+  new tab uses the same explicit discovery flow. For remote transport, session
+  ownership must additionally bind to the authenticated subject and tenant; a
+  session id alone is not authorization. If LangGraph is adopted later, its
+  `thread_id` equals the Forge review id. GraphRAG remains outside workflow and
+  scoring state.

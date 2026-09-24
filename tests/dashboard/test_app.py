@@ -88,18 +88,113 @@ def test_recording_answer_does_not_call_model_until_checkpoint(monkeypatch) -> N
             },
         },
     )
-    session_id = assessment.json()["remediation_session_id"]
+    session_id = assessment.json()["review_session_id"]
+    session_version = assessment.json()["session_version"]
     calls_after_assessment = calls
 
     recorded = client.post(
         f"/api/remediation/{session_id}/answers",
-        json={"answer": "GenZ viewers need short-form stories."},
+        json={
+            "session_version": session_version,
+            "operation_id": "answer-1",
+            "answer": "GenZ viewers need short-form stories.",
+        },
     )
 
     assert recorded.status_code == 200
     assert recorded.json()["turn"]["pending_answer_count"] == 1
     assert recorded.json()["turn"]["score_is_current"] is False
     assert calls == calls_after_assessment
+
+
+def test_exact_document_review_requires_explicit_resume_or_start_new(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    llm = {
+        "provider": "anthropic",
+        "model": "claude-test",
+        "api_key": "sk-test",
+    }
+    content = b"An incomplete product note with stable content."
+    first_document = client.post(
+        "/api/documents",
+        files={"file": ("prd.md", content, "text/markdown")},
+    ).json()
+    first = client.post(
+        "/api/assessments",
+        json={"document_id": first_document["document_id"], "llm": llm},
+    )
+    assert first.status_code == 200
+    review_id = first.json()["review_session_id"]
+
+    # A new tab may upload the same bytes under a new document id. Discovery
+    # matches by source hash and workspace rather than filename or recency.
+    second_document = client.post(
+        "/api/documents",
+        files={"file": ("renamed.md", content, "text/markdown")},
+    ).json()
+    discovery = client.get(
+        f"/api/documents/{second_document['document_id']}/reviews"
+    )
+    assert discovery.status_code == 200
+    assert [item["review_session_id"] for item in discovery.json()["matches"]] == [
+        review_id
+    ]
+    assert discovery.json()["choices"] == [
+        "resume_review",
+        "start_new_review",
+        "cancel",
+    ]
+
+    implicit = client.post(
+        "/api/assessments",
+        json={"document_id": second_document["document_id"], "llm": llm},
+    )
+    assert implicit.status_code == 409
+
+    resumed = client.post(
+        f"/api/documents/{second_document['document_id']}/reviews/{review_id}/resume",
+        json={"operation_id": "resume-dashboard-1"},
+    )
+    assert resumed.status_code == 200
+    assert resumed.json()["review_session_id"] == review_id
+    assert resumed.json()["next_action"]["type"] == "ask_question"
+
+
+def test_dashboard_answer_retry_is_idempotent_and_stale_versions_fail(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    upload = client.post(
+        "/api/documents",
+        files={"file": ("prd.md", b"An incomplete note.", "text/markdown")},
+    ).json()
+    assessment = client.post(
+        "/api/assessments",
+        json={
+            "document_id": upload["document_id"],
+            "llm": {
+                "provider": "anthropic",
+                "model": "claude-test",
+                "api_key": "sk-test",
+            },
+        },
+    ).json()
+    review_id = assessment["review_session_id"]
+    payload = {
+        "session_version": assessment["session_version"],
+        "operation_id": "answer-retry-1",
+        "answer": "GenZ viewers need short-form stories.",
+    }
+    first = client.post(f"/api/remediation/{review_id}/answers", json=payload)
+    retry = client.post(f"/api/remediation/{review_id}/answers", json=payload)
+    assert first.status_code == retry.status_code == 200
+    assert retry.json()["session_version"] == first.json()["session_version"]
+    assert retry.json()["turn"]["pending_answer_count"] == 1
+
+    stale = client.post(
+        f"/api/remediation/{review_id}/answers",
+        json={**payload, "operation_id": "answer-stale-2"},
+    )
+    assert stale.status_code == 400
+    assert "stale session_version" in stale.json()["detail"]
 
 
 def test_revision_preview_materializes_copy_and_reassesses(monkeypatch) -> None:
