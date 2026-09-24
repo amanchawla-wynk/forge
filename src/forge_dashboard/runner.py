@@ -17,6 +17,16 @@ from forge.extract.parse import parse_extraction
 from forge.extract.prompt import build_extraction_prompt
 from forge.ingest.batching import batch_document, plan_fingerprint
 from forge.ingest.models import ProductContextTerm, SupplementalAnswer
+from forge.rubric.models import Rubric
+from forge.score.contextualize import (
+    apply_edge_case_choice,
+    build_candidates,
+    build_edge_case_prompt,
+    build_framing_prompt,
+    parse_edge_case_choice,
+    parse_framing_choice,
+)
+from forge.score.planner import document_display_name
 from forge.service import AssessmentResponse, assess_extractions, prepare_assessment_input
 
 from forge_dashboard.llm import LLMCallError, call_model
@@ -36,6 +46,8 @@ async def run_assessment(
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
+    framing: str | None = None,
+    display_name: str | None = None,
 ) -> AssessmentResponse:
     answers = supplemental_answers or []
     context = product_context or []
@@ -50,14 +62,90 @@ async def run_assessment(
     else:
         batch, models = await _run_multi_batch(batches, rubric, llm, run_count)
 
-    return assess_extractions(
+    # Framing affects question wording only. Detect it once from already-
+    # verified facts; a failed or malformed call safely leaves the rubric's
+    # default phrasing in place. The response echoes the resolved framing so
+    # the browser can resubmit it on later remediation turns without drift.
+    resolved_framing = framing
+    if resolved_framing is None and rubric.framings:
+        preliminary = assess_extractions(
+            source_path,
+            batch,
+            rubric_name=rubric_name,
+            client_models=models,
+            supplemental_answers=answers,
+            product_context=context,
+            display_name=display_name,
+        )
+        resolved_framing = await _detect_framing(preliminary, rubric, llm)
+
+    response = assess_extractions(
         source_path,
         batch,
         rubric_name=rubric_name,
         client_models=models,
         supplemental_answers=answers,
         product_context=context,
+        framing=resolved_framing,
+        display_name=display_name,
     )
+    await _apply_edge_case_discovery(response, llm, display_name=display_name)
+    return response
+
+
+async def _detect_framing(
+    response: AssessmentResponse, rubric: Rubric, llm: LLMConfig
+) -> str | None:
+    candidates = build_candidates(response.assessment, "", limit=8)
+    prompt = build_framing_prompt(rubric, candidates)
+    try:
+        completion = await call_model(llm, prompt, max_tokens=50, temperature=0)
+    except LLMCallError:
+        return None
+    return parse_framing_choice(completion.text, rubric)
+
+
+async def _apply_edge_case_discovery(
+    response: AssessmentResponse,
+    llm: LLMConfig,
+    *,
+    display_name: str | None = None,
+) -> None:
+    question = response.next_question
+    if (
+        question is None
+        or question.criterion_id != "edge_cases_and_states"
+        or question.target_field
+        not in {
+            "error_states",
+            "empty_or_edge_states",
+            "transitional_or_degraded_states",
+        }
+    ):
+        return
+    candidates = build_candidates(
+        response.assessment,
+        "edge_cases_and_states",
+        limit=15,
+        per_field_limit=3,
+    )
+    if not candidates:
+        return
+    prompt = build_edge_case_prompt(question.target_field, candidates)
+    try:
+        completion = await call_model(llm, prompt, max_tokens=50, temperature=0)
+    except LLMCallError:
+        return
+    choice = parse_edge_case_choice(completion.text, len(candidates))
+    text, _, _ = apply_edge_case_choice(
+        display_name or document_display_name(response.source_path),
+        candidates,
+        choice,
+    )
+    if text is None:
+        return
+    question.question = text
+    response.report.next_step = text
 
 
 async def _run_single_batch(document, rubric, llm: LLMConfig, run_count: int):

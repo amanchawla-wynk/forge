@@ -478,3 +478,116 @@ supersedes the old one.
   caller's configured default when omitted); the exact `model.id` values in
   Cursor's catalog are user-supplied free text rather than a fixed list,
   since they are internal to Cursor's account/team configuration.
+
+## D-035: Guardrailed, Closed-Set Contextualization Of Remediation Questions
+
+- Status: accepted
+- Decision: Remediation questions gain two additive layers on top of D-031's
+  plain rubric-owned text, neither of which lets the model author free
+  user-facing prose. Level 0, always on, no model call: every
+  `Question.question` is deterministically prefixed with the document's
+  filename-derived display name (`Question.base_question` keeps the original
+  static string for audit and backward compatibility). Level 1, exposed
+  through a new `contextualize_next_question` tool: the connected model
+  performs exactly one closed-set choice among up to five already-verified
+  `SatisfiedFieldEvidence` facts pulled from the same scored assessment
+  (same-criterion fields first, then other satisfied criteria); the model's
+  only legal output is `{"choice": <int>}`, where the integer is one of the
+  enumerated indices or `0`. `parse_choice` mechanically rejects anything
+  else — malformed JSON, extra keys, non-integers, booleans, out-of-range
+  values, or any prose — and falls back to the Level 0 question with no error
+  surfaced to the caller. When a choice is accepted, Python, never the model,
+  renders the final sentence by concatenating the rubric's `base_question`,
+  the display name, the chosen field's rubric-owned description, and its
+  already source-verified quote.
+- Reason: The user asked for questions that read as specific to the document
+  under review, citing typed-decision "System 1" models such as Laya
+  (https://laya.convaiinnovations.com/) as a reference for guardrails strong
+  enough to make model generation predictable. Forge cannot bundle a separate
+  non-autoregressive classifier without breaking D-006 (client-LLM-only, no
+  bundled models or provider keys), but the same core guarantee — the output
+  space is closed, so hallucination has nowhere to hide — is achievable by
+  restricting the *borrowed* client model to a bounded classification task
+  over facts Forge already verified, instead of a free-text generation task.
+  This keeps D-005's "LLM extracts, Python judges" boundary intact: the model
+  never sees criterion weights, never writes a sentence that reaches the
+  user, and every word available for reuse was already checked against the
+  document by `document.locate_quote` before this module ever saw it.
+- Consequence: `CriterionResult` gains `satisfied_fields` (verified value,
+  quote, and field description per already-satisfied field); this is
+  read-only audit data and never re-enters `score()`. `Question` gains
+  `base_question`; existing exact-string assertions on `Question.question`
+  were updated to expect the Level 0 prefix. `contextualize_next_question` is
+  stateless like every other tool: callers resupply the same
+  `extraction_json` already submitted to `score_prd_extraction`, since Forge
+  retains no session between calls. The tool is advisory phrasing only,
+  documented as never able to change `missing_fields`, `answer_requirements`,
+  gates, weights, or the band.
+
+## D-036: Select Question Phrasing By Document Framing
+
+- Status: accepted
+- Decision: The bundled rubric declares four closed-set document framings:
+  `problem_fix`, `opportunity_bet`, `compliance_mandate`, and
+  `migration_replatform`. A required field may provide a rubric-authored
+  `framing_questions` variant while retaining its D-031
+  `remediation_question` as the safe default. The connected model may select
+  only one declared framing index through `detect_prd_framing`; malformed,
+  extra-keyed, non-integer, or out-of-range output resolves to the rubric's
+  `default_framing`. Framing changes wording only. It never changes required
+  fields, evidence rules, verdicts, weights, gates, band thresholds, question
+  ordering, or `band_if_answered`.
+- Reason: A single "problem" phrasing is not coherent across product bets.
+  The Micro Dramas PRD describes an emerging-format and audience opportunity,
+  not an existing user failure, so asking "what goes wrong for users today?"
+  is a category error even though the underlying rubric field — why this is
+  worth doing — is still missing. A reviewer with document context should ask
+  what opportunity is being pursued and the cost of waiting. Closed-set
+  framing preserves predictability: the model classifies; rubric authors
+  still write every sentence shown to the user.
+- Consequence: `FieldSpec` gains `framing_questions`; `Rubric` gains declared
+  `framings` and `default_framing`; `Question` and `AssessmentResponse` expose
+  the resolved framing for audit and stateless resubmission. The optional
+  dashboard performs one framing-classification call after its first complete
+  extraction and reuses that framing on subsequent remediation turns. MCP
+  clients call `detect_prd_framing` with the first native assessment JSON or
+  fallback extraction JSON, then resubmit its `framing` to
+  `score_prd_extraction`, `assess_prd`, and
+  `contextualize_next_question`. The rubric advances to
+  `0.4.1-expert-baseline`. Evidence-anchored discovery of specific missing
+  edge cases remains separate follow-up work because it changes question
+  granularity rather than just phrasing.
+
+## D-037: Discover Edge Cases Through Verified Anchors And A Fixed Taxonomy
+
+- Status: accepted
+- Decision: Add `discover_edge_case_question` for assessments whose
+  `edge_cases_and_states` criterion still lacks `error_states`,
+  `empty_or_edge_states`, or `transitional_or_degraded_states`. The connected
+  model may select exactly one fact index from up to 15 source-verified
+  candidates and one index from a fixed ten-entry edge-case taxonomy
+  (interruption/recovery, connectivity loss, time or entitlement expiry,
+  eligibility change, duplicate/retry, concurrent state change, partial
+  completion, empty/exhausted state, app lifecycle, stale/conflicting state).
+  Its only legal output is `{"fact": <int>, "edge_case": <int>}`. Python
+  renders the question from the exact verified quote and rubric-owned taxonomy
+  text. Invalid, mixed-zero, extra-keyed, or out-of-range output falls back to
+  the normal field question. The discovery never changes a score; only a
+  later user answer, submitted as `edge_cases_and_states` supplemental
+  evidence, can receive credit.
+- Reason: A field-level prompt such as "what happens while offline?" detects a
+  category gap but does not review the document deeply enough to expose the
+  concrete decision an author must make. For Micro Dramas, Forge can anchor to
+  the verified requirement "Progress should also sync with the backend server
+  at an interval of every 10/X seconds" and ask what happens when connectivity
+  is lost and restored. This is materially more useful while preserving the
+  closed-output-space safety boundary established by D-035 and D-036.
+- Consequence: List-valued extracted fields now receive per-item evidence in
+  `verify_run`; only list items independently found in normalized source text
+  may become question anchors. Candidate selection limits repeated values from
+  one field so broad metric lists cannot crowd out functional requirements.
+  Discovery remains advisory because a closed-set selection can identify a
+  plausible omission but cannot prove that no other document passage resolves
+  it. The caller shows the question, records the user's answer against
+  `edge_cases_and_states`, and lets normal evidence verification and scoring
+  determine whether the field is satisfied.

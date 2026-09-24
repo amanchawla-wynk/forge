@@ -1,5 +1,5 @@
 id: prd
-version: "0.4.0-expert-baseline"
+version: "0.4.1-expert-baseline"
 doc_type: prd
 description: >
   Source-backed cross-industry PRD completeness and actionability baseline.
@@ -37,6 +37,33 @@ sources:
     contribution: "Purpose-limited collection, retention, deletion, and lifecycle controls."
 
 extraction_runs: 3
+
+# Framing changes only how a question is *worded*, never which fields are
+# required, their weights, gates, or bands. `problem_fix` reproduces the
+# original phrasing and is the fallback whenever framing is unknown or a
+# model's selection fails validation. See docs/DECISIONS.md D-036.
+default_framing: problem_fix
+framings:
+  - id: problem_fix
+    label: "Fixing a known problem"
+    description: >
+      Something is broken, painful, costly, or failing for existing users
+      today, and this work is meant to remove that pain.
+  - id: opportunity_bet
+    label: "New opportunity or growth bet"
+    description: >
+      Nothing is broken. This pursues a new market, audience, format, or
+      revenue stream, often to capture an emerging trend before competitors.
+  - id: compliance_mandate
+    label: "Compliance or policy mandate"
+    description: >
+      Driven primarily by a legal, regulatory, security, privacy, contractual,
+      or platform-policy obligation rather than a user-chosen improvement.
+  - id: migration_replatform
+    label: "Migration or replatform"
+    description: >
+      Replaces, consolidates, upgrades, or migrates an existing system while
+      largely preserving current user-facing behaviour.
 
 bands:
   - id: not_a_prd
@@ -76,15 +103,44 @@ criteria:
       - name: problem
         description: "The user or business problem, stated as a problem not a solution."
         remediation_question: "What goes wrong for users today that this feature should fix?"
+        framing_questions:
+          opportunity_bet: >-
+            What opportunity is this going after, and what does the business
+            lose by not taking it now?
+          compliance_mandate: >-
+            Which obligation requires this, and what is the exposure if it is
+            not met?
+          migration_replatform: >-
+            What is wrong with the current system that makes replacing it
+            worth the disruption?
       - name: affected_users
         description: "Who specifically experiences it."
         remediation_question: "Who runs into this problem?"
+        framing_questions:
+          opportunity_bet: "Which specific audience is this aimed at winning?"
+          compliance_mandate: >-
+            Whose data, access, or experience does this obligation actually
+            cover?
+          migration_replatform: "Who is using the current system today?"
       - name: evidence
         description: "Data, research, or incident that demonstrates the problem is real."
         remediation_question: "What have you seen that shows this is a real problem?"
+        framing_questions:
+          opportunity_bet: >-
+            What market data, experiment, or comparable result suggests this
+            opportunity is real and worth the bet?
+          compliance_mandate: >-
+            Which specific rule, audit finding, or policy document imposes
+            this?
+          migration_replatform: >-
+            What evidence shows the current system is actually hitting its
+            limits?
       - name: cost_of_inaction
         description: "What happens if this is not built."
         required: false
+        framing_questions:
+          opportunity_bet: "What happens if a competitor gets there first?"
+          compliance_mandate: "What is the penalty or exposure for non-compliance?"
     remediation_prompt: >
       What is the evidence that this problem is real, and who specifically
       experiences it?
@@ -101,9 +157,27 @@ criteria:
       - name: primary_metric
         description: "The single headline metric."
         remediation_question: "Which single metric will tell us whether this worked?"
+        framing_questions:
+          opportunity_bet: >-
+            Which single metric will tell us this bet paid off?
+          compliance_mandate: >-
+            Which single metric will show the obligation is actually being
+            met?
+          migration_replatform: >-
+            Which single metric will show the migration succeeded without
+            regressing users?
       - name: baseline
         description: "Current value of that metric."
         remediation_question: "What is that metric's current numeric value?"
+        framing_questions:
+          # A net-new surface legitimately starts at zero. Asking for a
+          # "current value" invites "N/A", which `reject_values` then
+          # discards, stranding the author in a loop they cannot exit.
+          opportunity_bet: >-
+            What is that metric at today? If this is a brand-new surface,
+            say 0 and give the closest comparable number you have.
+          migration_replatform: >-
+            What is that metric on the current system today?
         value_pattern: '\d'
         value_requirement: "Must contain a numeric current value."
       - name: target

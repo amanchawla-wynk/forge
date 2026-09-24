@@ -19,7 +19,7 @@ from forge.ingest.models import (
 from forge.rubric.loader import load_rubric
 from forge.rubric.models import Rubric
 from forge.score.engine import Assessment, score
-from forge.score.planner import Question, plan_questions
+from forge.score.planner import Question, document_display_name, plan_questions
 from forge.score.report import NarrativeReport, build_narrative_report
 
 
@@ -35,6 +35,7 @@ class AssessmentResponse(BaseModel):
     recommended_additional_runs: int
     client_models: list[str]
     product_context: list[ProductContextTerm]
+    framing: str | None
     warnings: list[str]
 
 
@@ -46,6 +47,8 @@ def assess_extractions(
     client_models: list[str] | None = None,
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
+    framing: str | None = None,
+    display_name: str | None = None,
 ) -> AssessmentResponse:
     answers = supplemental_answers or []
     terms = product_context or []
@@ -55,7 +58,12 @@ def assess_extractions(
     document_batches = batch_document(document)
     runs = verify_extraction_batch(document_batches, batch, rubric)
     assessment = score(rubric, runs)
-    questions = plan_questions(rubric, assessment)
+    questions = plan_questions(
+        rubric,
+        assessment,
+        display_name=display_name or document_display_name(document.source_path),
+        framing=framing,
+    )
     disputed = [
         result.criterion_id
         for result in assessment.criteria
@@ -106,6 +114,7 @@ def assess_extractions(
         recommended_additional_runs=recommended_additional_runs,
         client_models=client_models or [],
         product_context=terms,
+        framing=questions[0].framing if questions else rubric.default_framing,
         warnings=warnings,
     )
 
@@ -117,6 +126,7 @@ def assess_extraction_json(
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
+    framing: str | None = None,
 ) -> AssessmentResponse:
     payload = json.loads(extraction_json)
     if "runs" not in payload:
@@ -127,6 +137,7 @@ def assess_extraction_json(
         rubric_name=rubric_name,
         supplemental_answers=supplemental_answers,
         product_context=product_context,
+        framing=framing,
     )
 
 

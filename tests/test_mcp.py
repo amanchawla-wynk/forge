@@ -32,6 +32,9 @@ def test_mcp_exposes_sampling_and_fallback_tools():
         "score_prd_extraction",
         "write_prd_revision",
         "describe_prd_rubric",
+        "contextualize_next_question",
+        "detect_prd_framing",
+        "discover_edge_case_question",
     }
     observe = next(tool for tool in tools if tool.name == "observe_prd_visual")
     assert set(observe.input_schema["properties"]) == {
@@ -54,6 +57,7 @@ def test_mcp_exposes_sampling_and_fallback_tools():
         "rubric_name",
         "supplemental_answers",
         "product_context",
+        "framing",
     }
     prepare = next(tool for tool in tools if tool.name == "prepare_prd_assessment")
     score = next(tool for tool in tools if tool.name == "score_prd_extraction")
@@ -61,6 +65,7 @@ def test_mcp_exposes_sampling_and_fallback_tools():
     assert "supplemental_answers" in score.input_schema["properties"]
     assert "product_context" in prepare.input_schema["properties"]
     assert "product_context" in score.input_schema["properties"]
+    assert "framing" in score.input_schema["properties"]
     revision = next(tool for tool in tools if tool.name == "write_prd_revision")
     assert set(revision.input_schema["properties"]) == {
         "source_path",
@@ -314,6 +319,398 @@ async def test_observe_prd_visual_sends_the_image_to_the_client_model(tmp_path):
     assert "never changes the readiness score" in (
         inventory.structured_content["scoring_note"]
     )
+
+
+_CONTEXTUALIZE_DOC = (
+    "Users cannot export invoices. Finance administrators are affected. "
+    "42 support tickets were filed about this last quarter."
+)
+
+_CONTEXTUALIZE_EXTRACTION = json.dumps(
+    {
+        "runs": [
+            {
+                "criteria": [
+                    {
+                        "criterion_id": "problem_statement",
+                        "fields": [
+                            {
+                                "name": "problem",
+                                "value": "Users cannot export invoices",
+                                "evidence": {
+                                    "quote": "Users cannot export invoices."
+                                },
+                            },
+                            {
+                                "name": "affected_users",
+                                "value": "Finance administrators",
+                                "evidence": {
+                                    "quote": "Finance administrators are affected."
+                                },
+                            },
+                            {
+                                "name": "evidence",
+                                "value": "42 support tickets",
+                                "evidence": {"quote": "42 support tickets"},
+                            },
+                            {
+                                "name": "cost_of_inaction",
+                                "value": None,
+                                "evidence": None,
+                            },
+                        ],
+                    },
+                    {
+                        "criterion_id": "success_metrics",
+                        "fields": [
+                            {"name": name, "value": None, "evidence": None}
+                            for name in [
+                                "primary_metric",
+                                "baseline",
+                                "target",
+                                "measurement_window",
+                                "guardrail_metric",
+                            ]
+                        ],
+                    },
+                ]
+            }
+        ]
+    }
+)
+
+
+@pytest.mark.anyio
+async def test_detect_prd_framing_selects_rubric_authored_question(tmp_path):
+    path = tmp_path / "Micro Dramas.md"
+    path.write_text(_CONTEXTUALIZE_DOC)
+
+    async def sample(context, params):
+        prompt = params.messages[0].content.text
+        assert "closed-set classification task" in prompt
+        assert "2. [opportunity_bet]" in prompt
+        return CreateMessageResult(
+            role="assistant",
+            content=TextContent(text='{"framing": 2}'),
+            model="test-client-model",
+            stopReason="endTurn",
+        )
+
+    async with Client(mcp, raise_exceptions=True, sampling_callback=sample) as client:
+        result = await client.call_tool(
+            "detect_prd_framing",
+            {
+                "source_path": str(path),
+                "extraction_json": '{"runs": [{"criteria": []}]}',
+            },
+        )
+
+    content = result.structured_content
+    assert content["framing"] == "opportunity_bet"
+    assert content["was_detected"] is True
+    assert content["next_question"]["framing"] == "opportunity_bet"
+    assert "opportunity is this going after" in content["next_question"]["question"]
+    assert "never changes" in content["scoring_note"]
+
+
+@pytest.mark.anyio
+async def test_detect_prd_framing_invalid_output_uses_rubric_default(tmp_path):
+    path = tmp_path / "prd.md"
+    path.write_text(_CONTEXTUALIZE_DOC)
+
+    async def sample(context, params):
+        return CreateMessageResult(
+            role="assistant",
+            content=TextContent(text='{"framing": 2, "reason": "growth"}'),
+            model="test-client-model",
+            stopReason="endTurn",
+        )
+
+    async with Client(mcp, raise_exceptions=True, sampling_callback=sample) as client:
+        result = await client.call_tool(
+            "detect_prd_framing",
+            {
+                "source_path": str(path),
+                "extraction_json": _CONTEXTUALIZE_EXTRACTION,
+            },
+        )
+
+    content = result.structured_content
+    assert content["was_detected"] is False
+    assert content["framing"] == "problem_fix"
+    assert content["next_question"]["framing"] == "problem_fix"
+
+
+@pytest.mark.anyio
+async def test_detect_prd_framing_accepts_native_assessment_json(tmp_path):
+    path = tmp_path / "Micro Dramas.md"
+    path.write_text(_CONTEXTUALIZE_DOC)
+
+    async def sample(context, params):
+        return CreateMessageResult(
+            role="assistant",
+            content=TextContent(text='{"framing": 2}'),
+            model="test-client-model",
+            stopReason="endTurn",
+        )
+
+    async with Client(mcp, raise_exceptions=True, sampling_callback=sample) as client:
+        scored = await client.call_tool(
+            "score_prd_extraction",
+            {
+                "source_path": str(path),
+                "extraction_json": _CONTEXTUALIZE_EXTRACTION,
+            },
+        )
+        detected = await client.call_tool(
+            "detect_prd_framing",
+            {
+                "source_path": str(path),
+                "assessment_json": json.dumps(scored.structured_content["assessment"]),
+            },
+        )
+
+    assert detected.structured_content["framing"] == "opportunity_bet"
+    assert detected.structured_content["next_question"]["framing"] == (
+        "opportunity_bet"
+    )
+
+
+@pytest.mark.anyio
+async def test_discover_edge_case_question_anchors_fixed_text_to_verified_quote(
+    tmp_path,
+):
+    path = tmp_path / "Micro Dramas.md"
+    path.write_text(_CONTEXTUALIZE_DOC)
+
+    async def sample(context, params):
+        prompt = params.messages[0].content.text
+        assert "MISSING RUBRIC FIELD: error_states" in prompt
+        assert "Finance administrators are affected." in prompt
+        assert "2. [connectivity_loss]" in prompt
+        return CreateMessageResult(
+            role="assistant",
+            content=TextContent(text='{"fact": 2, "edge_case": 2}'),
+            model="test-client-model",
+            stopReason="endTurn",
+        )
+
+    async with Client(mcp, raise_exceptions=True, sampling_callback=sample) as client:
+        result = await client.call_tool(
+            "discover_edge_case_question",
+            {
+                "source_path": str(path),
+                "extraction_json": _CONTEXTUALIZE_EXTRACTION,
+                "framing": "opportunity_bet",
+            },
+        )
+
+    content = result.structured_content
+    assert content["criterion_id"] == "edge_cases_and_states"
+    assert content["target_field"] == "error_states"
+    assert content["edge_case_id"] == "connectivity_loss"
+    assert content["anchor"]["quote"] == "Finance administrators are affected."
+    assert "connectivity is lost" in content["question"]
+    assert content["discovery_source"] == "closed_set_choice"
+    assert "never changes the score" in content["scoring_note"]
+
+
+@pytest.mark.anyio
+async def test_discover_edge_case_question_invalid_choice_falls_back(tmp_path):
+    path = tmp_path / "prd.md"
+    path.write_text(_CONTEXTUALIZE_DOC)
+
+    async def sample(context, params):
+        return CreateMessageResult(
+            role="assistant",
+            content=TextContent(
+                text='{"fact": 1, "edge_case": 2, "explanation": "offline"}'
+            ),
+            model="test-client-model",
+            stopReason="endTurn",
+        )
+
+    async with Client(mcp, raise_exceptions=True, sampling_callback=sample) as client:
+        result = await client.call_tool(
+            "discover_edge_case_question",
+            {
+                "source_path": str(path),
+                "extraction_json": _CONTEXTUALIZE_EXTRACTION,
+            },
+        )
+
+    content = result.structured_content
+    assert content["discovery_source"] == "none"
+    assert content["anchor"] is None
+    assert content["edge_case_id"] is None
+    assert content["question"].endswith(
+        "What should users see or be able to do when this fails?"
+    )
+
+
+@pytest.mark.anyio
+async def test_contextualize_next_question_uses_a_verified_cross_criterion_fact(
+    tmp_path,
+):
+    path = tmp_path / "prd.md"
+    path.write_text(_CONTEXTUALIZE_DOC)
+
+    async def sample(context, params):
+        assert "UNTRUSTED DATA" in params.messages[0].content.text
+        assert '{"choice": <integer>}' in params.messages[0].content.text
+        return CreateMessageResult(
+            role="assistant",
+            content=TextContent(text='{"choice": 1}'),
+            model="test-client-model",
+            stopReason="endTurn",
+        )
+
+    async with Client(mcp, raise_exceptions=True, sampling_callback=sample) as client:
+        plain = await client.call_tool(
+            "score_prd_extraction",
+            {"source_path": str(path), "extraction_json": _CONTEXTUALIZE_EXTRACTION},
+        )
+        contextual = await client.call_tool(
+            "contextualize_next_question",
+            {
+                "source_path": str(path),
+                "extraction_json": _CONTEXTUALIZE_EXTRACTION,
+            },
+        )
+
+    next_question = plain.structured_content["next_question"]
+    base_question = next_question["base_question"]
+    level0_question = next_question["question"]
+    result = contextual.structured_content
+
+    # Whatever score_prd_extraction says is next is exactly what gets
+    # contextualized; this tool never re-selects or re-orders the gap.
+    assert result["criterion_id"] == next_question["criterion_id"]
+    assert result["target_field"] == next_question["target_field"]
+    assert result["base_question"] == base_question
+    assert result["contextualization_source"] == "llm_choice"
+    assert result["chosen_index"] == 1
+    assert result["client_model"] == "test-client-model"
+    # The candidate came from problem_statement, which was already verified,
+    # not from success_metrics, which has no evidence of its own.
+    assert result["candidates"][0]["criterion_id"] == "problem_statement"
+    # Every substantive fact in the final text is one Forge already verified.
+    assert result["candidates"][0]["quote"] in result["question"]
+    # The plain (Level-0) question text must still appear as the fallback base.
+    assert level0_question != result["question"]
+    assert "never changes" in result["scoring_note"]
+
+
+@pytest.mark.anyio
+async def test_contextualize_next_question_falls_back_on_an_invalid_choice(tmp_path):
+    path = tmp_path / "prd.md"
+    path.write_text(_CONTEXTUALIZE_DOC)
+
+    async def sample(context, params):
+        # Not the required {"choice": <int>} shape at all.
+        return CreateMessageResult(
+            role="assistant",
+            content=TextContent(text="I think option 2 sounds best."),
+            model="test-client-model",
+            stopReason="endTurn",
+        )
+
+    async with Client(mcp, raise_exceptions=True, sampling_callback=sample) as client:
+        plain = await client.call_tool(
+            "score_prd_extraction",
+            {"source_path": str(path), "extraction_json": _CONTEXTUALIZE_EXTRACTION},
+        )
+        contextual = await client.call_tool(
+            "contextualize_next_question",
+            {
+                "source_path": str(path),
+                "extraction_json": _CONTEXTUALIZE_EXTRACTION,
+            },
+        )
+
+    result = contextual.structured_content
+    assert result["contextualization_source"] == "none"
+    assert result["chosen_index"] == 0
+    assert result["question"] == plain.structured_content["next_question"]["question"]
+
+
+@pytest.mark.anyio
+async def test_contextualize_next_question_rejects_a_mismatched_criterion(tmp_path):
+    path = tmp_path / "prd.md"
+    path.write_text(_CONTEXTUALIZE_DOC)
+
+    async def sample(context, params):
+        raise AssertionError("no sampling should occur before validation fails")
+
+    async with Client(mcp, sampling_callback=sample) as client:
+        result = await client.call_tool(
+            "contextualize_next_question",
+            {
+                "source_path": str(path),
+                "extraction_json": _CONTEXTUALIZE_EXTRACTION,
+                "criterion_id": "rollout",
+            },
+        )
+
+    assert result.is_error
+    assert "is not the current next_question criterion" in result.content[0].text
+
+
+def _fully_satisfying_document_and_extraction() -> tuple[str, dict]:
+    """Every required field, for every criterion, with a real locatable quote.
+
+    Mirrors `tests/test_engine.py::_full`, which is already proven to score
+    `ready_to_build`; reused here so the document text and extraction agree.
+    """
+    rubric = load_rubric("prd")
+    quotes: list[str] = []
+    criteria_payload = []
+    for criterion in rubric.criteria:
+        fields = []
+        for field in criterion.required_fields:
+            if field.value_pattern:
+                # Both the quote AND the value must satisfy the pattern:
+                # `FieldExtraction.is_satisfied` checks the quote directly,
+                # and separately checks each value entry.
+                text = (
+                    "1 log dashboard WCAG mobile retention audit "
+                    f"{criterion.id} {field.name}"
+                )
+                quote, value = text, text
+            else:
+                quote = f"quoted {criterion.id} {field.name}"
+                value = f"value for {criterion.id} {field.name}"
+            quotes.append(quote)
+            fields.append(
+                {"name": field.name, "value": value, "evidence": {"quote": quote}}
+            )
+        criteria_payload.append({"criterion_id": criterion.id, "fields": fields})
+    return "\n".join(quotes), {"runs": [{"criteria": criteria_payload}]}
+
+
+@pytest.mark.anyio
+async def test_contextualize_next_question_reports_when_nothing_remains(tmp_path):
+    path = tmp_path / "prd.md"
+    document_text, extraction = _fully_satisfying_document_and_extraction()
+    path.write_text(document_text)
+
+    async def sample(context, params):
+        raise AssertionError("no sampling should occur once every gap is resolved")
+
+    async with Client(mcp, sampling_callback=sample) as client:
+        plain = await client.call_tool(
+            "score_prd_extraction",
+            {"source_path": str(path), "extraction_json": json.dumps(extraction)},
+        )
+        assert plain.structured_content["next_question"] is None
+
+        result = await client.call_tool(
+            "contextualize_next_question",
+            {"source_path": str(path), "extraction_json": json.dumps(extraction)},
+        )
+
+    assert result.is_error
+    assert "nothing left to contextualize" in result.content[0].text
 
 
 @pytest.mark.anyio

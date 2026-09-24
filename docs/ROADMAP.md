@@ -87,6 +87,18 @@
   Next.js/shadcn UI in `web/`) covering upload, full assessment, and the
   one-question-at-a-time remediation loop, as a documented bring-your-own-key
   exception (D-033) that never touches `forge-mcp` or the domain core.
+- Added guardrailed, closed-set contextualization of remediation questions
+  (D-035): an always-on, model-free document-name prefix, plus an opt-in
+  `contextualize_next_question` tool where the client model may only choose
+  an index into an already-verified fact list — never author free text — with
+  a deterministic fallback to the plain question on any invalid choice.
+- Added closed-set document framing (`problem_fix`, `opportunity_bet`,
+  `compliance_mandate`, `migration_replatform`) and rubric-authored phrasing
+  variants, so opportunity PRDs are no longer asked what is "broken today";
+  dashboard sessions detect framing once and preserve it across turns.
+- Added evidence-anchored edge-case discovery: the model selects one verified
+  source quote and one fixed failure-mode taxonomy entry, while Python renders
+  the question and invalid choices fall back to the normal rubric wording.
 
 ## Current Build
 

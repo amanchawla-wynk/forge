@@ -83,6 +83,7 @@ def verify_run(
                 criterion_copy.not_applicable = False
                 criterion_copy.not_applicable_reason = None
         for field in criterion_copy.fields:
+            field.item_evidence = []
             if field.evidence is None:
                 continue
             block = document.locate_quote(field.evidence.quote)
@@ -105,6 +106,28 @@ def verify_run(
                 source_start_char=block.start_char,
                 source_end_char=block.end_char,
             )
+            if isinstance(field.value, list):
+                for item in field.value:
+                    item_block = document.locate_quote(item)
+                    if item_block is None:
+                        continue
+                    if (
+                        item_block.provenance == "supplemental_answer"
+                        and item_block.criterion_id != criterion.criterion_id
+                    ):
+                        continue
+                    field.item_evidence.append(
+                        Evidence(
+                            quote=item,
+                            section=item_block.section,
+                            page=item_block.page,
+                            provenance=item_block.provenance,
+                            source_block_id=item_block.id,
+                            source_parent_block_id=item_block.parent_id,
+                            source_start_char=item_block.start_char,
+                            source_end_char=item_block.end_char,
+                        )
+                    )
         verified.append(criterion_copy)
     return verified
 

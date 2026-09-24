@@ -11,6 +11,7 @@ It never writes the key to disk, a database, or a log.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -114,6 +115,8 @@ async def create_assessment(request: AssessRequest) -> DashboardAssessmentRespon
             rubric_name=request.rubric_name,
             supplemental_answers=request.supplemental_answers,
             product_context=request.product_context,
+            framing=request.framing,
+            display_name=Path(stored.filename).stem,
         )
     except ExtractionFailed as error:
         raise HTTPException(status_code=502, detail=str(error)) from error

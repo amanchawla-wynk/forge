@@ -27,6 +27,15 @@ still requires independent labels from the organization's own reviewers.
 - `write_prd_revision`: writes approved supplemental answers into a new DOCX,
   Markdown, or text revision while preserving the original.
 - `describe_prd_rubric`: describes the active criteria and consumers.
+- `contextualize_next_question`: optionally rephrases `next_question` using a
+  fact already verified elsewhere in the same document, through one
+  guardrailed model choice. Advisory phrasing only; never changes the score.
+- `detect_prd_framing`: classifies the PRD as a problem fix, opportunity bet,
+  compliance mandate, or migration/replatform through a closed-set model
+  choice, then returns the appropriate rubric-authored question wording.
+- `discover_edge_case_question`: finds one concrete missing failure or
+  transition question by selecting a verified source quote and a fixed
+  edge-case type; Python renders the question and scoring remains unchanged.
 
 ## Install Locally
 
@@ -218,6 +227,34 @@ Every required field has a short, rubric-owned question written in plain,
 conversational language. Forge asks for the decision or fact directly rather
 than asking what "the PRD should say." Numeric and other objective requirements
 remain visible in `answer_requirements`.
+
+That plain text is always available as `next_question.base_question`. The
+`next_question.question` a client actually shows is additionally, and always,
+prefixed with the document's filename-derived name at no cost — no model call
+involved. For a further, opt-in layer of contextualization, call
+`contextualize_next_question` with the same `extraction_json` already
+submitted to `score_prd_extraction`. The connected model may only choose an
+index into an already-verified fact list Forge supplies (or `0` for none); it
+can never author new sentences that reach the user, and any invalid or
+out-of-range choice silently falls back to the plain, document-named question.
+See `docs/DECISIONS.md` D-035 for the exact guardrail.
+
+Before remediation, call `detect_prd_framing` with either the first response's
+`assessment` JSON (native sampling) or the scored `extraction_json` (fallback),
+then pass its returned `framing` into later
+`score_prd_extraction`, `assess_prd`, or `contextualize_next_question` calls.
+This changes phrasing only. For example, an opportunity PRD is asked what
+opportunity it pursues and what is lost by waiting, rather than being
+incorrectly asked what is broken today. The dashboard performs this
+classification automatically on the first assessment and retains it across
+remediation turns. See `docs/DECISIONS.md` D-036.
+
+When `edge_cases_and_states` is missing behavioural coverage, call
+`discover_edge_case_question` with the same assessment or extraction JSON.
+For example, Forge can anchor to a verified progress-sync requirement and ask
+what happens when connectivity is lost and restored. Submit the user's answer
+as `edge_cases_and_states` supplemental evidence on the next assessment. The
+discovery itself is advisory and cannot earn credit. See D-037.
 
 `confidence` measures extraction-run agreement, not correctness. When the first
 three runs disagree, the response identifies `disputed_criteria` and recommends

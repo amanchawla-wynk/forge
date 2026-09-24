@@ -46,6 +46,9 @@ class AssessRequest(BaseModel):
     rubric_name: str = "prd"
     supplemental_answers: list[SupplementalAnswer] = Field(default_factory=list)
     product_context: list[ProductContextTerm] = Field(default_factory=list)
+    # Detected once on the first assessment, then echoed by the response and
+    # resubmitted on every remediation turn so question phrasing cannot drift.
+    framing: str | None = None
 
 
 class DashboardAssessmentResponse(AssessmentResponse):

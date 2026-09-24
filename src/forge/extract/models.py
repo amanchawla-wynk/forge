@@ -33,6 +33,12 @@ class FieldExtraction(BaseModel):
     # are legitimately extracted as lists, so both shapes are accepted.
     value: str | list[str] | None = None
     evidence: Evidence | None = None
+    # Populated by `verify_run` for list-valued fields. The extractor still
+    # submits one field-level citation, but each list item must independently
+    # occur in the source before contextual question tools may reuse it.
+    # Excluded from serialized extraction payloads because it is verifier
+    # output, never model input.
+    item_evidence: list[Evidence] = Field(default_factory=list, exclude=True)
 
     def is_satisfied(self, spec: FieldSpec) -> bool:
         """A field counts only if it has a real value AND a citation.
@@ -106,4 +112,65 @@ def missing_fields(
         found = extraction.field(spec.name)
         if found is None or not found.is_satisfied(spec):
             out.append(spec.name)
+    return out
+
+
+class SatisfiedFieldEvidence(BaseModel):
+    """A field that already passed verification, kept for question phrasing.
+
+    This is the only bridge between real document content and remediation
+    question text. It is never used for scoring: `derive_verdict` and
+    `missing_fields` above already ran before this is built, and nothing here
+    feeds back into them. See `forge/score/contextualize.py`.
+    """
+
+    field_name: str
+    description: str
+    value: str
+    quote: str
+    section: str | None = None
+
+
+def satisfied_field_evidence(
+    criterion: Criterion, extraction: CriterionExtraction
+) -> list[SatisfiedFieldEvidence]:
+    """Already-satisfied fields (required or optional) with their evidence.
+
+    Every entry here already passed `FieldExtraction.is_satisfied`, which
+    requires a value AND a quote that `document.locate_quote` will verify
+    downstream. Nothing new is asserted; this only re-packages facts Forge has
+    already checked, so it is safe to hand to a model as reference material.
+    """
+    out: list[SatisfiedFieldEvidence] = []
+    for spec in criterion.fields:
+        field = extraction.field(spec.name)
+        if field is None or field.evidence is None or not field.is_satisfied(spec):
+            continue
+        value = field.value
+        if isinstance(value, list) and field.item_evidence:
+            for evidence in field.item_evidence:
+                out.append(
+                    SatisfiedFieldEvidence(
+                        field_name=spec.name,
+                        description=spec.description.strip(),
+                        value=evidence.quote,
+                        quote=evidence.quote,
+                        section=evidence.section,
+                    )
+                )
+            continue
+        rendered = (
+            "; ".join(str(v) for v in value)
+            if isinstance(value, list)
+            else str(value)
+        )
+        out.append(
+            SatisfiedFieldEvidence(
+                field_name=spec.name,
+                description=spec.description.strip(),
+                value=rendered,
+                quote=field.evidence.quote,
+                section=field.evidence.section,
+            )
+        )
     return out

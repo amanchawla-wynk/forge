@@ -1,6 +1,6 @@
 # Expert Baseline
 
-Forge `0.4.0-expert-baseline` is a self-contained cross-industry PRD reviewer.
+Forge `0.4.1-expert-baseline` is a self-contained cross-industry PRD reviewer.
 It converts published product, service, privacy, accessibility, and launch
 guidance into atomic fields that an LLM extracts and Python verifies. It does
 not copy external scoring weights and does not treat an online template as a

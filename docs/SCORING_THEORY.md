@@ -150,6 +150,45 @@ active and familiar wording, and preserve qualifiers that affect validation,
 such as `single`, `current`, `numeric`, and `explicit`. The answer requirement
 also includes any objective value constraint.
 
+That plain, rubric-owned string is `Question.base_question` and never
+changes. Two additive layers may adjust the `Question.question` text a client
+actually sees, and neither lets a model author free user-facing prose (D-035):
+
+- Level 0, always on: `question` is deterministically prefixed with the
+  document's filename-derived display name, computed in Python with no model
+  call, so it can never disagree with the file actually being scored.
+- Level 1, opt-in via `contextualize_next_question`: the connected model
+  performs exactly one closed-set choice — `{"choice": <int>}` — among up to
+  five facts already verified elsewhere in the same assessment (same
+  criterion first). Any response that is not exactly that shape, or whose
+  integer is out of range, is mechanically discarded and the tool falls back
+  to the Level 0 text. When a choice is accepted, Python assembles the final
+  sentence from the static question, the display name, the chosen field's
+  configured description, and its already-verified quote — the model never
+  writes any of those words itself. This is a closed-output-space guardrail in the same
+  spirit as typed-decision "System 1" classifiers: bound what the model may
+  emit tightly enough that hallucination has no room to appear, rather than
+  trusting free generation and only checking it afterward.
+
+Before rendering questions, Forge may also classify the document's framing
+through a closed output space: `problem_fix`, `opportunity_bet`,
+`compliance_mandate`, or `migration_replatform`. The model returns only the
+option index; rubric authors supply every phrasing variant. An invalid or
+unclear choice uses the rubric's default wording. Framing solves category
+errors such as asking a new-market PRD "what goes wrong today?": an
+`opportunity_bet` instead asks what opportunity is being pursued and what the
+business loses by waiting. Framing is presentation metadata only and cannot
+change any scoring input or output.
+
+When a behavioural edge-case field is missing, Forge may replace its generic
+prompt with one evidence-anchored discovery question. The model selects two
+integers: one source-verified fact and one fixed edge-case taxonomy entry.
+Python combines the exact quote with rubric-owned question text. The model
+cannot invent a scenario or rewrite the source. A malformed or inapplicable
+selection falls back to the normal field question. This discovery remains
+advisory: it identifies a plausible omission, while only the user's subsequent
+criterion-bound answer can become evidence and affect the score.
+
 Each answer is bound to the criterion that prompted it. A quote from a
 supplemental answer receives no credit for a different criterion. Verified
 evidence records whether it came from the source document or a supplemental
@@ -166,11 +205,13 @@ states, production monitoring and support signals, and data-lifecycle controls.
 These fields use Forge's quote verification and objective value constraints;
 the external project's keyword weights and 0-100 score are not adopted.
 
-The `0.4.0-expert-baseline` rubric extends that work with source-backed primary
+The `0.4.0-expert-baseline` rubric introduced source-backed primary
 flows and preconditions, failure acceptance criteria, accessibility validation,
 dependency readiness, data minimisation and access, rollout thresholds and
 ownership, assumption validation, production recovery, and document governance.
 It also requires all applicable criteria for the top band.
+The `0.4.1-expert-baseline` revision adds framing-aware, rubric-authored
+question variants without changing criteria, weights, gates, or bands.
 
 Implementation repositories may provide non-evidence terminology context. This
 can clarify that two names refer to the same product or explain internal domain

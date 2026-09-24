@@ -307,7 +307,10 @@ def test_service_only_credits_quotes_found_in_source(tmp_path):
     assert "problem_statement" in response.report.consumer_gaps["engineering"]
     assert response.report.next_step == response.next_question.question
     assert response.next_question.target_field == "affected_users"
-    assert response.next_question.question == "Who runs into this problem?"
+    assert response.next_question.base_question == "Who runs into this problem?"
+    assert response.next_question.question == (
+        'For "prd": Who runs into this problem?'
+    )
     assert response.next_question.answer_requirements == [
         "Who specifically experiences it."
     ]
@@ -413,8 +416,11 @@ def test_service_asks_one_missing_field_at_a_time(tmp_path):
     assert response.next_question is not None
     assert response.next_question.criterion_id == "problem_statement"
     assert response.next_question.target_field == "evidence"
-    assert response.next_question.question == (
+    assert response.next_question.base_question == (
         "What have you seen that shows this is a real problem?"
+    )
+    assert response.next_question.question == (
+        'For "prd": What have you seen that shows this is a real problem?'
     )
     assert response.next_question.answer_requirements == [
         "Data, research, or incident that demonstrates the problem is real."

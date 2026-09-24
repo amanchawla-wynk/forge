@@ -80,6 +80,14 @@ export interface ProductContextTerm {
   source_ref?: string | null;
 }
 
+export interface SatisfiedFieldEvidence {
+  field_name: string;
+  description: string;
+  value: string;
+  quote: string;
+  section?: string | null;
+}
+
 export interface CriterionResult {
   criterion_id: string;
   name: string;
@@ -91,6 +99,9 @@ export interface CriterionResult {
   rationale: string;
   agreement: number;
   gate_triggered: boolean;
+  // Already-verified fields, kept only so remediation questions can refer to
+  // real document content (see docs/DECISIONS.md D-035). Never re-enters scoring.
+  satisfied_fields: SatisfiedFieldEvidence[];
 }
 
 export interface ConsumerReadiness {
@@ -118,6 +129,11 @@ export interface Question {
   criterion_name: string;
   target_field: string | null;
   question: string;
+  // The plain, rubric-owned question text before any contextualization
+  // (D-031/D-035). `question` may prefix this with a document name and, if
+  // `contextualize_next_question` was called, one verified fact.
+  base_question: string;
+  framing: string | null;
   missing_fields: string[];
   answer_requirements: string[];
   is_gate: boolean;
@@ -158,6 +174,7 @@ export interface AssessmentResponse {
   recommended_additional_runs: number;
   client_models: string[];
   product_context: ProductContextTerm[];
+  framing: string | null;
   warnings: string[];
   document_id: string;
   extraction_errors: string[];

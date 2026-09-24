@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from collections import Counter
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from forge.extract.models import (
     CriterionExtraction,
+    SatisfiedFieldEvidence,
     derive_verdict,
     missing_fields,
+    satisfied_field_evidence,
 )
 from forge.rubric.models import (
     VERDICT_CREDIT,
@@ -45,6 +47,10 @@ class CriterionResult(BaseModel):
     # Fraction of the k extraction runs that agreed on this verdict (0..1).
     agreement: float = 1.0
     gate_triggered: bool = False
+    # Already-verified fields, kept only so remediation questions can refer to
+    # real document content. Never re-enters scoring. See
+    # `forge/score/contextualize.py`.
+    satisfied_fields: list[SatisfiedFieldEvidence] = Field(default_factory=list)
 
 
 class ConsumerReadiness(BaseModel):
@@ -85,7 +91,12 @@ def _band_for(
 
 def _consolidate(
     rubric: Rubric, runs: list[list[CriterionExtraction]]
-) -> tuple[dict[str, Verdict], dict[str, float], dict[str, list[str]]]:
+) -> tuple[
+    dict[str, Verdict],
+    dict[str, float],
+    dict[str, list[str]],
+    dict[str, list[SatisfiedFieldEvidence]],
+]:
     """Reduce k independent runs to one verdict per criterion, plus agreement.
 
     We take the *modal* verdict, not the mean. Averaging a PRESENT and an ABSENT
@@ -98,12 +109,14 @@ def _consolidate(
     verdicts: dict[str, Verdict] = {}
     agreement: dict[str, float] = {}
     missing: dict[str, list[str]] = {}
+    satisfied: dict[str, list[SatisfiedFieldEvidence]] = {}
 
     severity = {Verdict.PRESENT: 3, Verdict.PARTIAL: 2, Verdict.NOT_APPLICABLE: 1, Verdict.ABSENT: 0}
 
     for criterion in rubric.criteria:
         observed: list[Verdict] = []
         per_run_missing: list[list[str]] = []
+        per_run_satisfied: list[list[SatisfiedFieldEvidence]] = []
         for run in runs:
             extraction = next(
                 (e for e in run if e.criterion_id == criterion.id), None
@@ -111,9 +124,11 @@ def _consolidate(
             if extraction is None:
                 observed.append(Verdict.ABSENT)
                 per_run_missing.append([f.name for f in criterion.required_fields])
+                per_run_satisfied.append([])
                 continue
             observed.append(derive_verdict(criterion, extraction))
             per_run_missing.append(missing_fields(criterion, extraction))
+            per_run_satisfied.append(satisfied_field_evidence(criterion, extraction))
 
         counts = Counter(observed)
         top = max(counts.values())
@@ -125,8 +140,9 @@ def _consolidate(
         # Report the missing-field list from a run that produced the chosen verdict.
         idx = observed.index(chosen)
         missing[criterion.id] = per_run_missing[idx]
+        satisfied[criterion.id] = per_run_satisfied[idx]
 
-    return verdicts, agreement, missing
+    return verdicts, agreement, missing, satisfied
 
 
 def score(rubric: Rubric, runs: list[list[CriterionExtraction]]) -> Assessment:
@@ -134,7 +150,7 @@ def score(rubric: Rubric, runs: list[list[CriterionExtraction]]) -> Assessment:
     if not runs:
         raise ValueError("no extraction runs supplied")
 
-    verdicts, agreement, missing = _consolidate(rubric, runs)
+    verdicts, agreement, missing, satisfied = _consolidate(rubric, runs)
 
     results: list[CriterionResult] = []
     earned = 0.0
@@ -172,6 +188,7 @@ def score(rubric: Rubric, runs: list[list[CriterionExtraction]]) -> Assessment:
                 rationale=criterion.rationale,
                 agreement=agreement[criterion.id],
                 gate_triggered=gate_hit,
+                satisfied_fields=satisfied[criterion.id],
             )
         )
 

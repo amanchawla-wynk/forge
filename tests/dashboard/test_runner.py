@@ -20,7 +20,7 @@ def _llm_config() -> LLMConfig:
 
 
 @pytest.mark.anyio
-async def test_run_assessment_calls_the_configured_model_three_times(
+async def test_run_assessment_calls_extractor_three_times_and_detects_framing(
     tmp_path, monkeypatch
 ):
     path = tmp_path / "prd.md"
@@ -31,17 +31,23 @@ async def test_run_assessment_calls_the_configured_model_three_times(
         calls.append(prompt)
         assert config.provider == "anthropic"
         assert "UNTRUSTED DATA" in prompt
+        if "OPTIONS:" in prompt:
+            return Completion(text='{"framing": 2}', model="claude-test")
         return Completion(text='{"criteria": []}', model="claude-test")
 
     monkeypatch.setattr("forge_dashboard.runner.call_model", fake_call_model)
 
     result = await run_assessment(str(path), _llm_config())
 
-    assert len(calls) == 3
+    assert len(calls) == 4
+    assert sum("strict information extractor" in prompt for prompt in calls) == 3
+    assert sum("OPTIONS:" in prompt for prompt in calls) == 1
     assert result.run_count == 3
     assert result.client_models == ["claude-test", "claude-test", "claude-test"]
     assert result.assessment.band == "not_a_prd"
     assert result.next_question is not None
+    assert result.framing == "opportunity_bet"
+    assert "opportunity is this going after" in result.next_question.question
 
 
 @pytest.mark.anyio
@@ -55,6 +61,8 @@ async def test_run_assessment_includes_accumulated_supplemental_answers(
 
     async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
         seen_prompts.append(prompt)
+        if "OPTIONS:" in prompt:
+            return Completion(text='{"framing": 0}', model="claude-test")
         return Completion(text='{"criteria": []}', model="claude-test")
 
     monkeypatch.setattr("forge_dashboard.runner.call_model", fake_call_model)
@@ -72,9 +80,13 @@ async def test_run_assessment_includes_accumulated_supplemental_answers(
         ],
     )
 
+    extraction_prompts = [
+        prompt for prompt in seen_prompts if "strict information extractor" in prompt
+    ]
+    assert len(extraction_prompts) == 3
     assert all(
         "Finance administrators cannot export invoices." in prompt
-        for prompt in seen_prompts
+        for prompt in extraction_prompts
     )
 
 
@@ -115,6 +127,8 @@ async def test_run_assessment_assembles_multi_batch_fragments_per_run(
 
     async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
         seen_prompts.append(prompt)
+        if "OPTIONS:" in prompt:
+            return Completion(text='{"framing": 1}', model="claude-test")
         assert "one exhaustive document batch" in prompt
         return Completion(
             text=json.dumps({"criteria": _criteria(prompt)}), model="claude-test"
@@ -124,14 +138,103 @@ async def test_run_assessment_assembles_multi_batch_fragments_per_run(
 
     result = await run_assessment(str(path), _llm_config())
 
-    assert len(seen_prompts) % 3 == 0
-    assert len(seen_prompts) > 3  # more than one batch
+    extraction_prompts = [
+        prompt for prompt in seen_prompts if "one exhaustive document batch" in prompt
+    ]
+    assert len(extraction_prompts) % 3 == 0
+    assert len(extraction_prompts) > 3  # more than one batch
+    assert len(seen_prompts) == len(extraction_prompts) + 1
     assert result.run_count == 3
     problem = next(
         item for item in result.assessment.criteria if item.criterion_id == "problem_statement"
     )
     assert problem.verdict.value == "partial"
     assert problem.missing == ["affected_users", "evidence"]
+
+
+@pytest.mark.anyio
+async def test_run_assessment_reuses_supplied_framing_without_redetecting(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "prd.md"
+    path.write_text("A short product note.")
+    calls: list[str] = []
+
+    async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
+        calls.append(prompt)
+        assert "OPTIONS:" not in prompt
+        return Completion(text='{"criteria": []}', model="claude-test")
+
+    monkeypatch.setattr("forge_dashboard.runner.call_model", fake_call_model)
+
+    result = await run_assessment(
+        str(path), _llm_config(), framing="opportunity_bet"
+    )
+
+    assert len(calls) == 3
+    assert result.framing == "opportunity_bet"
+    assert result.next_question is not None
+    assert "opportunity is this going after" in result.next_question.question
+
+
+@pytest.mark.anyio
+async def test_run_assessment_discovers_anchored_edge_case_when_it_is_next(
+    tmp_path, monkeypatch
+):
+    rubric = load_rubric("prd")
+    quotes: list[str] = []
+    criteria: list[dict[str, object]] = []
+    for criterion in rubric.criteria:
+        fields: list[dict[str, object]] = []
+        for field in criterion.required_fields:
+            if (
+                criterion.id == "edge_cases_and_states"
+                and field.name == "transitional_or_degraded_states"
+            ):
+                fields.append({"name": field.name, "value": None, "evidence": None})
+                continue
+            text = (
+                f"1 WCAG dashboard retention {criterion.id} {field.name}"
+                if field.value_pattern
+                else f"verified {criterion.id} {field.name}"
+            )
+            quotes.append(text)
+            fields.append(
+                {"name": field.name, "value": text, "evidence": {"quote": text}}
+            )
+        criteria.append({"criterion_id": criterion.id, "fields": fields})
+
+    path = tmp_path / "stored-id.md"
+    path.write_text("\n".join(quotes))
+    calls: list[str] = []
+
+    async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
+        calls.append(prompt)
+        if "MISSING RUBRIC FIELD" in prompt:
+            return Completion(
+                text='{"fact": 1, "edge_case": 2}', model="claude-test"
+            )
+        return Completion(
+            text=json.dumps({"criteria": criteria}), model="claude-test"
+        )
+
+    monkeypatch.setattr("forge_dashboard.runner.call_model", fake_call_model)
+
+    result = await run_assessment(
+        str(path),
+        _llm_config(),
+        framing="opportunity_bet",
+        display_name="Micro Dramas",
+    )
+
+    assert len(calls) == 4
+    assert result.next_question is not None
+    assert result.next_question.target_field == "transitional_or_degraded_states"
+    assert result.next_question.question.startswith(
+        'For "Micro Dramas", the PRD says:'
+    )
+    assert "connectivity is lost" in result.next_question.question
+    assert result.report.next_step == result.next_question.question
 
 
 @pytest.mark.anyio

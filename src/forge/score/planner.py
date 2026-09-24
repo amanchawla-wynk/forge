@@ -8,10 +8,36 @@ amount of other work can lift the band while a gate is failed.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import BaseModel
 
 from forge.rubric.models import Rubric, Verdict
 from forge.score.engine import BAND_ORDER, Assessment, _band_for
+
+
+def document_display_name(source_path: str) -> str:
+    """A deterministic, LLM-free document label. Always safe to show a user.
+
+    Derived purely from the filename already supplied by the caller, so it
+    can never disagree with the document actually being scored.
+    """
+    stem = Path(source_path).stem.strip()
+    cleaned = stem.replace("_", " ").replace("-", " ").strip()
+    return cleaned or stem or source_path
+
+
+def level0_question(base_question: str, display_name: str | None) -> str:
+    """Deterministic contextualization: no model call, never fails, always on.
+
+    Naming the document alone answers "this question feels generic" for the
+    common case, since the name is derived by Python, never guessed by a
+    model. See `forge/score/contextualize.py` for the optional, guardrailed
+    LLM-assisted layer built on top of this.
+    """
+    if not display_name:
+        return base_question
+    return f'For "{display_name}": {base_question}'
 
 
 class Question(BaseModel):
@@ -19,6 +45,13 @@ class Question(BaseModel):
     criterion_name: str
     target_field: str | None
     question: str
+    # The rubric-owned question text before any contextualization (D-031).
+    # `question` may prefix or extend this with document-derived content;
+    # `base_question` is always the plain, static, config-owned string.
+    base_question: str
+    # Framing whose phrasing produced `base_question`, or None when the
+    # rubric default was used. Audit only; never affects scoring (D-036).
+    framing: str | None = None
     missing_fields: list[str]
     answer_requirements: list[str]
     is_gate: bool
@@ -81,7 +114,12 @@ def _simulate_field_answer(
 
 
 def plan_questions(
-    rubric: Rubric, assessment: Assessment, limit: int | None = None
+    rubric: Rubric,
+    assessment: Assessment,
+    limit: int | None = None,
+    *,
+    display_name: str | None = None,
+    framing: str | None = None,
 ) -> list[Question]:
     """Greedy, band-aware ordering of remediation questions.
 
@@ -104,6 +142,14 @@ def plan_questions(
         )
     )
 
+    # An unknown framing must behave exactly like no framing at all, so a bad
+    # value can never strand the loop on a question nobody authored.
+    resolved_framing = (
+        framing
+        if framing is not None and rubric.framing(framing) is not None
+        else rubric.default_framing
+    )
+
     questions: list[Question] = []
     for result in failing:
         criterion = rubric.criterion(result.criterion_id)
@@ -115,21 +161,25 @@ def plan_questions(
             ),
             None,
         )
+        configured = target.question_for(resolved_framing) if target else None
+        base_question = (
+            configured.strip()
+            if configured
+            else (
+                f"What should the PRD say about "
+                f"this missing detail? {target.description.strip()}"
+                if target
+                else criterion.remediation_prompt.strip()
+            )
+        )
         questions.append(
             Question(
                 criterion_id=result.criterion_id,
                 criterion_name=result.name,
                 target_field=target.name if target else None,
-                question=(
-                    target.remediation_question.strip()
-                    if target and target.remediation_question
-                    else (
-                        f"What should the PRD say about "
-                        f"this missing detail? {target.description.strip()}"
-                        if target
-                        else criterion.remediation_prompt.strip()
-                    )
-                ),
+                question=level0_question(base_question, display_name),
+                base_question=base_question,
+                framing=resolved_framing,
                 missing_fields=result.missing,
                 answer_requirements=(
                     [

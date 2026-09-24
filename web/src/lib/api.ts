@@ -44,6 +44,7 @@ export interface CreateAssessmentPayload {
   rubric_name?: string;
   supplemental_answers?: SupplementalAnswer[];
   product_context?: { term: string; meaning: string; source_ref?: string | null }[];
+  framing?: string | null;
 }
 
 export async function createAssessment(

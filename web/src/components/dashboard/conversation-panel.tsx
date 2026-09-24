@@ -46,6 +46,7 @@ export function ConversationPanel() {
         document_id: document.document_id,
         llm,
         supplemental_answers: nextAnswers,
+        framing: assessment.framing,
       });
       appendHistory({ question, answer: answer.trim() });
       setAssessment(updated);

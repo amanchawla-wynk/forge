@@ -70,6 +70,16 @@ The target public surface is:
   editable PRD copy without overwriting the source.
 - `describe_prd_rubric`: explain the active rubric without exposing a prompt
   that encourages point gaming.
+- `contextualize_next_question`: optionally phrase the current `next_question`
+  using facts already verified elsewhere in the same assessment, through one
+  guardrailed, closed-set model choice (see below and D-035). Advisory only;
+  never changes scoring.
+- `detect_prd_framing`: classify the document as a problem fix, opportunity
+  bet, compliance mandate, or migration/replatform through one closed-set
+  model choice, then return the rubric-authored next-question variant.
+- `discover_edge_case_question`: select one source-verified fact and one fixed
+  edge-case type, then have Python render a concrete follow-up question. The
+  model never authors the question and the selection never affects scoring.
 
 Assessment responses return one highest-impact remediation question. The client
 keeps the conversation state and resubmits accumulated answers on each turn.
@@ -81,6 +91,36 @@ prompt, and one answer requirement. It also retains all `missing_fields` for the
 criterion audit. Rescoring after the answer determines whether the next turn
 stays on that criterion or advances; the planner never presents a batch of
 subquestions in one turn.
+
+That field-specific prompt is `base_question`, always the plain rubric text.
+`question` may additionally carry a deterministic, filename-derived document
+name (always on, no model call) and, only if the caller invokes
+`contextualize_next_question`, one guardrailed model-selected fact already
+verified elsewhere in the assessment. That tool's only valid model output is
+a single integer choosing among an enumerated, pre-verified candidate list, or
+`0`; anything else — malformed output, an out-of-range integer, extra
+prose — mechanically falls back to the plain document-named question. No
+model-authored sentence ever reaches the user; every word in an enriched
+question was already checked against the source document before the tool ran.
+Because Forge is stateless, this tool takes the same `extraction_json` already
+submitted to `score_prd_extraction` and recomputes the assessment rather than
+reading anything cached from a prior call.
+
+Framing selection follows the same boundary. `detect_prd_framing` gives the
+client model a rubric-declared option list and already-verified document facts;
+the model returns only `{"framing": <int>}`. Python maps that index to an id
+and chooses the corresponding `FieldSpec.framing_questions` string. Unknown or
+invalid output uses `Rubric.default_framing`. MCP clients retain and resubmit
+the resolved framing; the optional dashboard detects it once after initial
+extraction and reuses it for subsequent turns so wording does not drift.
+
+Edge-case discovery adds a second closed axis rather than opening generation.
+The first axis contains independently verified source quotes; the second is a
+fixed taxonomy of operational failure modes. `verify_run` separately locates
+each item in list-valued fields before that item can become a candidate. Python
+rejects any response outside the candidate/taxonomy product and uses the normal
+rubric question instead. The returned question stays advisory until the user
+answers it and that answer passes the standard supplemental-evidence flow.
 
 The response places a concise `report` before the detailed `assessment`. Report
 generation is deterministic and consumes only scored verdicts, failed gates,

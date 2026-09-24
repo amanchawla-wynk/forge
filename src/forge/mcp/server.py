@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Annotated
+import json
+
+from typing import Annotated, Literal
 
 from collections.abc import Callable
 from functools import wraps
@@ -32,6 +34,25 @@ from forge.ingest.models import ProductContextTerm, SupplementalAnswer
 from forge.ingest.visuals import render_visual_asset
 from forge.rubric.loader import load_rubric
 from forge.revise import RevisionResult, materialize_prd_revision
+from forge.score.contextualize import (
+    ContextCandidate,
+    apply_edge_case_choice,
+    apply_choice,
+    build_candidates,
+    build_choice_prompt,
+    build_edge_case_prompt,
+    build_framing_prompt,
+    document_display_name,
+    parse_choice,
+    parse_edge_case_choice,
+    parse_framing_choice,
+)
+from forge.score.engine import Assessment
+from forge.score.planner import (
+    Question,
+    document_display_name as planner_display_name,
+    plan_questions,
+)
 from forge.service import (
     AssessmentResponse,
     assess_extraction_json,
@@ -49,9 +70,15 @@ mcp = MCPServer(
         "once per batch, and submit the collected fragments to "
         "score_prd_extraction. Without sampling, call prepare_prd_assessment, "
         "complete every returned batch yourself, and submit the fragments to "
-        "score_prd_extraction. Return next_question to the user and resubmit "
+        "score_prd_extraction. After the first assessment, call "
+        "detect_prd_framing with its assessment JSON (or the fallback "
+        "extraction JSON), then pass the returned framing on later assessment "
+        "calls. Return next_question to the user and resubmit "
         "accumulated supplemental_answers after each reply, which invalidates "
-        "any earlier batch plan. When the user approves the answers, call "
+        "any earlier batch plan. When edge_cases_and_states lacks behavioural "
+        "coverage, call discover_edge_case_question to replace the generic "
+        "prompt with one source-anchored question. When the user approves the "
+        "answers, call "
         "write_prd_revision to create a new editable PRD copy. Forge is advisory."
     ),
 )
@@ -111,6 +138,8 @@ class RubricDescription(BaseModel):
     calibration_status: str
     sources: list[dict[str, str]]
     criteria: list[dict[str, object]]
+    framings: list[dict[str, str]]
+    default_framing: str | None
     warning: str
 
 
@@ -395,6 +424,7 @@ async def assess_prd(
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
+    framing: str | None = None,
 ) -> AssessmentResponse:
     """Assess a local PRD by borrowing the MCP client's model three times."""
     completions = [run_one, run_two, run_three]
@@ -407,6 +437,7 @@ async def assess_prd(
         client_models=models,
         supplemental_answers=supplemental_answers,
         product_context=product_context,
+        framing=framing,
     )
 
 
@@ -592,14 +623,21 @@ def score_prd_extraction(
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
+    framing: str | None = None,
 ) -> AssessmentResponse:
-    """Verify and score extraction JSON produced by the connected agent."""
+    """Verify and score extraction JSON produced by the connected agent.
+
+    Pass the `framing` returned by `detect_prd_framing` to phrase questions
+    for this kind of document. An unknown framing is ignored rather than
+    rejected, so questions always fall back to the rubric default.
+    """
     return assess_extraction_json(
         source_path,
         extraction_json,
         rubric_name=rubric_name,
         supplemental_answers=supplemental_answers,
         product_context=product_context,
+        framing=framing,
     )
 
 
@@ -637,10 +675,532 @@ def describe_prd_rubric(rubric_name: str = "prd") -> RubricDescription:
             }
             for criterion in rubric.criteria
         ],
+        framings=[framing.model_dump() for framing in rubric.framings],
+        default_framing=rubric.default_framing,
         warning=(
             "This is a source-backed cross-industry expert baseline, not an "
             "organization-validated rubric."
         ),
+    )
+
+
+class FramingOption(BaseModel):
+    id: str
+    label: str
+    description: str
+
+
+class DetectedFraming(BaseModel):
+    framing: str | None
+    framing_label: str | None
+    default_framing: str | None
+    options: list[FramingOption]
+    was_detected: bool
+    next_question: Question | None
+    client_model: str
+    scoring_note: str
+
+
+_FRAMING_NOTE = (
+    "Phrasing only. Framing selects which rubric-authored wording of a "
+    "question is used; it never changes which fields are required, their "
+    "weights, gates, bands, or the score. The model could only choose an "
+    "index from the rubric's declared framing list, and any invalid choice "
+    "falls back to the rubric default."
+)
+
+_EDGE_CASE_NOTE = (
+    "Advisory discovery only. The model selected one already-verified source "
+    "quote and one fixed edge-case taxonomy entry; Python rendered the final "
+    "question. The selection does not itself prove the edge case is missing "
+    "and never changes the score. Only the user's criterion-bound answer can "
+    "become supplemental evidence on a later assessment."
+)
+
+
+@dataclass(frozen=True)
+class _FramingPlan:
+    assessment: Assessment
+    rubric: Rubric
+    display_name: str
+    candidates: list[ContextCandidate]
+
+
+def _prepare_framing_plan(
+    source_path: str,
+    extraction_json: str | dict[str, object] | None,
+    assessment_json: str | dict[str, object] | None,
+    rubric_name: str,
+    supplemental_answers: list[SupplementalAnswer] | None,
+    product_context: list[ProductContextTerm] | None,
+) -> _FramingPlan:
+    if bool(extraction_json) == bool(assessment_json):
+        raise ValueError(
+            "supply exactly one of extraction_json or assessment_json"
+        )
+    rubric = load_rubric(rubric_name)
+    if extraction_json:
+        serialized = (
+            json.dumps(extraction_json)
+            if isinstance(extraction_json, dict)
+            else extraction_json
+        )
+        response = assess_extraction_json(
+            source_path,
+            serialized,
+            rubric_name=rubric_name,
+            supplemental_answers=supplemental_answers,
+            product_context=product_context,
+        )
+        assessment = response.assessment
+    else:
+        payload = (
+            assessment_json
+            if isinstance(assessment_json, dict)
+            else json.loads(assessment_json or "{}")
+        )
+        # Accept either the nested `assessment` object or the full response
+        # returned by assess_prd/score_prd_extraction.
+        assessment = Assessment.model_validate(payload.get("assessment", payload))
+        if assessment.rubric_id != rubric.id:
+            raise ValueError(
+                f"assessment rubric {assessment.rubric_id!r} does not match "
+                f"requested rubric {rubric.id!r}"
+            )
+    return _FramingPlan(
+        assessment=assessment,
+        rubric=rubric,
+        display_name=planner_display_name(source_path),
+        candidates=build_candidates(assessment, "", limit=8),
+    )
+
+
+@_anticipated
+def _sample_framing(
+    source_path: str,
+    extraction_json: str | dict[str, object] | None = None,
+    assessment_json: str | dict[str, object] | None = None,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+) -> Sample:
+    plan = _prepare_framing_plan(
+        source_path,
+        extraction_json,
+        assessment_json,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+    )
+    return Sample(
+        [
+            SamplingMessage(
+                role="user",
+                content=TextContent(
+                    type="text",
+                    text=build_framing_prompt(plan.rubric, plan.candidates),
+                ),
+            )
+        ],
+        max_tokens=50,
+        temperature=0,
+    )
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+async def detect_prd_framing(
+    source_path: str,
+    framing_choice: Annotated[CreateMessageResult, Resolve(_sample_framing)],
+    extraction_json: str | dict[str, object] | None = None,
+    assessment_json: str | dict[str, object] | None = None,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+) -> DetectedFraming:
+    """Classify what kind of bet this PRD describes, to phrase questions well.
+
+    A growth bet has no "what goes wrong today", so the problem-fix wording
+    is a category error for it. The connected model makes one closed-set
+    choice among rubric-declared framings (see `docs/DECISIONS.md` D-036); it
+    never writes question text. Pass the returned `framing` to
+    `score_prd_extraction` on subsequent calls.
+    """
+    plan = _prepare_framing_plan(
+        source_path,
+        extraction_json,
+        assessment_json,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+    )
+    detected = parse_framing_choice(_completion_text(framing_choice), plan.rubric)
+    resolved = detected or plan.rubric.default_framing
+    option = plan.rubric.framing(resolved) if resolved else None
+    questions = plan_questions(
+        plan.rubric,
+        plan.assessment,
+        limit=1,
+        display_name=plan.display_name,
+        framing=resolved,
+    )
+    return DetectedFraming(
+        framing=resolved,
+        framing_label=option.label if option else None,
+        default_framing=plan.rubric.default_framing,
+        options=[
+            FramingOption(
+                id=framing.id,
+                label=framing.label,
+                description=" ".join(framing.description.split()),
+            )
+            for framing in plan.rubric.framings
+        ],
+        was_detected=detected is not None,
+        next_question=questions[0] if questions else None,
+        client_model=framing_choice.model or "unreported",
+        scoring_note=_FRAMING_NOTE,
+    )
+
+
+class ContextCandidateSummary(BaseModel):
+    index: int
+    criterion_id: str
+    field_name: str
+    description: str
+    value: str
+    quote: str
+
+
+class DiscoveredEdgeCaseQuestion(BaseModel):
+    criterion_id: str
+    target_field: str
+    question: str
+    anchor: ContextCandidateSummary | None
+    edge_case_id: str | None
+    edge_case_label: str | None
+    answer_requirements: list[str]
+    discovery_source: Literal["closed_set_choice", "none"]
+    client_model: str
+    scoring_note: str
+
+
+@dataclass(frozen=True)
+class _EdgeCasePlan:
+    question: Question
+    display_name: str
+    candidates: list[ContextCandidate]
+    prompt: str
+
+
+def _prepare_edge_case_plan(
+    source_path: str,
+    extraction_json: str | dict[str, object] | None,
+    assessment_json: str | dict[str, object] | None,
+    rubric_name: str,
+    supplemental_answers: list[SupplementalAnswer] | None,
+    product_context: list[ProductContextTerm] | None,
+    framing: str | None,
+) -> _EdgeCasePlan:
+    plan = _prepare_framing_plan(
+        source_path,
+        extraction_json,
+        assessment_json,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+    )
+    result = next(
+        (
+            item
+            for item in plan.assessment.criteria
+            if item.criterion_id == "edge_cases_and_states"
+        ),
+        None,
+    )
+    if result is None:
+        raise ValueError("assessment has no edge_cases_and_states criterion")
+    discoverable = [
+        name
+        for name in (
+            "error_states",
+            "empty_or_edge_states",
+            "transitional_or_degraded_states",
+        )
+        if name in result.missing
+    ]
+    if not discoverable:
+        raise ValueError(
+            "no missing behavioural edge-case field remains; platform and "
+            "accessibility gaps use their normal rubric questions"
+        )
+    target_field = discoverable[0]
+    questions = plan_questions(
+        plan.rubric,
+        plan.assessment,
+        display_name=plan.display_name,
+        framing=framing,
+    )
+    question = next(
+        (
+            item
+            for item in questions
+            if item.criterion_id == "edge_cases_and_states"
+            and item.target_field == target_field
+        ),
+        None,
+    )
+    if question is None:
+        raise ValueError("could not plan the missing edge-case question")
+    candidates = build_candidates(
+        plan.assessment,
+        "edge_cases_and_states",
+        limit=15,
+        per_field_limit=3,
+    )
+    if not candidates:
+        raise ValueError(
+            "no verified document fact is available to anchor an edge-case "
+            "question; use the normal next_question instead"
+        )
+    return _EdgeCasePlan(
+        question=question,
+        display_name=plan.display_name,
+        candidates=candidates,
+        prompt=build_edge_case_prompt(target_field, candidates),
+    )
+
+
+@_anticipated
+def _sample_edge_case_choice(
+    source_path: str,
+    extraction_json: str | dict[str, object] | None = None,
+    assessment_json: str | dict[str, object] | None = None,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+    framing: str | None = None,
+) -> Sample:
+    plan = _prepare_edge_case_plan(
+        source_path,
+        extraction_json,
+        assessment_json,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+        framing,
+    )
+    return Sample(
+        [
+            SamplingMessage(
+                role="user",
+                content=TextContent(type="text", text=plan.prompt),
+            )
+        ],
+        max_tokens=50,
+        temperature=0,
+    )
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+async def discover_edge_case_question(
+    source_path: str,
+    choice: Annotated[CreateMessageResult, Resolve(_sample_edge_case_choice)],
+    extraction_json: str | dict[str, object] | None = None,
+    assessment_json: str | dict[str, object] | None = None,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+    framing: str | None = None,
+) -> DiscoveredEdgeCaseQuestion:
+    """Find one concrete missing edge-case question anchored to source text.
+
+    The model can only select one verified quote and one fixed edge-case type.
+    Python writes the question. The result remains advisory until the user
+    answers it and that answer is rescored as `edge_cases_and_states`
+    supplemental evidence (D-037).
+    """
+    plan = _prepare_edge_case_plan(
+        source_path,
+        extraction_json,
+        assessment_json,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+        framing,
+    )
+    parsed = parse_edge_case_choice(
+        _completion_text(choice), len(plan.candidates)
+    )
+    text, candidate, edge_case = apply_edge_case_choice(
+        plan.display_name, plan.candidates, parsed
+    )
+    return DiscoveredEdgeCaseQuestion(
+        criterion_id="edge_cases_and_states",
+        target_field=plan.question.target_field or "",
+        question=text or plan.question.question,
+        anchor=(
+            ContextCandidateSummary(**candidate.model_dump())
+            if candidate is not None
+            else None
+        ),
+        edge_case_id=edge_case.id if edge_case else None,
+        edge_case_label=edge_case.label if edge_case else None,
+        answer_requirements=plan.question.answer_requirements,
+        discovery_source="closed_set_choice" if text else "none",
+        client_model=choice.model or "unreported",
+        scoring_note=_EDGE_CASE_NOTE,
+    )
+
+
+class ContextualizedQuestion(BaseModel):
+    criterion_id: str
+    target_field: str | None
+    framing: str | None
+    base_question: str
+    question: str
+    candidates: list[ContextCandidateSummary]
+    chosen_index: int
+    contextualization_source: Literal["llm_choice", "none"]
+    client_model: str
+    scoring_note: str
+
+
+_CONTEXTUALIZATION_NOTE = (
+    "Advisory phrasing only. The model could only choose an index from a "
+    "closed list of facts Forge had already verified against the document; "
+    "it never authored any of the words in `question`. An invalid, missing, "
+    "or out-of-range choice silently falls back to the plain, rubric-owned "
+    "question. This never changes missing_fields, answer_requirements, "
+    "gates, weights, or the score."
+)
+
+
+@dataclass(frozen=True)
+class _ContextualizationPlan:
+    response: AssessmentResponse
+    question: Question
+    display_name: str
+    candidates: list[ContextCandidate]
+    prompt: str
+
+
+def _prepare_contextualization(
+    source_path: str,
+    extraction_json: str,
+    rubric_name: str,
+    supplemental_answers: list[SupplementalAnswer] | None,
+    product_context: list[ProductContextTerm] | None,
+    criterion_id: str | None,
+    framing: str | None = None,
+) -> _ContextualizationPlan:
+    response = assess_extraction_json(
+        source_path,
+        extraction_json,
+        rubric_name=rubric_name,
+        supplemental_answers=supplemental_answers,
+        product_context=product_context,
+        framing=framing,
+    )
+    question = response.next_question
+    if question is None:
+        raise ValueError(
+            "no remediation question remains for this extraction; there is "
+            "nothing left to contextualize"
+        )
+    if criterion_id is not None and criterion_id != question.criterion_id:
+        raise ValueError(
+            f"criterion_id {criterion_id!r} is not the current next_question "
+            f"criterion ({question.criterion_id!r}); contextualization always "
+            "targets whatever score_prd_extraction would ask next"
+        )
+    display_name = document_display_name(response.source_path)
+    candidates = build_candidates(response.assessment, question.criterion_id)
+    if not candidates:
+        raise ValueError(
+            "no verified document evidence is available yet to contextualize "
+            "with; next_question.question already includes the document name"
+        )
+    prompt = build_choice_prompt(
+        question.base_question, question.criterion_name, candidates
+    )
+    return _ContextualizationPlan(response, question, display_name, candidates, prompt)
+
+
+@_anticipated
+def _sample_context_choice(
+    source_path: str,
+    extraction_json: str,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+    criterion_id: str | None = None,
+    framing: str | None = None,
+) -> Sample:
+    plan = _prepare_contextualization(
+        source_path,
+        extraction_json,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+        criterion_id,
+        framing,
+    )
+    return Sample(
+        [SamplingMessage(role="user", content=TextContent(type="text", text=plan.prompt))],
+        max_tokens=50,
+        temperature=0,
+    )
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+async def contextualize_next_question(
+    source_path: str,
+    extraction_json: str,
+    choice: Annotated[CreateMessageResult, Resolve(_sample_context_choice)],
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+    criterion_id: str | None = None,
+    framing: str | None = None,
+) -> ContextualizedQuestion:
+    """Optionally phrase the current next_question using verified document facts.
+
+    The connected model performs one closed-set choice among facts Forge has
+    already verified against the document (see `forge/score/contextualize.py`
+    and `docs/DECISIONS.md` D-035); it never writes free text that reaches the
+    user. Pass the same `extraction_json` already submitted to
+    `score_prd_extraction`, since Forge does not retain state between calls.
+    """
+    plan = _prepare_contextualization(
+        source_path,
+        extraction_json,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+        criterion_id,
+        framing,
+    )
+    picked = parse_choice(_completion_text(choice), len(plan.candidates))
+    text, chosen = apply_choice(
+        plan.question.base_question, plan.display_name, plan.candidates, picked
+    )
+    return ContextualizedQuestion(
+        criterion_id=plan.question.criterion_id,
+        target_field=plan.question.target_field,
+        framing=plan.question.framing,
+        base_question=plan.question.base_question,
+        question=text,
+        candidates=[
+            ContextCandidateSummary(**candidate.model_dump())
+            for candidate in plan.candidates
+        ],
+        chosen_index=chosen.index if chosen else 0,
+        contextualization_source="llm_choice" if chosen else "none",
+        client_model=choice.model or "unreported",
+        scoring_note=_CONTEXTUALIZATION_NOTE,
     )
 
 

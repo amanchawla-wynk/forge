@@ -33,7 +33,12 @@ product bet itself is strategically correct.
   concise reasons.
 - A conversational question loop that asks for exactly one highest-impact
   missing field in concise language, retains the answer as supplemental
-  evidence, and then rescores.
+  evidence, and then rescores. Question wording adapts to whether the document
+  describes a problem fix, opportunity bet, compliance mandate, or migration;
+  the framing changes phrasing only and cannot affect the score.
+- Evidence-anchored edge-case discovery that can turn a broad missing-state
+  category into one concrete question about a verified requirement, without
+  allowing the model to write the question or alter scoring.
 - Local MCP server distribution with no Forge-hosted service required.
 - An optional local dashboard (FastAPI + Next.js) exposing the same
   assessment and remediation loop for users without an MCP client. It is a
@@ -60,13 +65,15 @@ product bet itself is strategically correct.
 2. Forge normalizes the document while retaining page and section evidence.
 3. The client's model extracts rubric fields and verbatim evidence.
 4. Forge verifies evidence and computes deterministic verdicts and bands.
-5. The user receives a concise deterministic narrative followed by the readiness
+5. Forge makes one closed-set framing classification so rubric-authored
+   questions fit the kind of product bet without allowing generated prose.
+6. The user receives a concise deterministic narrative followed by the readiness
    band, consumer breakdown, failed gates, confidence, evidence-based reasons,
    and the single next question to answer.
-6. The answer is added as explicit supplemental evidence and the PRD is
+7. The answer is added as explicit supplemental evidence and the PRD is
    rescored.
-7. Steps 5 and 6 repeat until no material question remains or the user stops.
-8. On explicit approval, Forge writes the accumulated answers into a new
+8. Steps 6 and 7 repeat until no material question remains or the user stops.
+9. On explicit approval, Forge writes the accumulated answers into a new
    editable PRD revision. The original remains unchanged, and the revision can
    be reassessed without supplemental evidence.
 
