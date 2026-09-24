@@ -19,14 +19,15 @@ from forge.ingest.batching import batch_document, plan_fingerprint
 from forge.ingest.models import ProductContextTerm, SupplementalAnswer
 from forge.rubric.models import Rubric
 from forge.score.contextualize import (
-    apply_edge_case_choice,
     build_candidates,
-    build_edge_case_prompt,
+    build_coverage_pairs,
+    build_coverage_prompt,
     build_framing_prompt,
-    parse_edge_case_choice,
+    build_requirement_candidates,
+    parse_coverage_classification,
     parse_framing_choice,
 )
-from forge.score.planner import document_display_name
+from forge.score.edge_coverage import EdgeCaseCoverageLedger
 from forge.service import AssessmentResponse, assess_extractions, prepare_assessment_input
 
 from forge_dashboard.llm import LLMCallError, call_model
@@ -48,6 +49,7 @@ async def run_assessment(
     product_context: list[ProductContextTerm] | None = None,
     framing: str | None = None,
     display_name: str | None = None,
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None,
 ) -> AssessmentResponse:
     answers = supplemental_answers or []
     context = product_context or []
@@ -79,7 +81,7 @@ async def run_assessment(
         )
         resolved_framing = await _detect_framing(preliminary, rubric, llm)
 
-    response = assess_extractions(
+    preliminary = assess_extractions(
         source_path,
         batch,
         rubric_name=rubric_name,
@@ -89,8 +91,20 @@ async def run_assessment(
         framing=resolved_framing,
         display_name=display_name,
     )
-    await _apply_edge_case_discovery(response, llm, display_name=display_name)
-    return response
+    coverage = edge_case_coverage or await _classify_edge_case_coverage(preliminary, llm)
+    if coverage is None:
+        return preliminary
+    return assess_extractions(
+        source_path,
+        batch,
+        rubric_name=rubric_name,
+        client_models=models,
+        supplemental_answers=answers,
+        product_context=context,
+        framing=resolved_framing,
+        display_name=display_name,
+        edge_case_coverage=coverage,
+    )
 
 
 async def _detect_framing(
@@ -105,47 +119,32 @@ async def _detect_framing(
     return parse_framing_choice(completion.text, rubric)
 
 
-async def _apply_edge_case_discovery(
-    response: AssessmentResponse,
-    llm: LLMConfig,
-    *,
-    display_name: str | None = None,
-) -> None:
-    question = response.next_question
-    if (
-        question is None
-        or question.criterion_id != "edge_cases_and_states"
-        or question.target_field
-        not in {
-            "error_states",
-            "empty_or_edge_states",
-            "transitional_or_degraded_states",
-        }
-    ):
-        return
-    candidates = build_candidates(
+async def _classify_edge_case_coverage(
+    response: AssessmentResponse, llm: LLMConfig
+) -> EdgeCaseCoverageLedger | None:
+    requirements = build_requirement_candidates(response.assessment)
+    if not requirements:
+        return None
+    evidence_candidates = build_candidates(
         response.assessment,
         "edge_cases_and_states",
-        limit=15,
-        per_field_limit=3,
+        limit=20,
+        per_field_limit=4,
     )
-    if not candidates:
-        return
-    prompt = build_edge_case_prompt(question.target_field, candidates)
+    pairs = build_coverage_pairs(requirements)
+    if not pairs:
+        return None
+    prompt = build_coverage_prompt(requirements, evidence_candidates, pairs)
     try:
-        completion = await call_model(llm, prompt, max_tokens=50, temperature=0)
+        completion = await call_model(llm, prompt, max_tokens=4_000, temperature=0)
     except LLMCallError:
-        return
-    choice = parse_edge_case_choice(completion.text, len(candidates))
-    text, _, _ = apply_edge_case_choice(
-        display_name or document_display_name(response.source_path),
-        candidates,
-        choice,
+        return None
+    return parse_coverage_classification(
+        completion.text,
+        requirements,
+        evidence_candidates,
+        pairs,
     )
-    if text is None:
-        return
-    question.question = text
-    response.report.next_step = text
 
 
 async def _run_single_batch(document, rubric, llm: LLMConfig, run_count: int):

@@ -1,5 +1,5 @@
 id: prd
-version: "0.4.1-expert-baseline"
+version: "0.5.0-expert-baseline"
 doc_type: prd
 description: >
   Source-backed cross-industry PRD completeness and actionability baseline.

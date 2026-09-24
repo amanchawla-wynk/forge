@@ -189,6 +189,23 @@ selection falls back to the normal field question. This discovery remains
 advisory: it identifies a plausible omission, while only the user's subsequent
 criterion-bound answer can become evidence and affect the score.
 
+The durable representation is edge-case coverage ledger `1.0`, not the single
+question. Forge independently verifies requirement atoms, applies deterministic
+rules to select applicable taxonomy pairs, and classifies every pair as
+`covered`, `missing`, `not_applicable`, or `unclear`. Positive statuses require
+verified evidence. Three native MCP runs consolidate by modal status with a
+pessimistic tie-break; disagreement is exposed rather than averaged into a
+status no run produced. Each user answer is bound to one requirement quote and
+one taxonomy id, so it updates only that cell on the next stateless rescore.
+
+The edge-case criterion is `PRESENT` only when the ledger is complete and the
+existing platform and accessibility fields are also satisfied. It is `PARTIAL`
+when there is verified progress but unresolved cells/components, and `ABSENT`
+when no component has evidence. Therefore one offline answer cannot silently
+complete playback, payments, quota, concurrency, and recovery coverage.
+"Complete" always means complete against the declared taxonomy version, not
+proof that every possible edge case has been imagined.
+
 Each answer is bound to the criterion that prompted it. A quote from a
 supplemental answer receives no credit for a different criterion. Verified
 evidence records whether it came from the source document or a supplemental
@@ -212,6 +229,8 @@ ownership, assumption validation, production recovery, and document governance.
 It also requires all applicable criteria for the top band.
 The `0.4.1-expert-baseline` revision adds framing-aware, rubric-authored
 question variants without changing criteria, weights, gates, or bands.
+The `0.5.0-expert-baseline` revision adds the edge-case coverage ledger and
+changes how `edge_cases_and_states` is derived when that ledger is supplied.
 
 Implementation repositories may provide non-evidence terminology context. This
 can clarify that two names refer to the same product or explain internal domain

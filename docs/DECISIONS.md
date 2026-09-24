@@ -591,3 +591,38 @@ supersedes the old one.
   it. The caller shows the question, records the user's answer against
   `edge_cases_and_states`, and lets normal evidence verification and scoring
   determine whether the field is satisfied.
+
+## D-038: Score Edge Cases From A Versioned Coverage Ledger
+
+- Status: accepted
+- Decision: Replace "one discovered edge-case answer satisfies the broad
+  field" with a versioned requirement-by-taxonomy coverage ledger. Verified
+  functional requirement atoms are crossed with applicable entries from edge
+  taxonomy `1.0` using deterministic keyword/rule mappings. The client model
+  classifies every declared pair as `covered`, `missing`, `not_applicable`, or
+  `unclear` and may cite only an enumerated verified evidence quote. Native MCP
+  coverage uses three independent runs, modal status, and pessimistic tie
+  resolution. Python rejects incomplete pair sets, duplicate pairs, unknown
+  taxonomy entries, malformed statuses, and unsupported positive claims.
+  `covered` and `not_applicable` count only when their evidence quote can be
+  located in the current document or criterion-bound supplemental evidence.
+- Reason: D-037 made questions concrete but still allowed one answer to make
+  `transitional_or_degraded_states` present while unrelated requirements and
+  failure modes remained unspecified. A ledger gives each decision a stable
+  identity, supports a deterministic question queue, and provides an honest
+  stopping claim: all applicable pairs in taxonomy `1.0` are covered or
+  explicitly not applicable. It does not claim that every imaginable real-
+  world edge case has been discovered.
+- Consequence: `AssessmentResponse` carries `edge_case_coverage`; each
+  taxonomy-led `Question` carries `requirement_quote`, `edge_case_id`, and
+  `taxonomy_version`; and `SupplementalAnswer` may bind an answer to that
+  exact cell. Resubmitting the ledger plus accumulated answers updates only
+  matching cells before evidence verification, so coverage cannot drift
+  between turns. The `edge_cases_and_states` verdict combines ledger coverage
+  with the existing `supported_platforms` and `accessibility_approach`
+  requirements: all three components are required for `PRESENT`. The dashboard
+  builds the ledger automatically and reuses it; MCP clients call
+  `assess_edge_case_coverage` and pass its ledger to later assessment calls.
+  The rubric advances to `0.5.0-expert-baseline`. This changes scoring behavior
+  when a coverage ledger is supplied and therefore requires organization data
+  before thresholds or applicability mappings can be considered calibrated.

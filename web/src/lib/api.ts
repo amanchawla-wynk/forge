@@ -1,4 +1,4 @@
-import type { AssessmentResponse, LLMConfig, SupplementalAnswer, UploadResponse } from "@/lib/types";
+import type { AssessmentResponse, EdgeCaseCoverageLedger, LLMConfig, SupplementalAnswer, UploadResponse } from "@/lib/types";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
@@ -45,6 +45,7 @@ export interface CreateAssessmentPayload {
   supplemental_answers?: SupplementalAnswer[];
   product_context?: { term: string; meaning: string; source_ref?: string | null }[];
   framing?: string | null;
+  edge_case_coverage?: EdgeCaseCoverageLedger | null;
 }
 
 export async function createAssessment(

@@ -36,6 +36,11 @@ class VisualAsset(BaseModel):
 class SupplementalAnswer(BaseModel):
     criterion_id: str = Field(min_length=1)
     answer: str = Field(min_length=1)
+    # Optional identity for one cell in the edge-case coverage ledger. This
+    # keeps repeated answers to the same broad criterion distinguishable.
+    requirement_quote: str | None = None
+    edge_case_id: str | None = None
+    taxonomy_version: str | None = None
 
     @field_validator("criterion_id", "answer")
     @classmethod

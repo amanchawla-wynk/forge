@@ -80,6 +80,10 @@ The target public surface is:
 - `discover_edge_case_question`: select one source-verified fact and one fixed
   edge-case type, then have Python render a concrete follow-up question. The
   model never authors the question and the selection never affects scoring.
+- `assess_edge_case_coverage`: classify every deterministically applicable
+  requirement/taxonomy pair through three closed-set sampling runs, verify
+  positive evidence, consolidate pessimistically, and return the versioned
+  ledger plus its next uncovered question.
 
 Assessment responses return one highest-impact remediation question. The client
 keeps the conversation state and resubmits accumulated answers on each turn.
@@ -121,6 +125,15 @@ each item in list-valued fields before that item can become a candidate. Python
 rejects any response outside the candidate/taxonomy product and uses the normal
 rubric question instead. The returned question stays advisory until the user
 answers it and that answer passes the standard supplemental-evidence flow.
+
+The coverage ledger is the state carried across remediation turns. Each item
+is keyed by an original-document requirement quote and taxonomy id. The
+dashboard builds it after initial extraction; MCP clients use
+`assess_edge_case_coverage`. A question copies that identity into the user's
+`SupplementalAnswer`. On rescore, Python updates only matching cells, verifies
+the answer in the criterion-bound supplemental block, and derives the edge-case
+verdict from ledger completion plus platform/accessibility fields. The ledger
+is echoed in every response because the server remains stateless.
 
 The response places a concise `report` before the detailed `assessment`. Report
 generation is deterministic and consumes only scored verdicts, failed gates,

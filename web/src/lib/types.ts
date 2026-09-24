@@ -72,6 +72,9 @@ export const CONSUMER_LABELS: Record<Consumer, string> = {
 export interface SupplementalAnswer {
   criterion_id: string;
   answer: string;
+  requirement_quote?: string | null;
+  edge_case_id?: string | null;
+  taxonomy_version?: string | null;
 }
 
 export interface ProductContextTerm {
@@ -139,6 +142,31 @@ export interface Question {
   is_gate: boolean;
   band_if_answered: string;
   unblocks_consumers: string[];
+  requirement_quote: string | null;
+  edge_case_id: string | null;
+  taxonomy_version: string | null;
+}
+
+export type CoverageStatus =
+  | "covered"
+  | "missing"
+  | "not_applicable"
+  | "unclear";
+
+export interface EdgeCaseCoverageItem {
+  requirement_criterion_id: string;
+  requirement_field: string;
+  requirement_quote: string;
+  edge_case_id: string;
+  status: CoverageStatus;
+  evidence_quote: string | null;
+  requirement_block_id: string | null;
+  evidence_block_id: string | null;
+}
+
+export interface EdgeCaseCoverageLedger {
+  taxonomy_version: string;
+  items: EdgeCaseCoverageItem[];
 }
 
 export interface GapRecord {
@@ -175,6 +203,7 @@ export interface AssessmentResponse {
   client_models: string[];
   product_context: ProductContextTerm[];
   framing: string | null;
+  edge_case_coverage: EdgeCaseCoverageLedger | null;
   warnings: string[];
   document_id: string;
   extraction_errors: string[];

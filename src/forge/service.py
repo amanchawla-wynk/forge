@@ -19,6 +19,14 @@ from forge.ingest.models import (
 from forge.rubric.loader import load_rubric
 from forge.rubric.models import Rubric
 from forge.score.engine import Assessment, score
+from forge.score.edge_coverage import (
+    EdgeCaseCoverageLedger,
+    apply_coverage_answers,
+    edge_case_type,
+    next_uncovered_item,
+    render_coverage_question,
+    verify_coverage_ledger,
+)
 from forge.score.planner import Question, document_display_name, plan_questions
 from forge.score.report import NarrativeReport, build_narrative_report
 
@@ -36,6 +44,7 @@ class AssessmentResponse(BaseModel):
     client_models: list[str]
     product_context: list[ProductContextTerm]
     framing: str | None
+    edge_case_coverage: EdgeCaseCoverageLedger | None
     warnings: list[str]
 
 
@@ -49,6 +58,7 @@ def assess_extractions(
     product_context: list[ProductContextTerm] | None = None,
     framing: str | None = None,
     display_name: str | None = None,
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None,
 ) -> AssessmentResponse:
     answers = supplemental_answers or []
     terms = product_context or []
@@ -57,13 +67,47 @@ def assess_extractions(
     )
     document_batches = batch_document(document)
     runs = verify_extraction_batch(document_batches, batch, rubric)
-    assessment = score(rubric, runs)
+    verified_coverage = (
+        verify_coverage_ledger(
+            document, apply_coverage_answers(edge_case_coverage, answers)
+        )
+        if edge_case_coverage is not None
+        else None
+    )
+    assessment = score(
+        rubric, runs, edge_case_coverage=verified_coverage
+    )
+    resolved_display_name = display_name or document_display_name(document.source_path)
     questions = plan_questions(
         rubric,
         assessment,
-        display_name=display_name or document_display_name(document.source_path),
+        display_name=resolved_display_name,
         framing=framing,
     )
+    if verified_coverage is not None:
+        uncovered = next_uncovered_item(verified_coverage)
+        edge_question = next(
+            (
+                question
+                for question in questions
+                if question.criterion_id == "edge_cases_and_states"
+            ),
+            None,
+        )
+        if uncovered is not None and edge_question is not None:
+            rendered = render_coverage_question(resolved_display_name, uncovered)
+            edge = edge_case_type(uncovered.edge_case_id)
+            edge_question.target_field = "edge_case_coverage"
+            edge_question.question = rendered
+            edge_question.base_question = edge.question
+            edge_question.answer_requirements = [
+                "State the expected behavior for this requirement and edge "
+                "case, including the user-visible result and recovery path."
+            ]
+            edge_question.band_if_answered = assessment.band
+            edge_question.requirement_quote = uncovered.requirement_quote
+            edge_question.edge_case_id = uncovered.edge_case_id
+            edge_question.taxonomy_version = verified_coverage.taxonomy_version
     disputed = [
         result.criterion_id
         for result in assessment.criteria
@@ -96,6 +140,17 @@ def assess_extractions(
             "Product terminology context was used only to disambiguate names; "
             "it was excluded from evidence verification and scoring."
         )
+    if verified_coverage is not None:
+        covered = sum(
+            item.status.value in {"covered", "not_applicable"}
+            for item in verified_coverage.items
+        )
+        warnings.append(
+            f"Edge-case taxonomy {verified_coverage.taxonomy_version} covers "
+            f"{covered} of {len(verified_coverage.items)} applicable/assessed "
+            "pairs. Completeness is relative to this declared taxonomy, not "
+            "every imaginable edge case."
+        )
 
     return AssessmentResponse(
         source_path=document.source_path,
@@ -115,6 +170,7 @@ def assess_extractions(
         client_models=client_models or [],
         product_context=terms,
         framing=questions[0].framing if questions else rubric.default_framing,
+        edge_case_coverage=verified_coverage,
         warnings=warnings,
     )
 
@@ -127,6 +183,7 @@ def assess_extraction_json(
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
     framing: str | None = None,
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None,
 ) -> AssessmentResponse:
     payload = json.loads(extraction_json)
     if "runs" not in payload:
@@ -138,6 +195,7 @@ def assess_extraction_json(
         supplemental_answers=supplemental_answers,
         product_context=product_context,
         framing=framing,
+        edge_case_coverage=edge_case_coverage,
     )
 
 

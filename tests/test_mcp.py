@@ -35,6 +35,7 @@ def test_mcp_exposes_sampling_and_fallback_tools():
         "contextualize_next_question",
         "detect_prd_framing",
         "discover_edge_case_question",
+        "assess_edge_case_coverage",
     }
     observe = next(tool for tool in tools if tool.name == "observe_prd_visual")
     assert set(observe.input_schema["properties"]) == {
@@ -58,6 +59,7 @@ def test_mcp_exposes_sampling_and_fallback_tools():
         "supplemental_answers",
         "product_context",
         "framing",
+        "edge_case_coverage",
     }
     prepare = next(tool for tool in tools if tool.name == "prepare_prd_assessment")
     score = next(tool for tool in tools if tool.name == "score_prd_extraction")
@@ -66,6 +68,7 @@ def test_mcp_exposes_sampling_and_fallback_tools():
     assert "product_context" in prepare.input_schema["properties"]
     assert "product_context" in score.input_schema["properties"]
     assert "framing" in score.input_schema["properties"]
+    assert "edge_case_coverage" in score.input_schema["properties"]
     revision = next(tool for tool in tools if tool.name == "write_prd_revision")
     assert set(revision.input_schema["properties"]) == {
         "source_path",
@@ -129,6 +132,9 @@ async def test_assess_prd_borrows_client_model_three_times(tmp_path):
         {
             "criterion_id": "problem_statement",
             "answer": "Finance administrators are affected.",
+            "requirement_quote": None,
+            "edge_case_id": None,
+            "taxonomy_version": None,
         }
     ]
     assert result.structured_content["client_models"] == [
@@ -546,6 +552,91 @@ async def test_discover_edge_case_question_invalid_choice_falls_back(tmp_path):
     assert content["question"].endswith(
         "What should users see or be able to do when this fails?"
     )
+
+
+@pytest.mark.anyio
+async def test_assess_edge_case_coverage_returns_exhaustive_verified_ledger(tmp_path):
+    path = tmp_path / "Micro Dramas.md"
+    requirement = "Playback progress syncs with the backend every 10 seconds."
+    path.write_text(requirement)
+    extraction = json.dumps(
+        {
+            "runs": [
+                {
+                    "criteria": [
+                        {
+                            "criterion_id": "functional_requirements",
+                            "fields": [
+                                {"name": "primary_flow", "value": None},
+                                {"name": "preconditions", "value": None},
+                                {
+                                    "name": "requirements",
+                                    "value": [requirement],
+                                    "evidence": {"quote": requirement},
+                                },
+                                {"name": "prioritisation", "value": None},
+                            ],
+                        }
+                    ]
+                }
+            ]
+        }
+    )
+
+    async def sample(context, params):
+        prompt = params.messages[0].content.text
+        assert "Return every PAIR exactly once" in prompt
+        pair_lines = prompt.split("PAIRS:\n", 1)[1].split(
+            "\n\nEVIDENCE OPTIONS:", 1
+        )[0].splitlines()
+        return CreateMessageResult(
+            role="assistant",
+            content=TextContent(
+                text=json.dumps(
+                    {
+                        "items": [
+                            {"pair": index, "status": 2, "evidence": 0}
+                            for index, _ in enumerate(pair_lines, start=1)
+                        ]
+                    }
+                )
+            ),
+            model="test-client-model",
+            stopReason="endTurn",
+        )
+
+    async with Client(mcp, raise_exceptions=True, sampling_callback=sample) as client:
+        coverage = await client.call_tool(
+            "assess_edge_case_coverage",
+            {
+                "source_path": str(path),
+                "extraction_json": extraction,
+            },
+        )
+        rescored = await client.call_tool(
+            "score_prd_extraction",
+            {
+                "source_path": str(path),
+                "extraction_json": extraction,
+                "edge_case_coverage": coverage.structured_content["ledger"],
+            },
+        )
+
+    content = coverage.structured_content
+    assert content["complete"] is False
+    assert content["missing_count"] == len(content["ledger"]["items"])
+    assert content["next_question"].startswith('For "Micro Dramas", the PRD says:')
+    edge = next(
+        item
+        for item in rescored.structured_content["assessment"]["criteria"]
+        if item["criterion_id"] == "edge_cases_and_states"
+    )
+    assert edge["verdict"] == "absent"
+    assert edge["missing"] == [
+        "edge_case_coverage",
+        "supported_platforms",
+        "accessibility_approach",
+    ]
 
 
 @pytest.mark.anyio

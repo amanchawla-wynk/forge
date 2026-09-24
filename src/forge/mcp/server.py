@@ -40,14 +40,28 @@ from forge.score.contextualize import (
     apply_choice,
     build_candidates,
     build_choice_prompt,
+    build_coverage_pairs,
+    build_coverage_prompt,
     build_edge_case_prompt,
     build_framing_prompt,
+    build_requirement_candidates,
     document_display_name,
     parse_choice,
+    parse_coverage_classification,
     parse_edge_case_choice,
     parse_framing_choice,
 )
 from forge.score.engine import Assessment
+from forge.score.edge_coverage import (
+    CoverageStatus,
+    EdgeCaseCoverageItem,
+    EdgeCaseCoverageLedger,
+    consolidate_coverage_ledgers,
+    edge_case_type,
+    next_uncovered_item,
+    render_coverage_question,
+    verify_coverage_ledger,
+)
 from forge.score.planner import (
     Question,
     document_display_name as planner_display_name,
@@ -76,9 +90,12 @@ mcp = MCPServer(
         "calls. Return next_question to the user and resubmit "
         "accumulated supplemental_answers after each reply, which invalidates "
         "any earlier batch plan. When edge_cases_and_states lacks behavioural "
-        "coverage, call discover_edge_case_question to replace the generic "
-        "prompt with one source-anchored question. When the user approves the "
-        "answers, call "
+        "coverage, call assess_edge_case_coverage and pass its ledger into "
+        "later score_prd_extraction/assess_prd calls; bind each answer to the "
+        "returned requirement_quote, edge_case_id, and taxonomy_version so "
+        "only that cell updates on rescore. discover_edge_case_question is a "
+        "lighter one-off alternative that cannot by itself move the verdict "
+        "past partial. When the user approves the answers, call "
         "write_prd_revision to create a new editable PRD copy. Forge is advisory."
     ),
 )
@@ -425,6 +442,7 @@ async def assess_prd(
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
     framing: str | None = None,
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None,
 ) -> AssessmentResponse:
     """Assess a local PRD by borrowing the MCP client's model three times."""
     completions = [run_one, run_two, run_three]
@@ -438,6 +456,7 @@ async def assess_prd(
         supplemental_answers=supplemental_answers,
         product_context=product_context,
         framing=framing,
+        edge_case_coverage=edge_case_coverage,
     )
 
 
@@ -624,6 +643,7 @@ def score_prd_extraction(
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
     framing: str | None = None,
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None,
 ) -> AssessmentResponse:
     """Verify and score extraction JSON produced by the connected agent.
 
@@ -638,6 +658,7 @@ def score_prd_extraction(
         supplemental_answers=supplemental_answers,
         product_context=product_context,
         framing=framing,
+        edge_case_coverage=edge_case_coverage,
     )
 
 
@@ -883,6 +904,234 @@ class DiscoveredEdgeCaseQuestion(BaseModel):
     discovery_source: Literal["closed_set_choice", "none"]
     client_model: str
     scoring_note: str
+
+
+class EdgeCaseCoverageResult(BaseModel):
+    ledger: EdgeCaseCoverageLedger
+    complete: bool
+    covered_count: int
+    missing_count: int
+    unclear_count: int
+    not_applicable_count: int
+    next_question: str | None
+    next_requirement_quote: str | None
+    next_edge_case_id: str | None
+    confidence: float
+    disputed_pairs: list[str]
+    client_model: str
+    scoring_note: str
+
+
+@dataclass(frozen=True)
+class _CoveragePlan:
+    framing_plan: _FramingPlan
+    requirements: list[ContextCandidate]
+    evidence_candidates: list[ContextCandidate]
+    pairs: list
+    prompt: str
+
+
+def _prepare_coverage_plan(
+    source_path: str,
+    extraction_json: str | dict[str, object] | None,
+    assessment_json: str | dict[str, object] | None,
+    rubric_name: str,
+    supplemental_answers: list[SupplementalAnswer] | None,
+    product_context: list[ProductContextTerm] | None,
+) -> _CoveragePlan:
+    plan = _prepare_framing_plan(
+        source_path,
+        extraction_json,
+        assessment_json,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+    )
+    requirements = build_requirement_candidates(plan.assessment)
+    if not requirements:
+        raise ValueError(
+            "no independently verified functional requirement is available "
+            "for edge-case coverage"
+        )
+    evidence_candidates = build_candidates(
+        plan.assessment, "edge_cases_and_states", limit=20, per_field_limit=4
+    )
+    pairs = build_coverage_pairs(requirements)
+    if not pairs:
+        raise ValueError(
+            "no edge-case taxonomy rules apply to the verified requirements"
+        )
+    return _CoveragePlan(
+        framing_plan=plan,
+        requirements=requirements,
+        evidence_candidates=evidence_candidates,
+        pairs=pairs,
+        prompt=build_coverage_prompt(requirements, evidence_candidates, pairs),
+    )
+
+
+@_anticipated
+def _sample_edge_case_coverage(
+    source_path: str,
+    extraction_json: str | dict[str, object] | None = None,
+    assessment_json: str | dict[str, object] | None = None,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+) -> Sample:
+    plan = _prepare_coverage_plan(
+        source_path,
+        extraction_json,
+        assessment_json,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+    )
+    return Sample(
+        [
+            SamplingMessage(
+                role="user", content=TextContent(type="text", text=plan.prompt)
+            )
+        ],
+        max_tokens=4_000,
+        temperature=0,
+    )
+
+
+def _sample_edge_case_coverage_run_one(
+    source_path: str,
+    extraction_json: str | dict[str, object] | None = None,
+    assessment_json: str | dict[str, object] | None = None,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+) -> Sample:
+    return _sample_edge_case_coverage(
+        source_path,
+        extraction_json,
+        assessment_json,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+    )
+
+
+def _sample_edge_case_coverage_run_two(
+    source_path: str,
+    extraction_json: str | dict[str, object] | None = None,
+    assessment_json: str | dict[str, object] | None = None,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+) -> Sample:
+    return _sample_edge_case_coverage(
+        source_path,
+        extraction_json,
+        assessment_json,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+    )
+
+
+def _sample_edge_case_coverage_run_three(
+    source_path: str,
+    extraction_json: str | dict[str, object] | None = None,
+    assessment_json: str | dict[str, object] | None = None,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+) -> Sample:
+    return _sample_edge_case_coverage(
+        source_path,
+        extraction_json,
+        assessment_json,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+    )
+@mcp.tool(structured_output=True)
+@_anticipated
+async def assess_edge_case_coverage(
+    source_path: str,
+    run_one: Annotated[
+        CreateMessageResult, Resolve(_sample_edge_case_coverage_run_one)
+    ],
+    run_two: Annotated[
+        CreateMessageResult, Resolve(_sample_edge_case_coverage_run_two)
+    ],
+    run_three: Annotated[
+        CreateMessageResult, Resolve(_sample_edge_case_coverage_run_three)
+    ],
+    extraction_json: str | dict[str, object] | None = None,
+    assessment_json: str | dict[str, object] | None = None,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+) -> EdgeCaseCoverageResult:
+    """Build a verified requirement-by-taxonomy edge-case coverage ledger."""
+    plan = _prepare_coverage_plan(
+        source_path,
+        extraction_json,
+        assessment_json,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+    )
+    completions = [run_one, run_two, run_three]
+    parsed_runs = []
+    for completion in completions:
+        parsed = parse_coverage_classification(
+            _completion_text(completion),
+            plan.requirements,
+            plan.evidence_candidates,
+            plan.pairs,
+        )
+        if parsed is None:
+            raise ValueError(
+                "client model returned invalid edge-case coverage JSON; expected "
+                "every declared pair exactly once with closed-set status/evidence indexes"
+            )
+        parsed_runs.append(parsed)
+    consolidated, agreement = consolidate_coverage_ledgers(parsed_runs)
+    document, _ = prepare_assessment_input(
+        source_path, rubric_name, supplemental_answers, product_context
+    )
+    ledger = verify_coverage_ledger(document, consolidated)
+    next_item = next_uncovered_item(ledger)
+    counts = {status: 0 for status in CoverageStatus}
+    for item in ledger.items:
+        counts[item.status] += 1
+    return EdgeCaseCoverageResult(
+        ledger=ledger,
+        complete=ledger.is_complete,
+        covered_count=counts[CoverageStatus.COVERED],
+        missing_count=counts[CoverageStatus.MISSING],
+        unclear_count=counts[CoverageStatus.UNCLEAR],
+        not_applicable_count=counts[CoverageStatus.NOT_APPLICABLE],
+        next_question=(
+            render_coverage_question(plan.framing_plan.display_name, next_item)
+            if next_item
+            else None
+        ),
+        next_requirement_quote=(next_item.requirement_quote if next_item else None),
+        next_edge_case_id=(next_item.edge_case_id if next_item else None),
+        confidence=(round(sum(agreement) / len(agreement), 4) if agreement else 0.0),
+        disputed_pairs=[
+            f"{item.requirement_block_id or item.requirement_quote}:{item.edge_case_id}"
+            for item, pair_agreement in zip(ledger.items, agreement, strict=True)
+            if pair_agreement < 1.0
+        ],
+        client_model=", ".join(
+            completion.model or "unreported" for completion in completions
+        ),
+        scoring_note=(
+            "Coverage is complete only against the declared edge-case taxonomy, "
+            "not every imaginable scenario. Requirement and positive coverage "
+            "quotes were verified against the current document; pass `ledger` "
+            "back on assessment calls to apply the deterministic stopping rule."
+        ),
+    )
 
 
 @dataclass(frozen=True)

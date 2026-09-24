@@ -99,6 +99,10 @@
 - Added evidence-anchored edge-case discovery: the model selects one verified
   source quote and one fixed failure-mode taxonomy entry, while Python renders
   the question and invalid choices fall back to the normal rubric wording.
+- Replaced one-answer edge-case completion with versioned coverage ledger
+  `1.0`: deterministic requirement/taxonomy pairs, closed-set four-state
+  classification, three-run pessimistic consolidation in MCP, cell-bound
+  answers, and an explicit taxonomy-relative stopping rule.
 
 ## Current Build
 
@@ -130,6 +134,9 @@
 - Build adversarial and representative fixtures from real PRDs.
 - Expand the multi-reviewer labelled calibration set beyond the first real PRD.
 - Set acceptable agreement and false-ready thresholds.
+- Validate the edge-case taxonomy's deterministic requirement-applicability
+  rules (D-038) against reviewed PRDs; the rules are an unvalidated expert
+  prior, same status as the rest of the bundled rubric.
 
 ## Later
 

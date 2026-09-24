@@ -58,6 +58,10 @@ class Question(BaseModel):
     # Band this document would reach if only the targeted field were answered.
     band_if_answered: str
     unblocks_consumers: list[str]
+    # Set only for taxonomy-led edge-case remediation (D-038).
+    requirement_quote: str | None = None
+    edge_case_id: str | None = None
+    taxonomy_version: str | None = None
 
 
 def _simulate_field_answer(

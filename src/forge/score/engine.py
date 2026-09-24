@@ -25,6 +25,10 @@ from forge.rubric.models import (
     Rubric,
     Verdict,
 )
+from forge.score.edge_coverage import (
+    CoverageStatus,
+    EdgeCaseCoverageLedger,
+)
 
 # Band ordering, worst to best. Gates clamp an index into this list.
 BAND_ORDER = ["not_a_prd", "needs_work", "ready_with_gaps", "ready_to_build"]
@@ -145,7 +149,12 @@ def _consolidate(
     return verdicts, agreement, missing, satisfied
 
 
-def score(rubric: Rubric, runs: list[list[CriterionExtraction]]) -> Assessment:
+def score(
+    rubric: Rubric,
+    runs: list[list[CriterionExtraction]],
+    *,
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None,
+) -> Assessment:
     """Turn k extraction runs into a banded assessment."""
     if not runs:
         raise ValueError("no extraction runs supplied")
@@ -160,6 +169,30 @@ def score(rubric: Rubric, runs: list[list[CriterionExtraction]]) -> Assessment:
 
     for criterion in rubric.criteria:
         verdict = verdicts[criterion.id]
+        criterion_missing = missing[criterion.id]
+        if criterion.id == "edge_cases_and_states" and edge_case_coverage is not None:
+            # The ledger replaces the three broad behavioural-state fields,
+            # but platform scope and accessibility remain normal rubric
+            # requirements. A complete matrix must not hide either gap.
+            noncoverage_missing = [
+                name
+                for name in criterion_missing
+                if name in {"supported_platforms", "accessibility_approach"}
+            ]
+            criterion_missing = list(noncoverage_missing)
+            if not edge_case_coverage.is_complete:
+                criterion_missing.insert(0, "edge_case_coverage")
+            coverage_progress = edge_case_coverage.is_complete or any(
+                item.status is CoverageStatus.COVERED
+                for item in edge_case_coverage.items
+            )
+            noncoverage_hits = 2 - len(noncoverage_missing)
+            if edge_case_coverage.is_complete and noncoverage_hits == 2:
+                verdict = Verdict.PRESENT
+            elif coverage_progress or noncoverage_hits > 0:
+                verdict = Verdict.PARTIAL
+            else:
+                verdict = Verdict.ABSENT
         credit = VERDICT_CREDIT[verdict]
 
         # NOT_APPLICABLE leaves the denominator, rather than scoring zero.
@@ -184,7 +217,7 @@ def score(rubric: Rubric, runs: list[list[CriterionExtraction]]) -> Assessment:
                 weight=criterion.weight,
                 credit=credit,
                 consumers=criterion.consumers,
-                missing=missing[criterion.id],
+                missing=criterion_missing,
                 rationale=criterion.rationale,
                 agreement=agreement[criterion.id],
                 gate_triggered=gate_hit,

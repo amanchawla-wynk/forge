@@ -116,6 +116,7 @@ async def create_assessment(request: AssessRequest) -> DashboardAssessmentRespon
             supplemental_answers=request.supplemental_answers,
             product_context=request.product_context,
             framing=request.framing,
+            edge_case_coverage=request.edge_case_coverage,
             display_name=Path(stored.filename).stem,
         )
     except ExtractionFailed as error:

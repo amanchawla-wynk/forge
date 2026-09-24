@@ -39,7 +39,13 @@ export function ConversationPanel() {
     setIsSubmitting(true);
     const nextAnswers = [
       ...assessment.supplemental_answers,
-      { criterion_id: question.criterion_id, answer: answer.trim() },
+      {
+        criterion_id: question.criterion_id,
+        answer: answer.trim(),
+        requirement_quote: question.requirement_quote,
+        edge_case_id: question.edge_case_id,
+        taxonomy_version: question.taxonomy_version,
+      },
     ];
     try {
       const updated = await createAssessment({
@@ -47,6 +53,7 @@ export function ConversationPanel() {
         llm,
         supplemental_answers: nextAnswers,
         framing: assessment.framing,
+        edge_case_coverage: assessment.edge_case_coverage,
       });
       appendHistory({ question, answer: answer.trim() });
       setAssessment(updated);

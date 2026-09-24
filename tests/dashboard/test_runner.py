@@ -210,9 +210,20 @@ async def test_run_assessment_discovers_anchored_edge_case_when_it_is_next(
 
     async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
         calls.append(prompt)
-        if "MISSING RUBRIC FIELD" in prompt:
+        if "Classify coverage for every listed" in prompt:
+            pair_lines = prompt.split("PAIRS:\n", 1)[1].split(
+                "\n\nEVIDENCE OPTIONS:", 1
+            )[0].splitlines()
             return Completion(
-                text='{"fact": 1, "edge_case": 2}', model="claude-test"
+                text=json.dumps(
+                    {
+                        "items": [
+                            {"pair": index, "status": 2, "evidence": 0}
+                            for index, _ in enumerate(pair_lines, start=1)
+                        ]
+                    }
+                ),
+                model="claude-test",
             )
         return Completion(
             text=json.dumps({"criteria": criteria}), model="claude-test"
@@ -229,11 +240,12 @@ async def test_run_assessment_discovers_anchored_edge_case_when_it_is_next(
 
     assert len(calls) == 4
     assert result.next_question is not None
-    assert result.next_question.target_field == "transitional_or_degraded_states"
+    assert result.next_question.target_field == "edge_case_coverage"
+    assert result.next_question.edge_case_id == "interruption_recovery"
     assert result.next_question.question.startswith(
         'For "Micro Dramas", the PRD says:'
     )
-    assert "connectivity is lost" in result.next_question.question
+    assert "interrupted after it starts" in result.next_question.question
     assert result.report.next_step == result.next_question.question
 
 

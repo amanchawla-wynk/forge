@@ -39,6 +39,9 @@ product bet itself is strategically correct.
 - Evidence-anchored edge-case discovery that can turn a broad missing-state
   category into one concrete question about a verified requirement, without
   allowing the model to write the question or alter scoring.
+- A persistent edge-case coverage ledger that asks one uncovered taxonomy cell
+  per turn and claims completion only against its declared taxonomy version;
+  one answer cannot satisfy unrelated requirements or failure modes.
 - Local MCP server distribution with no Forge-hosted service required.
 - An optional local dashboard (FastAPI + Next.js) exposing the same
   assessment and remediation loop for users without an MCP client. It is a

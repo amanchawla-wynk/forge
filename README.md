@@ -35,7 +35,16 @@ still requires independent labels from the organization's own reviewers.
   choice, then returns the appropriate rubric-authored question wording.
 - `discover_edge_case_question`: finds one concrete missing failure or
   transition question by selecting a verified source quote and a fixed
-  edge-case type; Python renders the question and scoring remains unchanged.
+  edge-case type; Python renders the question. This single-shot tool never
+  changes scoring by itself; see `assess_edge_case_coverage` below for the
+  ledger that can satisfy `edge_cases_and_states`.
+- `assess_edge_case_coverage`: builds a versioned coverage ledger crossing
+  every verified functional requirement against the edge-case taxonomy
+  entries that apply to it, using three closed-set classification runs.
+  Returns which requirement/edge-case pairs are `covered`, `missing`,
+  `not_applicable`, or `unclear`, plus the next uncovered question. Pass the
+  returned `ledger` into `score_prd_extraction`/`assess_prd` to make it the
+  authority for the `edge_cases_and_states` verdict.
 
 ## Install Locally
 
@@ -250,11 +259,24 @@ classification automatically on the first assessment and retains it across
 remediation turns. See `docs/DECISIONS.md` D-036.
 
 When `edge_cases_and_states` is missing behavioural coverage, call
-`discover_edge_case_question` with the same assessment or extraction JSON.
-For example, Forge can anchor to a verified progress-sync requirement and ask
-what happens when connectivity is lost and restored. Submit the user's answer
-as `edge_cases_and_states` supplemental evidence on the next assessment. The
-discovery itself is advisory and cannot earn credit. See D-037.
+`assess_edge_case_coverage` with the same assessment or extraction JSON. It
+crosses every verified functional requirement against the edge-case taxonomy
+entries that deterministically apply to it (a sync requirement gets
+connectivity-loss and concurrent-state checks; a quota requirement gets
+exhaustion and retry checks, and so on) and returns a versioned ledger: each
+requirement/edge-case pair is `covered`, `missing`, `not_applicable`, or
+`unclear`. Pass the returned `ledger` into `score_prd_extraction` or
+`assess_prd` and it becomes the authority for the `edge_cases_and_states`
+verdict — PRESENT only once every applicable pair is covered or explicitly not
+applicable, and platform/accessibility are also satisfied. Present the
+`next_question` from the ledger to the user, and submit their answer as a
+`SupplementalAnswer` carrying that exact `requirement_quote`, `edge_case_id`,
+and `taxonomy_version` so the next rescore updates only that one cell instead
+of silently marking the whole field satisfied. "Complete" is always relative
+to the declared taxonomy version, never a claim that every possible edge case
+has been found. `discover_edge_case_question` remains available as a
+lighter-weight single question, but only the ledger can move the verdict past
+PARTIAL. See D-037 and D-038.
 
 `confidence` measures extraction-run agreement, not correctness. When the first
 three runs disagree, the response identifies `disputed_criteria` and recommends

@@ -12,10 +12,14 @@ from forge.score.contextualize import (
     apply_choice,
     build_candidates,
     build_choice_prompt,
+    build_coverage_pairs,
+    build_coverage_prompt,
     build_edge_case_prompt,
     build_framing_prompt,
+    build_requirement_candidates,
     document_display_name,
     parse_choice,
+    parse_coverage_classification,
     parse_edge_case_choice,
     parse_framing_choice,
 )
@@ -295,6 +299,114 @@ def test_apply_edge_case_choice_none_returns_no_generated_question():
         None,
         None,
         None,
+    )
+
+
+def test_coverage_matrix_uses_verified_requirement_atoms(tmp_path):
+    path = tmp_path / "prd.md"
+    path.write_text(
+        "Progress should sync with the backend every 10 seconds. "
+        "Playback should start immediately."
+    )
+    extraction = {
+        "runs": [
+            {
+                "criteria": [
+                    {
+                        "criterion_id": "functional_requirements",
+                        "fields": [
+                            {
+                                "name": "primary_flow",
+                                "value": "Playback should start immediately.",
+                                "evidence": {
+                                    "quote": "Playback should start immediately."
+                                },
+                            },
+                            {"name": "preconditions", "value": None},
+                            {
+                                "name": "requirements",
+                                "value": [
+                                    "Progress should sync with the backend every 10 seconds."
+                                ],
+                                "evidence": {
+                                    "quote": "Progress should sync with the backend every 10 seconds."
+                                },
+                            },
+                            {"name": "prioritisation", "value": None},
+                        ],
+                    }
+                ]
+            }
+        ]
+    }
+    response = assess_extraction_json(str(path), json.dumps(extraction))
+    requirements = build_requirement_candidates(response.assessment)
+    pairs = build_coverage_pairs(requirements)
+
+    assert [item.quote for item in requirements] == [
+        "Playback should start immediately.",
+        "Progress should sync with the backend every 10 seconds.",
+    ]
+    progress_index = requirements[1].index
+    progress_edge_ids = {
+        EDGE_CASE_TYPES[pair.edge_case_index - 1].id
+        for pair in pairs
+        if pair.requirement_index == progress_index
+    }
+    assert {
+        "connectivity_loss",
+        "concurrent_state_change",
+        "stale_or_conflicting_state",
+    }.issubset(progress_edge_ids)
+
+
+def test_coverage_classification_requires_every_pair_exactly_once():
+    requirements = [_candidate(1)]
+    requirements[0].field_name = "requirements"
+    requirements[0].quote = "Playback starts immediately."
+    pairs = build_coverage_pairs(requirements)
+    evidence = [_candidate(1)]
+    prompt = build_coverage_prompt(requirements, evidence, pairs)
+    assert "Return every PAIR exactly once" in prompt
+
+    valid = {
+        "items": [
+            {"pair": pair.index, "status": 2, "evidence": 0}
+            for pair in pairs
+        ]
+    }
+    ledger = parse_coverage_classification(
+        json.dumps(valid), requirements, evidence, pairs
+    )
+    assert ledger is not None
+    assert len(ledger.items) == len(pairs)
+    assert all(item.status.value == "missing" for item in ledger.items)
+
+    valid["items"].pop()
+    assert (
+        parse_coverage_classification(
+            json.dumps(valid), requirements, evidence, pairs
+        )
+        is None
+    )
+
+
+def test_coverage_positive_status_requires_evidence_index():
+    requirements = [_candidate(1)]
+    requirements[0].field_name = "requirements"
+    pairs = build_coverage_pairs(requirements)
+    evidence = [_candidate(1)]
+    payload = {
+        "items": [
+            {"pair": pair.index, "status": 1, "evidence": 0}
+            for pair in pairs
+        ]
+    }
+    assert (
+        parse_coverage_classification(
+            json.dumps(payload), requirements, evidence, pairs
+        )
+        is None
     )
 
 

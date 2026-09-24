@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from forge.ingest.models import ProductContextTerm, SupplementalAnswer
+from forge.score.edge_coverage import EdgeCaseCoverageLedger
 from forge.service import AssessmentResponse
 
 # "cursor" is not an LLM provider: it authenticates to Cursor's Cloud Agents
@@ -49,6 +50,7 @@ class AssessRequest(BaseModel):
     # Detected once on the first assessment, then echoed by the response and
     # resubmitted on every remediation turn so question phrasing cannot drift.
     framing: str | None = None
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None
 
 
 class DashboardAssessmentResponse(AssessmentResponse):
