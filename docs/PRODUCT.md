@@ -31,11 +31,13 @@ product bet itself is strategically correct.
   inputs, with optional company-specific terminology and later validation.
 - A readiness band, downstream-consumer breakdown, evidence, confidence, and
   concise reasons.
-- A conversational question loop that asks for exactly one highest-impact
-  missing field in concise language, retains the answer as supplemental
-  evidence, and then rescores. Question wording adapts to whether the document
-  describes a problem fix, opportunity bet, compliance mandate, or migration;
-  the framing changes phrasing only and cannot affect the score.
+- A conversational question loop that shows exactly one highest-impact missing
+  field at a time while collecting several answers before a checkpoint. At a
+  checkpoint, Forge processes only the pending answers and affected criteria,
+  verifies them as supplemental evidence, and rescores without re-extracting
+  the unchanged PRD. Question wording adapts to whether the document describes
+  a problem fix, opportunity bet, compliance mandate, or migration; the framing
+  changes phrasing only and cannot affect the score.
 - Evidence-anchored edge-case discovery that can turn a broad missing-state
   category into one concrete question about a verified requirement, without
   allowing the model to write the question or alter scoring.
@@ -73,12 +75,23 @@ product bet itself is strategically correct.
 6. The user receives a concise deterministic narrative followed by the readiness
    band, consumer breakdown, failed gates, confidence, evidence-based reasons,
    and the single next question to answer.
-7. The answer is added as explicit supplemental evidence and the PRD is
-   rescored.
-8. Steps 6 and 7 repeat until no material question remains or the user stops.
-9. On explicit approval, Forge writes the accumulated answers into a new
-   editable PRD revision. The original remains unchanged, and the revision can
-   be reassessed without supplemental evidence.
+7. Forge records the exact answer as pending supplemental evidence and asks the
+   next queued question without re-extracting the unchanged PRD.
+8. After a bounded checkpoint (default five answers, completion of a failed
+   gate, or an explicit user request), Forge extracts only the pending answers
+   against their named criteria, verifies their quotes, merges the resulting
+   patches into the verified baseline, and deterministically rescores.
+9. Steps 6 through 8 repeat until no material question remains or the user
+   stops. Forge reports initial-assessment, remediation, and final-verification
+   model usage separately so conversational improvement has a visible token and
+   latency cost.
+10. Forge previews a revision plan that maps approved answers to existing PRD
+    sections and surfaces contradictions for resolution. On explicit approval,
+    it writes an integrated new editable copy, preserves the original, and adds
+    an audit appendix describing the accepted clarifications.
+11. Forge performs one full reassessment of the revised copy without
+    supplemental evidence. This final pass validates the durable artifact rather
+    than conversational state.
 
 When available, the caller may supply product terminology derived from an
 implementation repository or other background. It helps the extractor resolve

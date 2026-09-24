@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Loader2, MessageCircleQuestion, SendHorizontal } from "lucide-react";
+import { CheckCircle2, Download, FilePenLine, Loader2, MessageCircleQuestion, SendHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -15,9 +15,22 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError, createAssessment } from "@/lib/api";
+import {
+  ApiError,
+  checkpointRemediation,
+  createRevision,
+  documentDownloadUrl,
+  previewRevision,
+  recordRemediationAnswer,
+} from "@/lib/api";
 import { useAppStore } from "@/lib/store";
-import { BAND_STYLES, CONSUMER_LABELS, type Consumer } from "@/lib/types";
+import {
+  BAND_STYLES,
+  CONSUMER_LABELS,
+  type Consumer,
+  type RevisionAction,
+  type RevisionPreview,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export function ConversationPanel() {
@@ -26,10 +39,15 @@ export function ConversationPanel() {
   const assessment = useAppStore((state) => state.assessment);
   const history = useAppStore((state) => state.history);
   const setAssessment = useAppStore((state) => state.setAssessment);
+  const setDocument = useAppStore((state) => state.setDocument);
   const appendHistory = useAppStore((state) => state.appendHistory);
 
   const [answer, setAnswer] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [revisionPreview, setRevisionPreview] = useState<RevisionPreview | null>(null);
+  const [revisionActions, setRevisionActions] = useState<Record<string, RevisionAction>>({});
+  const [revisionDownload, setRevisionDownload] = useState<string | null>(null);
 
   if (!assessment || !llm || !document) return null;
   const question = assessment.next_question;
@@ -37,34 +55,103 @@ export function ConversationPanel() {
   async function handleSubmit() {
     if (!question || !answer.trim() || !assessment || !llm || !document) return;
     setIsSubmitting(true);
-    const nextAnswers = [
-      ...assessment.supplemental_answers,
-      {
-        criterion_id: question.criterion_id,
-        answer: answer.trim(),
-        requirement_quote: question.requirement_quote,
-        edge_case_id: question.edge_case_id,
-        taxonomy_version: question.taxonomy_version,
-      },
-    ];
+    const sessionId = assessment.remediation_session_id;
+    if (!sessionId) {
+      toast.error("Start a new assessment to use checkpointed remediation.");
+      setIsSubmitting(false);
+      return;
+    }
     try {
-      const updated = await createAssessment({
-        document_id: document.document_id,
-        llm,
-        supplemental_answers: nextAnswers,
-        framing: assessment.framing,
-        edge_case_coverage: assessment.edge_case_coverage,
-      });
+      const recorded = await recordRemediationAnswer(
+        sessionId,
+        answer.trim(),
+      );
       appendHistory({ question, answer: answer.trim() });
-      setAssessment(updated);
       setAnswer("");
-      toast.success("Rescored", {
-        description: `${updated.report.headline}`,
-      });
+      setPendingCount(recorded.turn.pending_answer_count);
+      if (recorded.turn.checkpoint_due) {
+        const checkpoint = await checkpointRemediation(sessionId, llm);
+        const state = checkpoint.result.state;
+        setAssessment({
+          ...assessment,
+          assessment: state.assessment,
+          report: state.report,
+          next_question: checkpoint.result.next_question,
+          supplemental_answers: state.verified_answers,
+          framing: state.framing,
+          edge_case_coverage: state.edge_case_coverage,
+        });
+        setPendingCount(0);
+        toast.success("Checkpoint scored", {
+          description: `${checkpoint.result.previous_band} → ${checkpoint.result.current_band}`,
+        });
+      } else {
+        setAssessment({
+          ...assessment,
+          next_question: recorded.turn.next_question,
+        });
+        toast.success("Answer saved", {
+          description: `${recorded.turn.pending_answer_count} of 5 answers collected`,
+        });
+      }
     } catch (error) {
       const message =
         error instanceof ApiError ? error.message : "Could not rescore the document.";
       toast.error("Rescoring failed", { description: message });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handlePreviewRevision() {
+    if (!assessment || !document || assessment.supplemental_answers.length === 0) return;
+    setIsSubmitting(true);
+    try {
+      const preview = await previewRevision(
+        document.document_id,
+        assessment.supplemental_answers,
+      );
+      setRevisionPreview(preview);
+      setRevisionActions(
+        Object.fromEntries(
+          preview.edits.map((edit) => [
+            edit.edit_id,
+            edit.target_section ? "integrate" : "audit_only",
+          ]),
+        ),
+      );
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : "Could not preview the revision.";
+      toast.error("Revision preview failed", { description: message });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleCreateRevision() {
+    if (!revisionPreview || !assessment || !document || !llm) return;
+    setIsSubmitting(true);
+    try {
+      const revised = await createRevision(
+        document.document_id,
+        revisionPreview.plan_id,
+        revisionActions,
+        llm,
+      );
+      setDocument({
+        document_id: revised.document_id,
+        filename: revised.filename,
+        source_type: revised.filename.split(".").pop() ?? "",
+      });
+      setAssessment(revised.assessment);
+      setRevisionDownload(documentDownloadUrl(revised.document_id));
+      setRevisionPreview(null);
+      toast.success("Revised copy created and reassessed", {
+        description: revised.assessment.report.headline,
+      });
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : "Could not create the revised copy.";
+      toast.error("Revision failed", { description: message });
     } finally {
       setIsSubmitting(false);
     }
@@ -78,8 +165,8 @@ export function ConversationPanel() {
           Remediation loop
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          One highest-impact question at a time. Each answer is retained as
-          supplemental evidence and the document is rescored.
+          One question at a time. Answers are processed together at a checkpoint,
+          avoiding repeated full-document extraction.
         </p>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-4">
@@ -139,6 +226,11 @@ export function ConversationPanel() {
                   ))}
                 </div>
               )}
+              {pendingCount > 0 && (
+                <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                  {pendingCount} pending answer{pendingCount === 1 ? "" : "s"}; score updates at the next checkpoint.
+                </p>
+              )}
             </div>
 
             <Textarea
@@ -156,24 +248,76 @@ export function ConversationPanel() {
               {isSubmitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Rescoring&hellip;
+                  Saving&hellip;
                 </>
               ) : (
                 <>
                   <SendHorizontal className="h-4 w-4" />
-                  Submit answer &amp; rescore
+                  Save answer
                 </>
               )}
             </Button>
           </div>
         ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-md border border-dashed p-6 text-center">
-            <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-            <p className="text-sm font-medium">No material question remains</p>
-            <p className="text-xs text-muted-foreground">
-              Every applicable rubric criterion has been addressed for this
-              document and its supplemental answers.
-            </p>
+          <div className="space-y-4 rounded-md border border-dashed p-5">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+              <p className="text-sm font-medium">No material question remains</p>
+              <p className="text-xs text-muted-foreground">
+                Create a new copy that integrates the approved clarifications,
+                then reassess that artifact without conversational evidence.
+              </p>
+            </div>
+            {assessment.supplemental_answers.length > 0 && !revisionPreview && (
+              <Button className="w-full" onClick={handlePreviewRevision} disabled={isSubmitting}>
+                <FilePenLine className="h-4 w-4" />
+                Preview revised copy
+              </Button>
+            )}
+            {revisionPreview && (
+              <div className="space-y-3">
+                {revisionPreview.edits.map((edit) => (
+                  <div key={edit.edit_id} className="space-y-2 rounded-md border bg-muted/30 p-3 text-xs">
+                    <p className="font-medium">{edit.target_section ?? "No matching section"}</p>
+                    {edit.existing_excerpt && (
+                      <p className="text-muted-foreground">Existing: {edit.existing_excerpt}</p>
+                    )}
+                    <p>Proposed: {edit.answer}</p>
+                    {edit.conflicts.map((conflict) => (
+                      <p key={conflict.conflict_id} className="text-amber-700 dark:text-amber-300">
+                        {conflict.message}
+                      </p>
+                    ))}
+                    <select
+                      className="w-full rounded-md border bg-background px-2 py-1.5"
+                      value={revisionActions[edit.edit_id]}
+                      onChange={(event) =>
+                        setRevisionActions((current) => ({
+                          ...current,
+                          [edit.edit_id]: event.target.value as RevisionAction,
+                        }))
+                      }
+                    >
+                      {edit.target_section && <option value="integrate">Integrate into section</option>}
+                      <option value="audit_only">Audit appendix only</option>
+                      <option value="skip">Skip</option>
+                    </select>
+                  </div>
+                ))}
+                <Button className="w-full" onClick={handleCreateRevision} disabled={isSubmitting}>
+                  {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePenLine className="h-4 w-4" />}
+                  Create copy and reassess
+                </Button>
+              </div>
+            )}
+            {revisionDownload && (
+              <Button asChild variant="outline" className="w-full">
+                <a href={revisionDownload}>
+                  <Download className="h-4 w-4" />
+                  Download revised PRD
+                </a>
+              </Button>
+            )}
           </div>
         )}
       </CardContent>

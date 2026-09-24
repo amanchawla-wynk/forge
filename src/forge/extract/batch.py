@@ -140,13 +140,17 @@ def _validate_plan_fingerprint(
     Supplemental answers change batch boundaries, so a fragment extracted
     before the latest answer cannot be scored as current evidence.
     """
-    supplied = {
-        fragment.plan_fingerprint
+    missing = [
+        fragment.batch_id
         for fragment in run.fragments
-        if fragment.plan_fingerprint is not None
-    }
-    if not supplied:
-        return
+        if fragment.plan_fingerprint is None
+    ]
+    if missing:
+        raise ValueError(
+            "every extraction fragment must carry plan_fingerprint; missing for "
+            + ", ".join(sorted(missing))
+        )
+    supplied = {fragment.plan_fingerprint for fragment in run.fragments}
     expected = plan_fingerprint(batches, rubric.version)
     stale = sorted(value for value in supplied if value != expected)
     if stale:

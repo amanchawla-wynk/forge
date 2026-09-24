@@ -227,8 +227,8 @@ def score(
 
     raw = earned / possible if possible else 0.0
     all_applicable_present = all(
-        verdict in (Verdict.PRESENT, Verdict.NOT_APPLICABLE)
-        for verdict in verdicts.values()
+        result.verdict in (Verdict.PRESENT, Verdict.NOT_APPLICABLE)
+        for result in results
     )
     uncapped = _band_for(
         rubric, raw, all_applicable_present=all_applicable_present

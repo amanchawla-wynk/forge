@@ -480,6 +480,7 @@ def test_service_consolidates_all_long_document_fragments(tmp_path):
     document_batches = batch_document(ingest_document(path))
     assert len(document_batches) > 1
     rubric = load_rubric("prd")
+    fingerprint = plan_fingerprint(document_batches, rubric.version)
 
     fragments = []
     for batch in document_batches:
@@ -514,7 +515,13 @@ def test_service_consolidates_all_long_document_fragments(tmp_path):
                 }:
                     field["value"] = metric_quote
                     field["evidence"] = {"quote": metric_quote}
-        fragments.append({"batch_id": batch.id, "criteria": criteria})
+        fragments.append(
+            {
+                "batch_id": batch.id,
+                "plan_fingerprint": fingerprint,
+                "criteria": criteria,
+            }
+        )
 
     response = assess_extraction_json(
         str(path), json.dumps({"runs": [{"fragments": fragments}]})
@@ -704,10 +711,12 @@ def test_verified_evidence_keeps_split_block_offsets(tmp_path):
     rubric = load_rubric("prd")
     batches = batch_document(ingest_document(path))
     assert len(batches) > 1
+    fingerprint = plan_fingerprint(batches, rubric.version)
 
     fragments = [
         ExtractionFragment(
             batch_id=batch.id,
+            plan_fingerprint=fingerprint,
             criteria=_complete_fragment_criteria(
                 rubric,
                 {
@@ -745,12 +754,19 @@ def test_fragment_must_contain_every_criterion_and_field(tmp_path):
     path.write_text("A short PRD.")
     rubric = load_rubric("prd")
     batches = batch_document(ingest_document(path))
+    fingerprint = plan_fingerprint(batches, rubric.version)
 
     with pytest.raises(ValueError, match="missing criteria"):
         verify_extraction_run(
             batches,
             ExtractionRun(
-                fragments=[ExtractionFragment(batch_id=batches[0].id, criteria=[])]
+                fragments=[
+                    ExtractionFragment(
+                        batch_id=batches[0].id,
+                        plan_fingerprint=fingerprint,
+                        criteria=[],
+                    )
+                ]
             ),
             rubric,
         )
@@ -763,7 +779,11 @@ def test_fragment_must_contain_every_criterion_and_field(tmp_path):
             batches,
             ExtractionRun(
                 fragments=[
-                    ExtractionFragment(batch_id=batches[0].id, criteria=partial)
+                    ExtractionFragment(
+                        batch_id=batches[0].id,
+                        plan_fingerprint=fingerprint,
+                        criteria=partial,
+                    )
                 ]
             ),
             rubric,

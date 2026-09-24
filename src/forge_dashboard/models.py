@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field, model_validator
 
 from forge.ingest.models import ProductContextTerm, SupplementalAnswer
 from forge.score.edge_coverage import EdgeCaseCoverageLedger
+from forge.remediation import RemediationCheckpointResult, RemediationTurn
+from forge.revise import RevisionEdit, RevisionResult
 from forge.service import AssessmentResponse
 
 # "cursor" is not an LLM provider: it authenticates to Cursor's Cloud Agents
@@ -58,3 +60,49 @@ class DashboardAssessmentResponse(AssessmentResponse):
 
     document_id: str
     extraction_errors: list[str] = Field(default_factory=list)
+    remediation_session_id: str | None = None
+
+
+class RecordAnswerRequest(BaseModel):
+    answer: str = Field(min_length=1)
+    force_checkpoint: bool = False
+
+
+class DashboardRemediationTurn(BaseModel):
+    session_id: str
+    turn: RemediationTurn
+
+
+class CheckpointRequest(BaseModel):
+    llm: LLMConfig
+
+
+class DashboardCheckpointResponse(BaseModel):
+    session_id: str
+    result: RemediationCheckpointResult
+
+
+class RevisionPreviewRequest(BaseModel):
+    supplemental_answers: list[SupplementalAnswer] = Field(min_length=1)
+    section_overrides: dict[str, str] = Field(default_factory=dict)
+
+
+class DashboardRevisionPreview(BaseModel):
+    plan_id: str
+    plan_digest: str
+    source_sha256: str
+    edits: list[RevisionEdit]
+
+
+class MaterializeRevisionRequest(BaseModel):
+    plan_id: str
+    actions: dict[str, Literal["integrate", "audit_only", "skip"]]
+    llm: LLMConfig
+    rubric_name: str = "prd"
+
+
+class DashboardRevisionResponse(BaseModel):
+    document_id: str
+    filename: str
+    revision: RevisionResult
+    assessment: DashboardAssessmentResponse

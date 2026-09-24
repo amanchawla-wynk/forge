@@ -1,4 +1,15 @@
-import type { AssessmentResponse, EdgeCaseCoverageLedger, LLMConfig, SupplementalAnswer, UploadResponse } from "@/lib/types";
+import type {
+  AssessmentResponse,
+  EdgeCaseCoverageLedger,
+  LLMConfig,
+  RemediationCheckpointResponse,
+  RemediationTurnResponse,
+  RevisionAction,
+  RevisionPreview,
+  RevisionResponse,
+  SupplementalAnswer,
+  UploadResponse,
+} from "@/lib/types";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
@@ -61,6 +72,85 @@ export async function createAssessment(
     throw new ApiError(response.status, await parseErrorDetail(response));
   }
   return response.json();
+}
+
+export async function recordRemediationAnswer(
+  sessionId: string,
+  answer: string,
+  forceCheckpoint = false,
+): Promise<RemediationTurnResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/remediation/${sessionId}/answers`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answer, force_checkpoint: forceCheckpoint }),
+    },
+  );
+  if (!response.ok) {
+    throw new ApiError(response.status, await parseErrorDetail(response));
+  }
+  return response.json();
+}
+
+export async function checkpointRemediation(
+  sessionId: string,
+  llm: LLMConfig,
+): Promise<RemediationCheckpointResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/remediation/${sessionId}/checkpoint`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ llm }),
+    },
+  );
+  if (!response.ok) {
+    throw new ApiError(response.status, await parseErrorDetail(response));
+  }
+  return response.json();
+}
+
+export async function previewRevision(
+  documentId: string,
+  supplementalAnswers: SupplementalAnswer[],
+): Promise<RevisionPreview> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/documents/${documentId}/revisions/preview`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ supplemental_answers: supplementalAnswers }),
+    },
+  );
+  if (!response.ok) {
+    throw new ApiError(response.status, await parseErrorDetail(response));
+  }
+  return response.json();
+}
+
+export async function createRevision(
+  documentId: string,
+  planId: string,
+  actions: Record<string, RevisionAction>,
+  llm: LLMConfig,
+): Promise<RevisionResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/documents/${documentId}/revisions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan_id: planId, actions, llm }),
+    },
+  );
+  if (!response.ok) {
+    throw new ApiError(response.status, await parseErrorDetail(response));
+  }
+  return response.json();
+}
+
+export function documentDownloadUrl(documentId: string): string {
+  return `${API_BASE_URL}/api/documents/${documentId}/download`;
 }
 
 export interface VerifyLLMResponse {

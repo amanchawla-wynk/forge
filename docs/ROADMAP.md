@@ -117,12 +117,29 @@
   proactive capability check in every sampling resolver: a clear, catchable
   error naming the fallback tool when one exists, or stating plainly that
   none exists yet for the four advisory tools (D-039).
+- Replaced per-answer full-document re-extraction with checkpointed remediation
+  (D-040): a Forge-owned `RemediationState`, deterministic field queue, local
+  opaque sessions, five-answer/gate/manual checkpoints, answer-only criterion
+  delta prompts, verified patch merging, and unchanged-score signaling while
+  answers remain pending.
+- Added mandatory full-fragment plan fingerprints plus separate delta
+  fingerprints, preventing fallback clients from scoring stale extraction JSON
+  after the source, rubric, or pending answers change.
+- Added remediation usage accounting and a hard 40,000-character delta budget;
+  regression tests prove ordinary answers invoke no model and delta prompts do
+  not contain the unchanged PRD body.
+- Added integrated revision preview and writing (D-041) alongside appendix mode:
+  source and approval digests, section placement, explicit per-edit conflict
+  resolution, no-overwrite new copies, audit appendices, dashboard download,
+  and automatic full reassessment of the generated dashboard artifact without
+  supplemental answers.
 
 ## Current Build
 
 - Grow the regression corpus with a multi-batch document.
-- Run the one-question remediation loop on both internal PRDs, materialize the
-  approved answers, and measure score and extraction-agreement movement.
+- Run the checkpointed one-question remediation loop on both internal PRDs,
+  materialize approved answers into new copies, and measure score,
+  extraction-agreement, token, and latency movement.
 - Resolve the documented Rush quality contradictions: Data Saver precedence,
   flag-off behavior, and the 360p fallback algorithm.
 - Evaluate local OCR output as separately provenanced, quote-verifiable evidence.

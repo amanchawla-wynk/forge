@@ -61,6 +61,95 @@ def test_upload_and_assess_round_trip(monkeypatch) -> None:
     assert "sk-test-not-real" not in assessment.text
 
 
+def test_recording_answer_does_not_call_model_until_checkpoint(monkeypatch) -> None:
+    calls = 0
+
+    async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
+        nonlocal calls
+        calls += 1
+        return Completion(text='{"criteria": []}', model="claude-test")
+
+    monkeypatch.setattr("forge_dashboard.runner.call_model", fake_call_model)
+    monkeypatch.setattr("forge_dashboard.app.call_model", fake_call_model)
+    client = TestClient(app)
+    upload = client.post(
+        "/api/documents",
+        files={"file": ("prd.md", b"An incomplete product note.", "text/markdown")},
+    )
+    document_id = upload.json()["document_id"]
+    assessment = client.post(
+        "/api/assessments",
+        json={
+            "document_id": document_id,
+            "llm": {
+                "provider": "anthropic",
+                "model": "claude-test",
+                "api_key": "sk-test",
+            },
+        },
+    )
+    session_id = assessment.json()["remediation_session_id"]
+    calls_after_assessment = calls
+
+    recorded = client.post(
+        f"/api/remediation/{session_id}/answers",
+        json={"answer": "GenZ viewers need short-form stories."},
+    )
+
+    assert recorded.status_code == 200
+    assert recorded.json()["turn"]["pending_answer_count"] == 1
+    assert recorded.json()["turn"]["score_is_current"] is False
+    assert calls == calls_after_assessment
+
+
+def test_revision_preview_materializes_copy_and_reassesses(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    original = b"# PRD\n\n## Success Metrics\n\nDAU is monitored.\n"
+    upload = client.post(
+        "/api/documents",
+        files={"file": ("prd.md", original, "text/markdown")},
+    ).json()
+    answer = "Repeat usage should increase from 20% to 30% within 90 days."
+    preview = client.post(
+        f"/api/documents/{upload['document_id']}/revisions/preview",
+        json={
+            "supplemental_answers": [
+                {"criterion_id": "success_metrics", "answer": answer}
+            ]
+        },
+    )
+    assert preview.status_code == 200
+    plan = preview.json()
+    edit = plan["edits"][0]
+    assert edit["target_section"] == "Success Metrics"
+
+    revised = client.post(
+        f"/api/documents/{upload['document_id']}/revisions",
+        json={
+            "plan_id": plan["plan_id"],
+            "actions": {edit["edit_id"]: "integrate"},
+            "llm": {
+                "provider": "anthropic",
+                "model": "claude-test",
+                "api_key": "sk-test",
+            },
+        },
+    )
+    assert revised.status_code == 200
+    body = revised.json()
+    assert body["revision"]["mode"] == "integrated"
+    assert body["revision"]["final_assessment_required"] is True
+    assert body["assessment"]["supplemental_answers"] == []
+    assert body["assessment"]["source_path"] == "prd - Forge Revision.md"
+
+    download = client.get(f"/api/documents/{body['document_id']}/download")
+    assert download.status_code == 200
+    assert answer.encode() in download.content
+    assert original == client.get(
+        f"/api/documents/{upload['document_id']}/download"
+    ).content
+
+
 def test_upload_rejects_unsupported_extension(monkeypatch) -> None:
     client = _client(monkeypatch)
     response = client.post(

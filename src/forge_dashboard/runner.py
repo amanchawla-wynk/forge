@@ -28,6 +28,7 @@ from forge.score.contextualize import (
     parse_framing_choice,
 )
 from forge.score.edge_coverage import EdgeCaseCoverageLedger
+from forge.remediation import RemediationState, begin_remediation
 from forge.service import AssessmentResponse, assess_extractions, prepare_assessment_input
 
 from forge_dashboard.llm import LLMCallError, call_model
@@ -51,6 +52,30 @@ async def run_assessment(
     display_name: str | None = None,
     edge_case_coverage: EdgeCaseCoverageLedger | None = None,
 ) -> AssessmentResponse:
+    response, _ = await run_assessment_with_remediation(
+        source_path,
+        llm,
+        rubric_name=rubric_name,
+        supplemental_answers=supplemental_answers,
+        product_context=product_context,
+        framing=framing,
+        display_name=display_name,
+        edge_case_coverage=edge_case_coverage,
+    )
+    return response
+
+
+async def run_assessment_with_remediation(
+    source_path: str,
+    llm: LLMConfig,
+    *,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+    framing: str | None = None,
+    display_name: str | None = None,
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None,
+) -> tuple[AssessmentResponse, RemediationState | None]:
     answers = supplemental_answers or []
     context = product_context or []
     document, rubric = prepare_assessment_input(
@@ -92,19 +117,37 @@ async def run_assessment(
         display_name=display_name,
     )
     coverage = edge_case_coverage or await _classify_edge_case_coverage(preliminary, llm)
-    if coverage is None:
-        return preliminary
-    return assess_extractions(
+    response = (
+        preliminary
+        if coverage is None
+        else assess_extractions(
+            source_path,
+            batch,
+            rubric_name=rubric_name,
+            client_models=models,
+            supplemental_answers=answers,
+            product_context=context,
+            framing=resolved_framing,
+            display_name=display_name,
+            edge_case_coverage=coverage,
+        )
+    )
+    if answers:
+        # Compatibility path for existing dashboard clients. New sessions use
+        # answer collection and checkpoint deltas instead.
+        return response, None
+    extraction_json = batch.model_dump_json()
+    turn = begin_remediation(
         source_path,
-        batch,
+        extraction_json,
         rubric_name=rubric_name,
-        client_models=models,
-        supplemental_answers=answers,
         product_context=context,
         framing=resolved_framing,
-        display_name=display_name,
         edge_case_coverage=coverage,
+        client_models=models,
+        display_name=display_name,
     )
+    return response, turn.state
 
 
 async def _detect_framing(

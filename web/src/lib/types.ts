@@ -218,6 +218,76 @@ export interface AssessmentResponse {
   warnings: string[];
   document_id: string;
   extraction_errors: string[];
+  remediation_session_id?: string | null;
+}
+
+export interface RemediationState {
+  assessment: Assessment;
+  report: NarrativeReport;
+  question_queue: Question[];
+  verified_answers: SupplementalAnswer[];
+  pending_answers: unknown[];
+  framing: string | null;
+  edge_case_coverage: EdgeCaseCoverageLedger | null;
+}
+
+export interface RemediationTurnResponse {
+  session_id: string;
+  turn: {
+    state: RemediationState;
+    next_question: Question | null;
+    checkpoint_due: boolean;
+    checkpoint_reason: string | null;
+    pending_answer_count: number;
+    verified_answer_count: number;
+    score_is_current: boolean;
+  };
+}
+
+export interface RemediationCheckpointResponse {
+  session_id: string;
+  result: {
+    state: RemediationState;
+    next_question: Question | null;
+    credited_answer_ids: string[];
+    uncredited_answer_ids: string[];
+    previous_band: string;
+    current_band: string;
+  };
+}
+
+export type RevisionAction = "integrate" | "audit_only" | "skip";
+
+export interface RevisionEdit {
+  edit_id: string;
+  criterion_id: string;
+  answer: string;
+  target_section: string | null;
+  existing_excerpt: string | null;
+  conflicts: Array<{
+    conflict_id: string;
+    kind: string;
+    message: string;
+    allowed_resolutions: RevisionAction[];
+  }>;
+}
+
+export interface RevisionPreview {
+  plan_id: string;
+  plan_digest: string;
+  source_sha256: string;
+  edits: RevisionEdit[];
+}
+
+export interface RevisionResponse {
+  document_id: string;
+  filename: string;
+  revision: {
+    mode: "appendix" | "integrated";
+    plan_digest: string | null;
+    final_assessment_required: boolean;
+  };
+  assessment: AssessmentResponse;
 }
 
 export interface UploadResponse {

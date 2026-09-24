@@ -133,10 +133,32 @@ Answers must be retained as supplemental user-provided evidence and clearly
 distinguished from text originally present in the PRD. Forge should never
 silently rewrite the source document and pretend the answer was already there.
 
-The conversational experience asks one question at a time. After each answer,
-the accumulated original and supplemental evidence is rescored before the next
-question is selected. This keeps the conversation focused and allows each turn
-to respond to the document's new state.
+The conversational experience asks one question at a time, but does not require
+a full extraction or rescore after every answer. Forge builds a deterministic
+queue from the last verified assessment, records exact user answers as pending
+criterion-bound evidence, and advances through that queue until a checkpoint.
+The default checkpoint is five answers; completing the missing fields of a
+failed gate or an explicit user request also triggers one. At that point Forge
+processes the pending answers together, rescoring before it rebuilds the queue.
+This preserves a focused interaction without repeatedly sending an unchanged
+long PRD to a model.
+
+Checkpoint processing is incremental. The initial verified extraction remains
+an immutable baseline bound to the source hash and rubric version. A delta
+extraction sees only pending supplemental-answer blocks, the field definitions
+and previously verified values for the affected criteria, and any edge-case
+cell identities carried by those answers. It may update only those criteria or
+cells. Python verifies every cited quote against the criterion-bound answer
+block, merges valid patches into the baseline, and performs normal deterministic
+scoring. One answer may satisfy several fields of its named criterion, but can
+never satisfy another criterion.
+
+A full exhaustive extraction remains required when the source document or
+rubric changes and for the final reassessment of a materialized revision. It is
+not required merely because another clarification answer was collected. Forge
+reports token usage separately for initial extraction, remediation deltas, and
+final verification; remediation should have a configured budget and must not
+silently fall back to full-document extraction when that budget is exceeded.
 
 Each turn targets one missing required field, even when the selected criterion
 has several gaps. The response retains the full missing-field list for audit but
@@ -212,9 +234,13 @@ evidence records whether it came from the source document or a supplemental
 answer so the two can never be presented as the same provenance.
 
 Questions expose plain-language requirements for each missing field. After the
-user approves the accumulated answers, Forge may materialize them into a new
-editable PRD revision under explicit user control. It never overwrites the
-source or claims that conversational evidence was originally present.
+user approves the accumulated answers, Forge may propose an integrated revision
+plan: place each answer in the most relevant existing section, identify any
+conflict with existing text, and retain an audit appendix. The user must resolve
+conflicts and approve the proposed edits before Forge creates a new editable
+copy. Forge never overwrites the source or claims that conversational evidence
+was originally present. The new copy receives a full assessment without
+supplemental evidence before Forge reports its final readiness.
 
 The generic `0.3.0-expert-prior` rubric added concrete coverage adapted from the
 reviewed multi-agent project: transitional/degraded and platform/accessibility

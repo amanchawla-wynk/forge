@@ -36,6 +36,13 @@ def test_mcp_exposes_sampling_and_fallback_tools():
         "detect_prd_framing",
         "discover_edge_case_question",
         "assess_edge_case_coverage",
+        "begin_prd_remediation",
+        "record_prd_answer",
+        "prepare_prd_checkpoint",
+        "apply_prd_checkpoint",
+        "delete_prd_remediation",
+        "preview_prd_revision",
+        "write_integrated_prd_revision",
     }
     observe = next(tool for tool in tools if tool.name == "observe_prd_visual")
     assert set(observe.input_schema["properties"]) == {
@@ -74,6 +81,12 @@ def test_mcp_exposes_sampling_and_fallback_tools():
         "source_path",
         "output_path",
         "supplemental_answers",
+    }
+    record = next(tool for tool in tools if tool.name == "record_prd_answer")
+    assert set(record.input_schema["properties"]) == {
+        "session_id",
+        "answer",
+        "force_checkpoint",
     }
 
 
@@ -163,6 +176,95 @@ async def test_prepare_prd_assessment_returns_every_long_document_batch(tmp_path
         "one exhaustive document batch" in batch["extraction_prompt"]
         for batch in batches
     )
+    assert all(
+        batch["plan_fingerprint"] == result.structured_content["plan_fingerprint"]
+        for batch in batches
+    )
+
+
+@pytest.mark.anyio
+async def test_remediation_collects_answers_before_one_delta_checkpoint(tmp_path):
+    path = tmp_path / "prd.md"
+    path.write_text("An incomplete product note.")
+    rubric = load_rubric("prd")
+    problem = rubric.criterion("problem_statement")
+    extraction = json.dumps(
+        {
+            "criteria": [
+                {
+                    "criterion_id": problem.id,
+                    "fields": [
+                        {"name": field.name, "value": None, "evidence": None}
+                        for field in problem.fields
+                    ],
+                }
+            ]
+        }
+    )
+
+    async with Client(mcp, raise_exceptions=True) as client:
+        started = await client.call_tool(
+            "begin_prd_remediation",
+            {"source_path": str(path), "extraction_json": extraction},
+        )
+        session_id = started.structured_content["session_id"]
+        answers = [
+            "GenZ users lack short-form stories.",
+            "Mobile-first GenZ viewers.",
+            "38 interviews requested this format.",
+        ]
+        recorded = None
+        for answer in answers:
+            recorded = await client.call_tool(
+                "record_prd_answer",
+                {"session_id": session_id, "answer": answer},
+            )
+        assert recorded is not None
+        assert recorded.structured_content["turn"]["checkpoint_due"] is True
+
+        prepared = await client.call_tool(
+            "prepare_prd_checkpoint", {"session_id": session_id}
+        )
+        assert "An incomplete product note." not in prepared.structured_content[
+            "extraction_prompt"
+        ]
+        values = dict(zip(["problem", "affected_users", "evidence"], answers))
+        delta = {
+            "delta_fingerprint": prepared.structured_content["delta_fingerprint"],
+            "criteria": [
+                {
+                    "criterion_id": problem.id,
+                    "fields": [
+                        {
+                            "name": field.name,
+                            "value": values.get(field.name),
+                            "evidence": (
+                                {"quote": values[field.name]}
+                                if field.name in values
+                                else None
+                            ),
+                        }
+                        for field in problem.fields
+                    ],
+                }
+            ],
+        }
+        applied = await client.call_tool(
+            "apply_prd_checkpoint",
+            {"session_id": session_id, "extraction_json": json.dumps(delta)},
+        )
+        await client.call_tool(
+            "delete_prd_remediation", {"session_id": session_id}
+        )
+
+    result = applied.structured_content["result"]
+    criterion = next(
+        item
+        for item in result["state"]["assessment"]["criteria"]
+        if item["criterion_id"] == "problem_statement"
+    )
+    assert criterion["verdict"] == "present"
+    assert len(result["credited_answer_ids"]) == 3
 
 
 @pytest.mark.anyio

@@ -210,3 +210,82 @@ def plan_questions(
         if limit is not None and len(questions) >= limit:
             break
     return questions
+
+
+def plan_question_queue(
+    rubric: Rubric,
+    assessment: Assessment,
+    *,
+    display_name: str | None = None,
+    framing: str | None = None,
+) -> list[Question]:
+    """Plan every currently missing field while presenting none in a batch.
+
+    The queue lets a client ask one question per turn without rescoring between
+    turns. It is rebuilt after each remediation checkpoint, so broader answers
+    can remove fields that are already satisfied.
+    """
+    failing = [
+        result
+        for result in assessment.criteria
+        if result.verdict in (Verdict.ABSENT, Verdict.PARTIAL)
+    ]
+    failing.sort(
+        key=lambda result: (
+            not result.gate_triggered,
+            -result.weight,
+            -len(result.consumers),
+            result.criterion_id,
+        )
+    )
+    resolved_framing = (
+        framing
+        if framing is not None and rubric.framing(framing) is not None
+        else rubric.default_framing
+    )
+    queue: list[Question] = []
+    for result in failing:
+        criterion = rubric.criterion(result.criterion_id)
+        missing_specs = [
+            field
+            for field in criterion.required_fields
+            if field.name in result.missing
+        ]
+        for field in missing_specs:
+            configured = field.question_for(resolved_framing)
+            base_question = (
+                configured.strip()
+                if configured
+                else (
+                    "What should the PRD say about this missing detail? "
+                    + field.description.strip()
+                )
+            )
+            queue.append(
+                Question(
+                    criterion_id=result.criterion_id,
+                    criterion_name=result.name,
+                    target_field=field.name,
+                    question=level0_question(base_question, display_name),
+                    base_question=base_question,
+                    framing=resolved_framing,
+                    missing_fields=result.missing,
+                    answer_requirements=[
+                        field.description.strip()
+                        + (
+                            f" {field.value_requirement.strip()}"
+                            if field.value_requirement
+                            else ""
+                        )
+                    ],
+                    is_gate=result.gate_triggered,
+                    band_if_answered=_simulate_field_answer(
+                        rubric,
+                        assessment,
+                        result.criterion_id,
+                        len(result.missing),
+                    ),
+                    unblocks_consumers=[consumer.value for consumer in result.consumers],
+                )
+            )
+    return queue

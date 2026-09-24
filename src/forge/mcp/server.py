@@ -33,7 +33,25 @@ from forge.ingest.batching import batch_document, plan_fingerprint
 from forge.ingest.models import ProductContextTerm, SupplementalAnswer
 from forge.ingest.visuals import render_visual_asset
 from forge.rubric.loader import load_rubric
-from forge.revise import RevisionResult, materialize_prd_revision
+from forge.revise import (
+    RevisionPlan,
+    RevisionResult,
+    approve_revision_plan,
+    materialize_integrated_prd_revision,
+    materialize_prd_revision,
+    preview_integrated_revision,
+)
+from forge.remediation import (
+    CheckpointPolicy,
+    RemediationCheckpointResult,
+    RemediationSessionStore,
+    RemediationTurn,
+    apply_checkpoint,
+    begin_remediation,
+    prepare_checkpoint,
+    record_answer,
+)
+from forge.extract.delta import DeltaExtractionPlan
 from forge.score.contextualize import (
     ContextCandidate,
     apply_edge_case_choice,
@@ -87,16 +105,22 @@ mcp = MCPServer(
         "score_prd_extraction. After the first assessment, call "
         "detect_prd_framing with its assessment JSON (or the fallback "
         "extraction JSON), then pass the returned framing on later assessment "
-        "calls. Return next_question to the user and resubmit "
-        "accumulated supplemental_answers after each reply, which invalidates "
-        "any earlier batch plan. When edge_cases_and_states lacks behavioural "
+        "calls. Return next_question to the user. For token-efficient follow-up, "
+        "call begin_prd_remediation with the verified initial extraction, then "
+        "record_prd_answer after each reply. Ask one question at a time without "
+        "rescoring until checkpoint_due is true; then call prepare_prd_checkpoint, "
+        "complete its bounded answer-only prompt, and call apply_prd_checkpoint. "
+        "When edge_cases_and_states lacks behavioural "
         "coverage, call assess_edge_case_coverage and pass its ledger into "
         "later score_prd_extraction/assess_prd calls; bind each answer to the "
         "returned requirement_quote, edge_case_id, and taxonomy_version so "
         "only that cell updates on rescore. discover_edge_case_question is a "
         "lighter one-off alternative that cannot by itself move the verdict "
         "past partial. When the user approves the answers, call "
-        "write_prd_revision to create a new editable PRD copy. Forge is advisory."
+        "preview_integrated_prd_revision, then write_integrated_prd_revision "
+        "with explicit per-edit actions to create a new editable copy. Run one "
+        "final assessment of that copy without supplemental answers. The simpler "
+        "write_prd_revision appendix mode remains available. Forge is advisory."
     ),
 )
 
@@ -117,7 +141,7 @@ def _anticipated(func: Callable[_P, _R]) -> Callable[_P, _R]:
         async def async_wrapper(*args: _P.args, **kwargs: _P.kwargs):
             try:
                 return await func(*args, **kwargs)
-            except (ValueError, FileNotFoundError) as error:
+            except (ValueError, FileNotFoundError, KeyError) as error:
                 raise ToolError(str(error)) from error
 
         return async_wrapper  # type: ignore[return-value]
@@ -126,7 +150,7 @@ def _anticipated(func: Callable[_P, _R]) -> Callable[_P, _R]:
     def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         try:
             return func(*args, **kwargs)
-        except (ValueError, FileNotFoundError) as error:
+        except (ValueError, FileNotFoundError, KeyError) as error:
             raise ToolError(str(error)) from error
 
     return wrapper
@@ -168,6 +192,7 @@ def _require_sampling(context: Context, tool_name: str, fallback_hint: str) -> N
 
 class PreparedExtractionBatch(BaseModel):
     batch_id: str
+    plan_fingerprint: str
     extraction_prompt: str
 
 
@@ -178,6 +203,7 @@ class PreparedAssessment(BaseModel):
     expected_runs: int
     supplemental_answers: list[SupplementalAnswer]
     product_context: list[ProductContextTerm]
+    plan_fingerprint: str
     extraction_batches: list[PreparedExtractionBatch]
     instructions: str
 
@@ -216,6 +242,24 @@ class BatchExtractionResult(BaseModel):
     fragments: list[ExtractionFragment]
     client_models: list[str]
     instructions: str
+
+
+class RemediationSessionResponse(BaseModel):
+    session_id: str
+    turn: RemediationTurn
+
+
+class RemediationCheckpointResponse(BaseModel):
+    session_id: str
+    result: RemediationCheckpointResult
+
+
+class DeletedRemediationSession(BaseModel):
+    session_id: str
+    deleted: bool
+
+
+_remediation_sessions = RemediationSessionStore()
 
 
 class VisualAssetSummary(BaseModel):
@@ -651,6 +695,7 @@ def prepare_prd_assessment(
         source_path, rubric_name, answers, product_context
     )
     batches = batch_document(document)
+    fingerprint = plan_fingerprint(batches, rubric.version)
     return PreparedAssessment(
         source_path=document.source_path,
         rubric_id=rubric.id,
@@ -658,9 +703,11 @@ def prepare_prd_assessment(
         expected_runs=rubric.extraction_runs,
         supplemental_answers=answers,
         product_context=product_context or [],
+        plan_fingerprint=fingerprint,
         extraction_batches=[
             PreparedExtractionBatch(
                 batch_id=batch.id,
+                plan_fingerprint=fingerprint,
                 extraction_prompt=build_extraction_prompt(
                     batch.document,
                     rubric,
@@ -673,7 +720,8 @@ def prepare_prd_assessment(
             "Complete every extraction batch with the connected agent model. "
             "For each independent run, submit all results as fragments using "
             '{"runs": [{"fragments": [{"batch_id": "batch-1", '
-            '"criteria": [...]}, ...]}]}. For stronger confidence, repeat every '
+            '"plan_fingerprint": "...", "criteria": [...]}, ...]}]}. Copy the '
+            "returned plan_fingerprint onto every fragment. For stronger confidence, repeat every "
             "batch independently for three complete runs. A single complete run "
             "is accepted but cannot establish test/retest stability."
         ),
@@ -706,6 +754,101 @@ def score_prd_extraction(
         framing=framing,
         edge_case_coverage=edge_case_coverage,
     )
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def begin_prd_remediation(
+    source_path: str,
+    extraction_json: str,
+    rubric_name: str = "prd",
+    product_context: list[ProductContextTerm] | None = None,
+    framing: str | None = None,
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None,
+    checkpoint_size: int = 5,
+) -> RemediationSessionResponse:
+    """Start a local, token-efficient clarification session."""
+    turn = begin_remediation(
+        source_path,
+        extraction_json,
+        rubric_name=rubric_name,
+        product_context=product_context,
+        framing=framing,
+        edge_case_coverage=edge_case_coverage,
+        checkpoint_policy=CheckpointPolicy(max_pending_answers=checkpoint_size),
+    )
+    session_id = _remediation_sessions.create(turn.state)
+    return RemediationSessionResponse(session_id=session_id, turn=turn)
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def record_prd_answer(
+    session_id: str,
+    answer: str,
+    force_checkpoint: bool = False,
+) -> RemediationSessionResponse:
+    """Record one answer without invoking a model or rescoring the PRD."""
+    state = _remediation_sessions.get(session_id)
+    turn = record_answer(state, answer, force_checkpoint=force_checkpoint)
+    _remediation_sessions.put(session_id, turn.state)
+    return RemediationSessionResponse(session_id=session_id, turn=turn)
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def prepare_prd_checkpoint(session_id: str) -> DeltaExtractionPlan:
+    """Prepare one bounded answer-only extraction prompt for a checkpoint."""
+    return prepare_checkpoint(_remediation_sessions.get(session_id))
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def apply_prd_checkpoint(
+    session_id: str,
+    extraction_json: str,
+) -> RemediationCheckpointResponse:
+    """Verify a criterion-local delta, merge it, and deterministically rescore."""
+    state = _remediation_sessions.get(session_id)
+    result = apply_checkpoint(state, extraction_json)
+    _remediation_sessions.put(session_id, result.state)
+    return RemediationCheckpointResponse(session_id=session_id, result=result)
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def delete_prd_remediation(session_id: str) -> DeletedRemediationSession:
+    """Delete one local remediation session immediately."""
+    _remediation_sessions.delete(session_id)
+    return DeletedRemediationSession(session_id=session_id, deleted=True)
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def preview_prd_revision(
+    source_path: str,
+    supplemental_answers: list[SupplementalAnswer],
+    section_overrides: dict[str, str] | None = None,
+) -> RevisionPlan:
+    """Preview source-bound placements and conflicts without writing a file."""
+    return preview_integrated_revision(
+        source_path,
+        supplemental_answers,
+        section_overrides=section_overrides,
+    )
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def write_integrated_prd_revision(
+    source_path: str,
+    output_path: str,
+    plan: RevisionPlan,
+    actions: dict[str, Literal["integrate", "audit_only", "skip"]],
+) -> RevisionResult:
+    """Write one explicitly approved revision plan into a new editable copy."""
+    approved = approve_revision_plan(plan, actions=actions)
+    return materialize_integrated_prd_revision(source_path, output_path, approved)
 
 
 @mcp.tool(structured_output=True)

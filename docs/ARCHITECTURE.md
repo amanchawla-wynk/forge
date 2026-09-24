@@ -110,16 +110,27 @@ The target public surface is:
   positive evidence, consolidate pessimistically, and return the versioned
   ledger plus its next uncovered question.
 
-Assessment responses return one highest-impact remediation question. The client
-keeps the conversation state and resubmits accumulated answers on each turn.
-Forge marks those answers as supplemental user evidence and includes them in
-normalization and quote verification without rewriting the source PRD.
+Assessment responses return one highest-impact remediation question. The
+checkpoint workflow keeps a `RemediationState` containing the source/rubric identity,
+immutable verified baseline extraction, last assessment, framing, queued
+questions, accepted answers, pending answers, and any edge-case ledger. An MCP
+or dashboard adapter may retain that state locally behind an opaque session id;
+the domain workflow remains independent of transport and model provider.
+
+Submitting an answer records the user's exact text and returns the next queued
+question without invoking extraction or scoring. By default, a checkpoint runs
+after five answers, after collecting the remaining fields of a failed gate, or
+when the user requests a rescore. The checkpoint sends only pending answer
+blocks and affected criterion schemas to the connected model. It verifies and
+merges criterion-local patches, deterministically rescores, and replaces the
+question queue. The unchanged source PRD is not re-extracted.
 
 The selected question names one `target_field`, one concise field-specific
 prompt, and one answer requirement. It also retains all `missing_fields` for the
-criterion audit. Rescoring after the answer determines whether the next turn
-stays on that criterion or advances; the planner never presents a batch of
-subquestions in one turn.
+criterion audit. The planner may queue multiple missing fields internally, but
+the client presents only one at a time. A checkpoint rescore removes questions
+already satisfied by broader answers and determines the next queue; no batch of
+subquestions is presented to the user.
 
 That field-specific prompt is `base_question`, always the plain rubric text.
 `question` may additionally carry a deterministic, filename-derived document
@@ -174,15 +185,22 @@ configured rationale.
 
 Each supplemental answer contains a rubric `criterion_id` and answer text. It
 is rendered as a distinct normalized block, and evidence verification rejects
-attempts to use that block for another criterion. Responses echo the accumulated
-answers and return `next_question` as either one question or `null` when the
-assessment has no remaining failed criterion.
+attempts to use that block for another criterion. Pending answers do not affect
+the displayed score until checkpoint verification. Responses expose collection
+progress, the reason for the next checkpoint, accumulated verified answers, and
+`next_question` as either one question or `null` when the verified assessment
+has no remaining failed criterion.
 
 Questions include the configured descriptions of their missing required fields.
-`write_prd_revision` supports DOCX, Markdown, and text sources, requires a new
-same-format output path, and refuses to overwrite an existing file. PDF remains
-read-only because appending text would not preserve an editable source or its
-layout semantics.
+`write_prd_revision` supports DOCX, Markdown, and text sources,
+requires a new same-format output path, refuses to overwrite an existing file,
+and appends a clarification section. `preview_prd_revision` and
+`write_integrated_prd_revision` add source-bound section placement, explicit
+per-edit approval, conflict resolution, and an audit appendix. The dashboard
+fully reassesses the generated copy without supplemental answers; MCP callers
+are instructed to run the same final assessment because writing itself never
+borrows a model. PDF remains read-only because revision would not preserve an
+editable source or its layout semantics.
 
 Assessment responses expose disputed criteria and recommend up to two more
 complete runs after initial disagreement. The fallback scorer already accepts
@@ -194,8 +212,12 @@ marked non-evidence prompt section, and included in the batch-plan fingerprint.
 They are never rendered as `SourceBlock`s, so `locate_quote` cannot verify a
 context-only claim. Changing context invalidates prior extraction fragments.
 
-Server-side session persistence remains deferred until the stateless
-conversation proves cumbersome.
+The one-answer/full-re-extraction loop proved cumbersome and expensive on a
+real long PRD. A lightweight local remediation-session store now backs the MCP
+and dashboard checkpoint APIs instead of a general workflow framework. Sessions contain no provider keys,
+are addressed by opaque ids, bind state to the source hash and rubric version,
+and have explicit expiry/deletion behavior. Adapters may continue to support a
+fully client-held state object where persistence is undesirable.
 
 `prepare_prd_assessment` returns `extraction_batches` rather than a single
 `extraction_prompt`, because a long document requires several exhaustive
@@ -213,12 +235,13 @@ and performs consolidation and scoring in `score_prd_extraction`.
 Generating dynamic tool signatures per document was rejected as unnecessary
 metaprogramming for the same capability.
 
-Because orchestration is client-side, fragments are bound to their inputs. Each
+Initial and final full-document orchestration remains bound to its inputs. Each
 plan has a fingerprint over its batch text and rubric version, and every
-fragment carries that fingerprint plus its `run_index`. Scoring rejects stale
-plans, repeated run indexes, and mixed runs, so a new supplemental answer
-requires re-running the batch flow instead of silently scoring outdated
-extractions.
+fragment must carry that fingerprint plus its `run_index`; scoring rejects
+stale plans, repeated run indexes, and mixed runs. Remediation deltas use a
+separate fingerprint over the baseline extraction identity, affected criterion
+schemas, and pending answer blocks. A new answer invalidates only an unprocessed
+delta plan, not the immutable full-document baseline.
 
 Anticipated failures are raised as `ToolError` so their messages reach the
 agent; the SDK would otherwise collapse them into "Error executing tool".

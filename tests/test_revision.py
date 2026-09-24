@@ -6,6 +6,11 @@ import pytest
 from forge.ingest.document import ingest_document
 from forge.ingest.models import SupplementalAnswer
 from forge.revise import materialize_prd_revision
+from forge.revise import (
+    approve_revision_plan,
+    materialize_integrated_prd_revision,
+    preview_integrated_revision,
+)
 
 
 def test_materializes_answers_into_new_markdown_revision(tmp_path):
@@ -64,3 +69,77 @@ def test_revision_never_overwrites_source_or_existing_output(tmp_path):
     output.write_text("Do not replace")
     with pytest.raises(ValueError, match="already exists"):
         materialize_prd_revision(source, output, [answer])
+
+
+def test_previews_approves_and_integrates_markdown_revision(tmp_path):
+    source = tmp_path / "prd.md"
+    output = tmp_path / "prd-revised.md"
+    source.write_text("# PRD\n\n## Success Metrics\n\nDAU is monitored.\n")
+    answer = SupplementalAnswer(
+        criterion_id="success_metrics",
+        answer="Primary metric: repeat usage increases from 20% to 30% in 90 days.",
+    )
+
+    plan = preview_integrated_revision(source, [answer])
+    assert not output.exists()
+    assert plan.edits[0].target_section == "Success Metrics"
+    assert plan.edits[0].existing_excerpt == "DAU is monitored."
+    assert plan.edits[0].conflicts[0].kind == "existing_section_content"
+    approved = approve_revision_plan(
+        plan, actions={plan.edits[0].edit_id: "integrate"}
+    )
+    result = materialize_integrated_prd_revision(source, output, approved)
+
+    assert source.read_text() == "# PRD\n\n## Success Metrics\n\nDAU is monitored.\n"
+    revised = output.read_text()
+    assert answer.answer in revised
+    assert revised.index(answer.answer) < revised.index("# Forge Revision Audit")
+    assert approved.approval_digest in revised
+    assert result.output_path == str(output.resolve())
+
+
+def test_integrated_revision_rejects_stale_source_and_modified_plan(tmp_path):
+    source = tmp_path / "prd.md"
+    source.write_text("# PRD\n\n## Problem\n\nCurrent text.\n")
+    answer = SupplementalAnswer(
+        criterion_id="problem_statement",
+        answer="Mobile viewers cannot find short-form stories.",
+    )
+    plan = preview_integrated_revision(source, [answer])
+    approved = approve_revision_plan(
+        plan, actions={plan.edits[0].edit_id: "integrate"}
+    )
+    source.write_text("# PRD\n\n## Problem\n\nChanged text.\n")
+
+    with pytest.raises(ValueError, match="source changed"):
+        materialize_integrated_prd_revision(
+            source, tmp_path / "revised.md", approved
+        )
+
+    source.write_text("# PRD\n\n## Problem\n\nCurrent text.\n")
+    approved.edits[0].edit.answer = "Tampered"
+    with pytest.raises(ValueError, match="modified after approval"):
+        materialize_integrated_prd_revision(
+            source, tmp_path / "revised.md", approved
+        )
+
+
+def test_missing_revision_section_requires_explicit_audit_resolution(tmp_path):
+    source = tmp_path / "prd.md"
+    output = tmp_path / "prd-revised.md"
+    source.write_text("# PRD\n\nContent.\n")
+    answer = SupplementalAnswer(
+        criterion_id="risk_compliance",
+        answer="No customer PII is stored.",
+    )
+    plan = preview_integrated_revision(source, [answer])
+    edit = plan.edits[0]
+    assert edit.target_section is None
+    assert edit.conflicts[0].kind == "missing_section"
+
+    with pytest.raises(ValueError, match="has no integration target"):
+        approve_revision_plan(plan, actions={edit.edit_id: "integrate"})
+
+    approved = approve_revision_plan(plan, actions={edit.edit_id: "audit_only"})
+    materialize_integrated_prd_revision(source, output, approved)
+    assert answer.answer in output.read_text()

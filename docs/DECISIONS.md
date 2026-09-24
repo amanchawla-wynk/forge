@@ -666,3 +666,60 @@ supersedes the old one.
   (SEP-2577); Forge has not yet investigated what SEP-2577 proposes in its
   place, and D-006/D-007's reliance on sampling should be revisited once that
   replacement is understood.
+
+## D-040: Checkpoint Remediation And Extract Only Answer Deltas
+
+- Status: implemented
+- Supersedes: D-010 and D-030 only where they require recomputation after every
+  answer, D-014's exclusively stateless transport, and D-020's consequence that
+  every answer invalidates the full-document extraction plan. One question per
+  user turn and criterion-bound evidence remain unchanged.
+- Decision: Ask one field-sized question at a time while collecting exact user
+  answers in a remediation session. Do not invoke a model or change the score
+  merely to advance to the next queued question. Process pending answers at a
+  bounded checkpoint: five answers by default, completion of the remaining
+  fields in a failed gate, or an explicit user request. A checkpoint extracts
+  only pending answer blocks against the affected criterion schemas and prior
+  verified values, verifies their quotes, merges criterion-local patches into
+  an immutable source/rubric-bound baseline, deterministically rescores, and
+  rebuilds the queue. One answer may satisfy multiple fields of its criterion
+  but cannot affect another criterion. Full exhaustive extraction is reserved
+  for an initial assessment, a changed source or rubric, and final verification
+  of a materialized revision.
+- Reason: A real OpenCode fallback run generated an extraction prompt of roughly
+  83,000 characters for the Micro Dramas PRD. Repeating the full document for
+  every atomic question multiplies latency and input tokens while the source is
+  unchanged. The evidence boundary needs criterion-local verification, not
+  repeated ingestion of unrelated sections.
+- Consequence: Add a domain `RemediationState`, deterministic internal question
+  queue, pending/verified answer separation, checkpoint policy, criterion-delta
+  extraction schema, merge validation, and separate initial/remediation/final
+  token accounting. Prefer a small Forge-owned state machine and lightweight
+  local session store over LangGraph; revisit a workflow framework only if
+  durable branching, background execution, or multi-party approvals become
+  concrete requirements. Full-document fragments must require fingerprints;
+  omitting one must not bypass stale-plan protection.
+
+## D-041: Preview Integrated Revisions And Verify A New Copy
+
+- Status: implemented
+- Supersedes: D-027 only where revision materialization is limited to appending
+  a clarification section. Its explicit approval, provenance, and no-overwrite
+  guarantees remain unchanged.
+- Decision: After remediation, map verified answers to proposed insertions or
+  replacements in existing PRD sections and show that revision plan to the user.
+  Detect conflicts with current text and require an explicit resolution. Only
+  after approval may Forge create a same-format editable copy; it never modifies
+  the source or an existing output. The copy includes an audit appendix of
+  accepted clarifications. Forge then runs one full assessment of the new copy
+  without supplemental evidence and reports that artifact's readiness.
+- Reason: Supplemental answers improve a conversational score but downstream
+  teams need one durable, internally coherent PRD. Appending every decision at
+  the end preserves provenance but leaves readers to reconcile sections and can
+  retain contradictions. A new-copy preview keeps the user as author while the
+  final reassessment verifies what will actually circulate.
+- Consequence: Keep the current appendix-only mode as a low-risk option and add
+  an integrated-revision mode. Generated placement or connective wording is a
+  proposal, never scored evidence before approval and materialization. Revision
+  generation runs once per approved batch, not after every question, and its
+  model usage is reported separately.

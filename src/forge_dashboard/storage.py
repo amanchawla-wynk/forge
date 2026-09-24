@@ -51,3 +51,24 @@ class DocumentStore:
         if stored is None:
             raise KeyError(f"unknown document_id {document_id!r}")
         return stored
+
+    def allocate_generated(self, filename: str) -> StoredDocument:
+        suffix = Path(filename).suffix.lower()
+        if suffix not in SUPPORTED_EXTENSIONS or suffix == ".pdf":
+            raise ValueError("generated revisions require DOCX, Markdown, or text")
+        document_id = uuid.uuid4().hex
+        return StoredDocument(
+            document_id=document_id,
+            filename=filename,
+            path=self._root / f"{document_id}{suffix}",
+        )
+
+    def register_generated(self, stored: StoredDocument) -> None:
+        if not stored.path.exists() or not stored.path.is_file():
+            raise FileNotFoundError(f"generated document not found: {stored.path}")
+        with self._lock:
+            if stored.document_id in self._documents:
+                raise ValueError(
+                    f"document_id already registered: {stored.document_id}"
+                )
+            self._documents[stored.document_id] = stored
