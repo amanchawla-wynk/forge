@@ -83,6 +83,10 @@
   weighted average from hiding a known gap.
 - Excluded public and synthetic examples from headline calibration metrics and
   corrected false-ready and false-not-ready denominators.
+- Added an optional local dashboard (`forge_dashboard` FastAPI backend plus a
+  Next.js/shadcn UI in `web/`) covering upload, full assessment, and the
+  one-question-at-a-time remediation loop, as a documented bring-your-own-key
+  exception (D-033) that never touches `forge-mcp` or the domain core.
 
 ## Current Build
 
@@ -98,6 +102,8 @@
 ## Next
 
 - Test installation and behavior in Cursor and GitHub Copilot.
+- Test the dashboard's `dashboard` extra install and BYOK flow against real
+  Anthropic, OpenAI, and Gemini keys on a clean machine.
 - Compare a direct Docling adapter with current PDF and DOCX normalization on
   representative fixtures before expanding to multimodal document content.
 - Add qualitative risk records only where source evidence or a rubric omission
@@ -115,7 +121,9 @@
 
 ## Later
 
-- Dashboard using the same core packages.
+- Dashboard: visual asset review, long-document batch progress UI, and
+  revision export/download, reusing `forge.ingest.visuals` and `forge.revise`
+  the same way the v1 dashboard reuses `forge.service`.
 - Optional Excel workbook output adapter.
 - Optional SharePoint publication adapter using caller-managed authentication.
 - Optional remote MCP transport.

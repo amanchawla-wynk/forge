@@ -176,6 +176,39 @@ popularity, or template provenance is not an independent readiness label.
 The scoring and ingestion packages must remain independent of MCP so they can be
 reused by a future dashboard. MCP code is an adapter, not the domain core.
 
+## Dashboard Mode (Optional, BYOK)
+
+`forge_dashboard` (`src/forge_dashboard/`) is a second, optional adapter around
+the same domain core, exposed as a small local FastAPI service for the Next.js
+UI in `web/`. It exists because a browser has no MCP client to borrow a model
+from. See D-033 for the full decision and rationale; this section only records
+the resulting boundary.
+
+- The dashboard is not installed or run by default. It lives behind the
+  `dashboard` optional dependency group so `forge-mcp` and its default install
+  never gain a provider SDK.
+- The dashboard accepts a per-request LLM provider, model, and API key from the
+  browser and calls it through `litellm`. The key is never written to disk, a
+  database, or a log by the backend; it is held client-side for the browser
+  session and resent with each request.
+- Everything after the model call is identical to the MCP path: the same
+  `build_extraction_prompt`, `parse_extraction`, evidence verification in
+  `forge.extract.batch`, and deterministic scoring in `forge.score` are reused
+  unmodified through `forge.service`. The dashboard backend only replaces MCP
+  sampling with a direct LiteLLM call as the source of extraction completions.
+- The dashboard keeps Forge's stateless supplemental-answer design (D-014):
+  the browser accumulates `supplemental_answers` and resubmits the full list
+  on every turn; the backend does not persist a conversation session.
+- Uploaded documents are written to a local, gitignored working directory for
+  the lifetime of the process only, addressed by an opaque document id; the
+  backend does not expose raw filesystem paths to the browser.
+
+A fourth provider option, `cursor`, does not call an LLM provider at all: it
+authenticates to Cursor's Cloud Agents API with a Cursor-issued key and runs
+extraction through a short-lived cloud agent instead of a direct model call.
+See D-034 for the full rationale, cost/latency tradeoffs, and why it is
+represented as a `provider` value rather than a separate concept.
+
 ## Dependency Strategy
 
 Forge reuses maintained open-source parsing and chunking components before

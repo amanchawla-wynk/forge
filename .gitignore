@@ -4,3 +4,9 @@
 *.pyc
 graphify-out/
 sampleDoc/
+
+# Optional local dashboard (see docs/DECISIONS.md D-033)
+web/node_modules/
+web/.next/
+web/.env.local
+web/next-env.d.ts

@@ -4,6 +4,14 @@ Forge is a local-first MCP server that assesses whether a PRD is complete and
 actionable. It uses the connected MCP client's LLM. It must never require,
 store, or accept an LLM provider API key.
 
+The one documented exception is the optional local dashboard
+(`src/forge_dashboard/`, `web/`), which has no MCP client to borrow a model
+from and therefore accepts a per-request, browser-held, never-persisted
+bring-your-own-key for its own LiteLLM calls only. It is not installed by
+default (`dashboard` extra) and never touches the MCP server or core domain
+code. See `docs/DECISIONS.md` D-033 and `docs/ARCHITECTURE.md` "Dashboard Mode"
+before changing anything in that boundary.
+
 Before changing product behavior, architecture, scoring, or the MCP surface,
 read these files in order:
 

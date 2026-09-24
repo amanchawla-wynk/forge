@@ -274,6 +274,49 @@ the baseline for organization-specific use.
 See `docs/EXPERT_BASELINE.md` for the published standards and public corpus
 research behind the bundled rubric.
 
+## Optional Local Dashboard (Bring Your Own Key)
+
+For people without an MCP client, an optional local web dashboard exposes the
+same upload, assessment, and one-question-at-a-time remediation loop. It is a
+documented, narrow exception to "no API key": see `docs/DECISIONS.md` D-033
+and `docs/ARCHITECTURE.md` "Dashboard Mode" before changing it. It is **not**
+installed by default and never touches `forge-mcp` or the core domain code.
+
+You supply your own Anthropic, OpenAI, or Gemini API key in the browser, or a
+Cursor API key generated at `cursor.com/dashboard/api` if you'd rather not
+configure Forge as an MCP server at all (see D-034 — this path runs each
+extraction through a short-lived Cursor Cloud Agent, so it is slower and
+billed against your Cursor plan instead of raw token pricing). Whichever you
+choose, the key is held in that browser tab for the session only, sent to
+your local FastAPI process per request, and never written to disk, a
+database, or a log.
+
+Click **Connect model** in the top navbar to open the connection dialog. It
+makes one minimal test call before saving, so the navbar badge only turns
+green ("Connected") once the key/model combination is actually verified.
+
+Install the extra and start the backend:
+
+```bash
+uv sync --extra dashboard
+uv run forge-dashboard-api
+```
+
+This starts a local API on `http://127.0.0.1:8000`. In a second terminal,
+start the Next.js UI:
+
+```bash
+cd web
+npm install
+cp .env.local.example .env.local
+npm run dev
+```
+
+Open `http://localhost:3000`, choose a provider and model, paste your API
+key, upload a PDF/DOCX/Markdown/text PRD, and click **Assess PRD**. Answer the
+single remediation question shown after each assessment to rescore with
+supplemental evidence, exactly like the MCP conversation loop.
+
 ## Troubleshooting
 
 - If a client reports that `uv` was not found, use the absolute path returned by

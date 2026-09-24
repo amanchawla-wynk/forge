@@ -17,7 +17,8 @@ product bet itself is strategically correct.
 - Engineering, design, QA, data, risk, leadership, and go-to-market readers
   who need their missing inputs identified.
 - Coding-agent users in clients such as Cursor and GitHub Copilot.
-- A future dashboard using the same ingestion and deterministic scoring core.
+- Users of the optional local dashboard who supply their own Claude, OpenAI,
+  or Gemini API key instead of an MCP client.
 
 ## Initial Scope
 
@@ -34,6 +35,10 @@ product bet itself is strategically correct.
   missing field in concise language, retains the answer as supplemental
   evidence, and then rescores.
 - Local MCP server distribution with no Forge-hosted service required.
+- An optional local dashboard (FastAPI + Next.js) exposing the same
+  assessment and remediation loop for users without an MCP client. It is a
+  documented exception to "no API key": see `docs/DECISIONS.md` D-033. It is
+  not installed by default and is not a hosted service.
 
 ## Non-goals For V1
 

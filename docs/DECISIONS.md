@@ -413,3 +413,68 @@ supersedes the old one.
 - Consequence: The bundled rubric advances to `0.4.0-expert-baseline` with 15
   criteria. Public and synthetic cases are excluded from headline calibration
   metrics, while internal labels can later validate or tune the baseline.
+
+## D-033: Optional Local Dashboard With Bring-Your-Own-Key Inference
+
+- Status: accepted
+- Decision: Add an optional, separately packaged local dashboard
+  (`forge_dashboard`, a FastAPI service, plus a Next.js UI in `web/`) as a
+  second, non-default way to run Forge's existing ingestion, extraction, and
+  deterministic scoring core. Unlike the MCP server, the dashboard has no
+  connected MCP client to borrow a model from, so it accepts a user-supplied
+  LLM API key (Anthropic, OpenAI, or Gemini through LiteLLM) for the sole
+  purpose of driving extraction calls for that user's own local session.
+  - The MCP server (`forge-mcp`, `src/forge/mcp/`) and the core domain
+    packages (`ingest`, `extract`, `rubric`, `score`) are unchanged and remain
+    exactly as governed by D-006: no API key, no provider SDK, no direct
+    provider calls anywhere in that path or its default install.
+  - The key is never persisted to disk, a database, or a log by the
+    dashboard backend. It is held in the browser for the session and sent
+    per-request to the local FastAPI process, which forwards it to LiteLLM
+    for that call only and does not write it anywhere.
+  - `litellm` and the dashboard's web dependencies live behind a `dashboard`
+    optional dependency group (`pip install forge[dashboard]` /
+    `uv sync --extra dashboard`), so installing or running the MCP server
+    never pulls in a provider SDK.
+  - The dashboard reuses `forge.service`, `forge.ingest`, `forge.extract`,
+    `forge.rubric`, and `forge.score` unmodified; it only replaces the
+    "borrow the MCP client's model" step with "call the user's own key
+    through LiteLLM," using the same extraction prompts, the same evidence
+    verification, and the same deterministic scoring engine.
+- Reason: The user explicitly asked for a local web dashboard that supports
+  Claude, OpenAI, and Gemini directly, which structurally requires accepting a
+  key somewhere outside an MCP client. Confining that exception to a clearly
+  labelled, opt-in, separately installed surface preserves D-006 for the
+  primary MCP distribution instead of quietly weakening it project-wide.
+- Consequence: `AGENTS.md`'s "never require, store, or accept an API key" rule
+  now has one documented, narrow exception: the optional dashboard's
+  per-request, browser-held BYOK flow. Any future change that stores a key on
+  disk, logs it, or adds it to the default install must be treated as a new
+  decision, not a natural extension of this one.
+
+## D-034: Cursor Cloud Agents As A Second Dashboard Inference Path
+
+- Status: accepted
+- Decision: The dashboard accepts a fourth `provider` option, `cursor`, for
+  people who want to avoid configuring Forge as an MCP server entirely. A
+  Cursor API key (generated at `cursor.com/dashboard/api`) is not an LLM
+  provider key and cannot go through LiteLLM, so `forge_dashboard.cursor_agent`
+  calls Cursor's Cloud Agents API directly: it creates one short-lived,
+  no-repo cloud agent per extraction call, polls its single run to
+  completion, reads the agent's final reply as the extraction JSON, and
+  best-effort archives the agent afterward.
+- Reason: The user asked for a way to reuse a key generated from Cursor
+  instead of a per-provider key, for dashboard users who don't want MCP.
+  Cursor's public API for this purpose is the Cloud Agents API, not a
+  synchronous completion endpoint; representing it as a fourth "provider" in
+  the same BYOK flow was simpler than inventing a separate concept for it.
+- Consequence: This path is slower (cloud VM boot plus reasoning time before
+  the run reaches `FINISHED`), billed against the caller's Cursor plan/agent
+  quota rather than raw token pricing, and sends PRD text to Cursor's cloud
+  infrastructure for that run rather than staying fully local — the dashboard
+  UI states this explicitly when `cursor` is selected. The key still follows
+  D-033: forwarded per request only, never written to disk, a database, or a
+  log. Model selection is optional for this provider (Cursor resolves the
+  caller's configured default when omitted); the exact `model.id` values in
+  Cursor's catalog are user-supplied free text rather than a fixed list,
+  since they are internal to Cursor's account/team configuration.
