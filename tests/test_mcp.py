@@ -29,6 +29,8 @@ def test_mcp_exposes_sampling_and_fallback_tools():
         "list_prd_visuals",
         "observe_prd_visual",
         "prepare_prd_assessment",
+        "prepare_prd_advisory",
+        "apply_prd_advisory",
         "score_prd_extraction",
         "write_prd_revision",
         "describe_prd_rubric",
@@ -1248,3 +1250,27 @@ async def test_starting_parallel_review_requires_explicit_start_new(tmp_path):
             separate.structured_content["review_session_id"]
             != first.structured_content["review_session_id"]
         )
+
+
+@pytest.mark.anyio
+async def test_agent_fallback_can_prepare_and_apply_framing(tmp_path):
+    path = tmp_path / "prd.md"
+    path.write_text("A new audience opportunity for short-form stories.")
+    inputs = {
+        "kind": "framing",
+        "source_path": str(path),
+        "extraction_json": _bare_extraction(),
+    }
+
+    async with Client(mcp, raise_exceptions=True) as client:
+        prepared = await client.call_tool("prepare_prd_advisory", inputs)
+        assert prepared.structured_content["completion_count"] == 1
+        assert "Return JSON only" in prepared.structured_content["prompt"]
+
+        applied = await client.call_tool(
+            "apply_prd_advisory",
+            {**inputs, "completions": ['{"framing": 2}']},
+        )
+
+    assert applied.structured_content["kind"] == "framing"
+    assert applied.structured_content["result"]["client_model"] == "agent_fallback"

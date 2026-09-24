@@ -754,3 +754,23 @@ supersedes the old one.
   session id alone is not authorization. If LangGraph is adopted later, its
   `thread_id` equals the Forge review id. GraphRAG remains outside workflow and
   scoring state.
+
+## D-043: Harden Durable Review Integrity Before Expanding Scope
+
+- Status: implemented
+- Decision: Verify edge-case ledgers before session scoring; persist dashboard
+  documents, revision plans, and artifact links; bind operation ids to request
+  digests and reserve external inference; distinguish source-run agreement from
+  single remediation deltas; provide agent fallbacks for advisory sampling; and
+  enforce local resource, retention, path-redaction, and loopback safeguards.
+- Reason: Durable identity is insufficient if unverified coverage can alter a
+  score, process restart loses the source, retries duplicate paid work, one
+  delta looks like repeated agreement, or local adapter details leak to the
+  browser. These failures would undermine the evidence boundary and make later
+  validation results uninterpretable.
+- Consequence: Dashboard state is locally persistent and explicitly deletable;
+  revision/final-assessment provenance is linked to the originating review;
+  advisory features work without MCP sampling through prepare/apply tools; DOCX
+  headers, footers, and body table order are covered; and organization-validity
+  claims remain gated by the preregistered holdout protocol in
+  `docs/VALIDATION_PROTOCOL.md`.

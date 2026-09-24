@@ -61,9 +61,9 @@ normal `ToolError` handling entirely, leaving the agent nothing useful to
 read. `assess_prd`/`assess_prd_batch` point the agent at
 `prepare_prd_assessment`; `detect_prd_framing`,
 `discover_edge_case_question`, `assess_edge_case_coverage`, and
-`contextualize_next_question` have no non-sampling fallback yet, so their
-error says so explicitly and tells the agent to continue without that
-enrichment rather than block the assessment.
+`contextualize_next_question` also expose the unified
+`prepare_prd_advisory`/`apply_prd_advisory` agent fallback. Coverage requires
+three independent completions; the other closed-set enrichments require one.
 
 ## Trust Boundaries
 
@@ -330,9 +330,13 @@ the resulting boundary.
   `next_action` in per-tab `sessionStorage`; it never persists the provider key
   server-side. A newly uploaded exact document triggers explicit review
   discovery and Resume / Start new / Cancel choices rather than auto-resume.
-- Uploaded documents are written to a local, gitignored working directory for
-  the lifetime of the process only, addressed by an opaque document id; the
-  backend does not expose raw filesystem paths to the browser.
+- Uploaded documents, generated artifacts, and revision plans are written to a
+  durable local, gitignored dashboard directory with a SQLite index and opaque
+  ids. Dashboard DTOs do not expose raw filesystem paths or internal extraction
+  state to the browser.
+- Dashboard inference is concurrency-limited and time-bounded, uploads have a
+  configurable byte limit, SQLite uses secure local permissions and a busy
+  timeout, and the server refuses non-loopback binding.
 
 A fourth provider option, `cursor`, does not call an LLM provider at all: it
 authenticates to Cursor's Cloud Agents API with a Cursor-issued key and runs

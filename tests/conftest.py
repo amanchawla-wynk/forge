@@ -15,9 +15,13 @@ def isolated_review_store(tmp_path, monkeypatch):
 
     import forge.mcp.server as server
     import forge_dashboard.app as dashboard
+    from forge_dashboard.storage import DocumentStore
 
     monkeypatch.setattr(server, "_review_repository", None, raising=False)
     monkeypatch.setattr(dashboard, "_review_repository", None, raising=False)
+    monkeypatch.setattr(
+        dashboard, "_store", DocumentStore(tmp_path / "dashboard"), raising=False
+    )
     yield
     monkeypatch.setattr(server, "_review_repository", None, raising=False)
     monkeypatch.setattr(dashboard, "_review_repository", None, raising=False)

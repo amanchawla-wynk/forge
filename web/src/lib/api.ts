@@ -142,13 +142,17 @@ export async function findDocumentReviews(
 export async function resumeDocumentReview(
   documentId: string,
   reviewSessionId: string,
+  confirmClientChange = false,
 ): Promise<AssessmentResponse> {
   const response = await fetch(
     `${API_BASE_URL}/api/documents/${documentId}/reviews/${reviewSessionId}/resume`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ operation_id: crypto.randomUUID() }),
+      body: JSON.stringify({
+        operation_id: crypto.randomUUID(),
+        confirm_client_change: confirmClientChange,
+      }),
     },
   );
   if (!response.ok) {
@@ -159,6 +163,9 @@ export async function resumeDocumentReview(
 
 export async function previewRevision(
   documentId: string,
+  reviewSessionId: string,
+  sessionVersion: number,
+  operationId: string,
   supplementalAnswers: SupplementalAnswer[],
 ): Promise<RevisionPreview> {
   const response = await fetch(
@@ -166,7 +173,12 @@ export async function previewRevision(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ supplemental_answers: supplementalAnswers }),
+      body: JSON.stringify({
+        review_session_id: reviewSessionId,
+        session_version: sessionVersion,
+        operation_id: operationId,
+        supplemental_answers: supplementalAnswers,
+      }),
     },
   );
   if (!response.ok) {
@@ -177,6 +189,9 @@ export async function previewRevision(
 
 export async function createRevision(
   documentId: string,
+  reviewSessionId: string,
+  sessionVersion: number,
+  operationId: string,
   planId: string,
   actions: Record<string, RevisionAction>,
   llm: LLMConfig,
@@ -186,7 +201,14 @@ export async function createRevision(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan_id: planId, actions, llm }),
+      body: JSON.stringify({
+        review_session_id: reviewSessionId,
+        session_version: sessionVersion,
+        operation_id: operationId,
+        plan_id: planId,
+        actions,
+        llm,
+      }),
     },
   );
   if (!response.ok) {

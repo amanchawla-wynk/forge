@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
+from collections import Counter
 
 from collections.abc import Callable
 from functools import wraps
@@ -62,6 +63,7 @@ from forge.sessions import (
     status_for,
     turn_for_session,
     workflow_for_turn,
+    operation_digest,
 )
 from forge.extract.delta import DeltaExtractionPlan
 from forge.score.contextualize import (
@@ -1047,7 +1049,16 @@ def record_prd_answer(
     `operation_id` must be unique per answer so a retried call cannot record
     the same answer twice.
     """
-    cached = _reviews_store().operation_result(review_session_id, operation_id)
+    request_digest = operation_digest(
+        "record_answer",
+        {"answer": answer, "force_checkpoint": force_checkpoint},
+    )
+    cached = _reviews_store().operation_result(
+        review_session_id,
+        operation_id,
+        operation_type="record_answer",
+        request_digest=request_digest,
+    )
     if cached is not None:
         return _session_response(_reviews_store().get(review_session_id))
     session = _reviews_store().get(review_session_id)
@@ -1062,6 +1073,8 @@ def record_prd_answer(
         event_type="answer_recorded",
         result_json=turn.model_dump_json(),
         event_payload={"checkpoint_due": turn.checkpoint_due},
+        operation_type="record_answer",
+        request_digest=request_digest,
     )
     return _session_response(updated)
 
@@ -1074,7 +1087,15 @@ def prepare_prd_checkpoint(
     operation_id: str,
 ) -> PreparedCheckpointResponse:
     """Prepare a bounded delta and advance the review to `submit_delta`."""
-    cached = _reviews_store().operation_result(review_session_id, operation_id)
+    request_digest = operation_digest(
+        "prepare_checkpoint", {"session_version": session_version}
+    )
+    cached = _reviews_store().operation_result(
+        review_session_id,
+        operation_id,
+        operation_type="prepare_checkpoint",
+        request_digest=request_digest,
+    )
     if cached is not None:
         session = _reviews_store().get(review_session_id)
         return PreparedCheckpointResponse(
@@ -1095,6 +1116,8 @@ def prepare_prd_checkpoint(
         workflow_state=WorkflowState.AWAITING_DELTA_EXTRACTION,
         event_type="checkpoint_prepared",
         result_json=plan.model_dump_json(),
+        operation_type="prepare_checkpoint",
+        request_digest=request_digest,
     )
     return PreparedCheckpointResponse(
         review_session_id=session.review_session_id,
@@ -1114,7 +1137,15 @@ def apply_prd_checkpoint(
     extraction_json: str,
 ) -> RemediationCheckpointResponse:
     """Verify a criterion-local delta, merge it, and deterministically rescore."""
-    cached = _reviews_store().operation_result(review_session_id, operation_id)
+    request_digest = operation_digest(
+        "apply_checkpoint", {"extraction_json": extraction_json}
+    )
+    cached = _reviews_store().operation_result(
+        review_session_id,
+        operation_id,
+        operation_type="apply_checkpoint",
+        request_digest=request_digest,
+    )
     if cached is not None:
         session = _reviews_store().get(review_session_id)
         return RemediationCheckpointResponse(
@@ -1142,6 +1173,8 @@ def apply_prd_checkpoint(
             "previous_band": result.previous_band,
             "current_band": result.current_band,
         },
+        operation_type="apply_checkpoint",
+        request_digest=request_digest,
     )
     return RemediationCheckpointResponse(
         review_session_id=updated.review_session_id,
@@ -1858,6 +1891,18 @@ class ContextualizedQuestion(BaseModel):
     scoring_note: str
 
 
+class PreparedAdvisory(BaseModel):
+    kind: Literal["framing", "edge_case_coverage", "edge_case_question", "contextualize"]
+    prompt: str
+    completion_count: int
+    instructions: str
+
+
+class AdvisoryFallbackResult(BaseModel):
+    kind: str
+    result: dict[str, Any]
+
+
 _CONTEXTUALIZATION_NOTE = (
     "Advisory phrasing only. The model could only choose an index from a "
     "closed list of facts Forge had already verified against the document; "
@@ -1995,6 +2040,222 @@ async def contextualize_next_question(
         client_model=choice.model or "unreported",
         scoring_note=_CONTEXTUALIZATION_NOTE,
     )
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def prepare_prd_advisory(
+    kind: Literal[
+        "framing", "edge_case_coverage", "edge_case_question", "contextualize"
+    ],
+    source_path: str,
+    extraction_json: str | dict[str, object] | None = None,
+    assessment_json: str | dict[str, object] | None = None,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+    criterion_id: str | None = None,
+    framing: str | None = None,
+) -> PreparedAdvisory:
+    """Prepare a sampling-independent prompt for one advisory enrichment."""
+    if kind == "framing":
+        plan = _prepare_framing_plan(
+            source_path,
+            extraction_json,
+            assessment_json,
+            rubric_name,
+            supplemental_answers,
+            product_context,
+        )
+        prompt = build_framing_prompt(plan.rubric, plan.candidates)
+        count = 1
+    elif kind == "edge_case_coverage":
+        plan = _prepare_coverage_plan(
+            source_path,
+            extraction_json,
+            assessment_json,
+            rubric_name,
+            supplemental_answers,
+            product_context,
+        )
+        prompt = plan.prompt
+        count = 3
+    elif kind == "edge_case_question":
+        plan = _prepare_edge_case_plan(
+            source_path,
+            extraction_json,
+            assessment_json,
+            rubric_name,
+            supplemental_answers,
+            product_context,
+            framing,
+        )
+        prompt = plan.prompt
+        count = 1
+    else:
+        if not isinstance(extraction_json, str):
+            raise ValueError("contextualize requires extraction_json as a JSON string")
+        plan = _prepare_contextualization(
+            source_path,
+            extraction_json,
+            rubric_name,
+            supplemental_answers,
+            product_context,
+            criterion_id,
+            framing,
+        )
+        prompt = plan.prompt
+        count = 1
+    return PreparedAdvisory(
+        kind=kind,
+        prompt=prompt,
+        completion_count=count,
+        instructions=(
+            f"Run this prompt {count} independent time(s) with the connected "
+            "agent, then call apply_prd_advisory with the completion strings "
+            "and the same source/extraction inputs."
+        ),
+    )
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def apply_prd_advisory(
+    kind: Literal[
+        "framing", "edge_case_coverage", "edge_case_question", "contextualize"
+    ],
+    source_path: str,
+    completions: list[str],
+    extraction_json: str | dict[str, object] | None = None,
+    assessment_json: str | dict[str, object] | None = None,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+    criterion_id: str | None = None,
+    framing: str | None = None,
+) -> AdvisoryFallbackResult:
+    """Mechanically validate and apply agent-produced advisory choices."""
+    completion_count = 3 if kind == "edge_case_coverage" else 1
+    if len(completions) != completion_count:
+        raise ValueError(
+            f"{kind} requires exactly {completion_count} completion(s)"
+        )
+    if kind == "framing":
+        plan = _prepare_framing_plan(
+            source_path, extraction_json, assessment_json, rubric_name,
+            supplemental_answers, product_context,
+        )
+        detected = parse_framing_choice(completions[0], plan.rubric)
+        resolved = detected or plan.rubric.default_framing
+        option = plan.rubric.framing(resolved) if resolved else None
+        questions = plan_questions(
+            plan.rubric, plan.assessment, limit=1,
+            display_name=plan.display_name, framing=resolved,
+        )
+        result: BaseModel = DetectedFraming(
+            framing=resolved,
+            framing_label=option.label if option else None,
+            default_framing=plan.rubric.default_framing,
+            options=[
+                FramingOption(
+                    id=item.id,
+                    label=item.label,
+                    description=" ".join(item.description.split()),
+                )
+                for item in plan.rubric.framings
+            ],
+            was_detected=detected is not None,
+            next_question=questions[0] if questions else None,
+            client_model="agent_fallback",
+            scoring_note=_FRAMING_NOTE,
+        )
+    elif kind == "edge_case_coverage":
+        plan = _prepare_coverage_plan(
+            source_path, extraction_json, assessment_json, rubric_name,
+            supplemental_answers, product_context,
+        )
+        parsed_runs = [
+            parse_coverage_classification(
+                completion, plan.requirements, plan.evidence_candidates, plan.pairs
+            )
+            for completion in completions
+        ]
+        if any(item is None for item in parsed_runs):
+            raise ValueError("agent returned invalid edge-case coverage JSON")
+        consolidated, agreement = consolidate_coverage_ledgers(parsed_runs)  # type: ignore[arg-type]
+        document, _ = prepare_assessment_input(
+            source_path, rubric_name, supplemental_answers, product_context
+        )
+        ledger = verify_coverage_ledger(document, consolidated)
+        next_item = next_uncovered_item(ledger)
+        counts = Counter(item.status for item in ledger.items)
+        result = EdgeCaseCoverageResult(
+            ledger=ledger,
+            complete=ledger.is_complete,
+            covered_count=counts[CoverageStatus.COVERED],
+            missing_count=counts[CoverageStatus.MISSING],
+            unclear_count=counts[CoverageStatus.UNCLEAR],
+            not_applicable_count=counts[CoverageStatus.NOT_APPLICABLE],
+            next_question=(
+                render_coverage_question(plan.framing_plan.display_name, next_item)
+                if next_item else None
+            ),
+            next_requirement_quote=next_item.requirement_quote if next_item else None,
+            next_edge_case_id=next_item.edge_case_id if next_item else None,
+            confidence=round(sum(agreement) / len(agreement), 4) if agreement else 0,
+            disputed_pairs=[
+                f"{item.requirement_block_id or item.requirement_quote}:{item.edge_case_id}"
+                for item, value in zip(ledger.items, agreement, strict=True)
+                if value < 1
+            ],
+            client_model="agent_fallback",
+            scoring_note="Verified fallback coverage against taxonomy 1.0.",
+        )
+    elif kind == "edge_case_question":
+        plan = _prepare_edge_case_plan(
+            source_path, extraction_json, assessment_json, rubric_name,
+            supplemental_answers, product_context, framing,
+        )
+        parsed = parse_edge_case_choice(completions[0], len(plan.candidates))
+        text, candidate, edge_case = apply_edge_case_choice(
+            plan.display_name, plan.candidates, parsed
+        )
+        result = DiscoveredEdgeCaseQuestion(
+            criterion_id="edge_cases_and_states",
+            target_field=plan.question.target_field or "",
+            question=text or plan.question.question,
+            anchor=(ContextCandidateSummary(**candidate.model_dump()) if candidate else None),
+            edge_case_id=edge_case.id if edge_case else None,
+            edge_case_label=edge_case.label if edge_case else None,
+            answer_requirements=plan.question.answer_requirements,
+            discovery_source="closed_set_choice" if text else "none",
+            client_model="agent_fallback",
+            scoring_note=_EDGE_CASE_NOTE,
+        )
+    else:
+        if not isinstance(extraction_json, str):
+            raise ValueError("contextualize requires extraction_json as a JSON string")
+        plan = _prepare_contextualization(
+            source_path, extraction_json, rubric_name, supplemental_answers,
+            product_context, criterion_id, framing,
+        )
+        picked = parse_choice(completions[0], len(plan.candidates))
+        text, chosen = apply_choice(
+            plan.question.base_question, plan.display_name, plan.candidates, picked
+        )
+        result = ContextualizedQuestion(
+            criterion_id=plan.question.criterion_id,
+            target_field=plan.question.target_field,
+            framing=plan.question.framing,
+            base_question=plan.question.base_question,
+            question=text,
+            candidates=[ContextCandidateSummary(**item.model_dump()) for item in plan.candidates],
+            chosen_index=chosen.index if chosen else 0,
+            contextualization_source="llm_choice" if chosen else "none",
+            client_model="agent_fallback",
+            scoring_note=_CONTEXTUALIZATION_NOTE,
+        )
+    return AdvisoryFallbackResult(kind=kind, result=result.model_dump(mode="json"))
 
 
 def main() -> None:

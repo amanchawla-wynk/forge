@@ -376,15 +376,16 @@ while preserving exact source offsets. Scoring rejects incomplete fragment sets,
 fragments whose criteria or fields do not match the rubric exactly, repeated run
 indexes, and fragments from a stale batch plan.
 
-Recording a new supplemental answer changes the batch plan, so the batch
-extraction flow must be repeated before rescoring.
+After the initial assessment, call `find_prd_reviews` and let the user choose
+Resume, Start new, or Cancel. A durable review returns `review_session_id`,
+`session_version`, and `next_action`. Send the latest version and a fresh
+idempotent `operation_id` on each mutation and follow `next_action` rather than
+guessing the next tool.
 
-After presenting `next_question`, the agent records the reply as an object with
-`criterion_id` and `answer`, then resubmits the accumulated
-`supplemental_answers` on the next call. Supplemental answers are marked
-separately from the PRD and may provide evidence only for their named criterion.
-Forge remains stateless and returns `next_question: null` when no rubric gap
-remains.
+`record_prd_answer` stores exact criterion-bound answers without a model call.
+At a bounded checkpoint, `prepare_prd_checkpoint` returns an answer-only delta
+prompt and `apply_prd_checkpoint` verifies and merges that delta without
+re-extracting the unchanged PRD.
 
 Each question includes `answer_requirements` for the exact missing fields. The
 planner targets one missing field per turn through `target_field`, while keeping

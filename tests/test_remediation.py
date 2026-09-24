@@ -8,6 +8,11 @@ from forge.remediation import (
     prepare_checkpoint,
     record_answer,
 )
+from forge.score.edge_coverage import (
+    CoverageStatus,
+    EdgeCaseCoverageItem,
+    EdgeCaseCoverageLedger,
+)
 from forge.rubric.loader import load_rubric
 
 
@@ -107,6 +112,14 @@ def test_collects_gate_answers_without_rescoring_then_checkpoints(tmp_path):
     assert result.state.pending_answers == []
     assert result.state.delta_extraction_count == 1
     assert result.state.delta_input_characters == plan.input_character_count
+    assert result.state.assessment.confidence_basis == (
+        "source_runs_plus_single_verified_deltas"
+    )
+    assert result.state.assessment.remediated_criteria == ["problem_statement"]
+    assert problem.agreement_basis == "source_before_remediation"
+    assert "not repeated independent full-document runs" in (
+        result.state.report.confidence_note
+    )
     assert result.next_question is not None
 
 
@@ -161,3 +174,38 @@ def test_source_change_invalidates_remediation_state(tmp_path):
         assert "source PRD changed" in str(error)
     else:
         raise AssertionError("source changes must invalidate remediation")
+
+
+def test_begin_remediation_downgrades_unverified_positive_coverage(tmp_path):
+    source = tmp_path / "prd.md"
+    anchor = "Playback progress syncs with the backend every ten seconds."
+    source.write_text(anchor)
+    ledger = EdgeCaseCoverageLedger(
+        items=[
+            EdgeCaseCoverageItem(
+                requirement_criterion_id="functional_requirements",
+                requirement_field="primary_flows",
+                requirement_quote=anchor,
+                edge_case_id="connectivity_loss",
+                status=CoverageStatus.COVERED,
+                evidence_quote="Invented offline recovery behavior.",
+            )
+        ]
+    )
+
+    turn = begin_remediation(
+        str(source),
+        _empty_problem_extraction(),
+        edge_case_coverage=ledger,
+    )
+
+    stored = turn.state.edge_case_coverage
+    assert stored is not None
+    assert stored.items[0].status is CoverageStatus.UNCLEAR
+    assert stored.items[0].evidence_quote is None
+    edge_result = next(
+        item
+        for item in turn.state.assessment.criteria
+        if item.criterion_id == "edge_cases_and_states"
+    )
+    assert edge_result.verdict.value == "absent"

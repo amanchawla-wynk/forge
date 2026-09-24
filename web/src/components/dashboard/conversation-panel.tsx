@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Download, FilePenLine, Loader2, MessageCircleQuestion, SendHorizontal } from "lucide-react";
+import { CheckCircle2, Download, FilePenLine, Loader2, MessageCircleQuestion, SendHorizontal, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -22,11 +22,13 @@ import {
   documentDownloadUrl,
   previewRevision,
   recordRemediationAnswer,
+  resumeDocumentReview,
 } from "@/lib/api";
 import { useAppStore } from "@/lib/store";
 import {
   BAND_STYLES,
   CONSUMER_LABELS,
+  type AssessmentResponse,
   type Consumer,
   type RevisionAction,
   type RevisionPreview,
@@ -45,12 +47,81 @@ export function ConversationPanel() {
   const [answer, setAnswer] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [checkpointOperationId, setCheckpointOperationId] = useState<string | null>(null);
   const [revisionPreview, setRevisionPreview] = useState<RevisionPreview | null>(null);
   const [revisionActions, setRevisionActions] = useState<Record<string, RevisionAction>>({});
   const [revisionDownload, setRevisionDownload] = useState<string | null>(null);
 
   if (!assessment || !llm || !document) return null;
   const question = assessment.next_question;
+  const nextAction = assessment.next_action?.type;
+
+  async function runCheckpoint(current: AssessmentResponse) {
+    const sessionId = current.review_session_id;
+    const sessionVersion = current.session_version;
+    if (!sessionId || !sessionVersion || !llm) return;
+    const operationId = checkpointOperationId ?? crypto.randomUUID();
+    setCheckpointOperationId(operationId);
+    const checkpoint = await checkpointRemediation(
+      sessionId,
+      sessionVersion,
+      operationId,
+      llm,
+    );
+    const state = checkpoint.result.state;
+    setAssessment({
+      ...current,
+      assessment: state.assessment,
+      report: state.report,
+      next_question: checkpoint.result.next_question,
+      supplemental_answers: state.verified_answers,
+      framing: state.framing,
+      edge_case_coverage: state.edge_case_coverage,
+      review_session_id: checkpoint.review_session_id,
+      session_version: checkpoint.session_version,
+      workflow_state: checkpoint.workflow_state,
+      next_action: checkpoint.next_action,
+    });
+    setPendingCount(0);
+    setCheckpointOperationId(null);
+    toast.success("Checkpoint scored", {
+      description: `${checkpoint.result.previous_band} → ${checkpoint.result.current_band}`,
+    });
+  }
+
+  async function handleRetryCheckpoint() {
+    const current = assessment;
+    if (!current) return;
+    setIsSubmitting(true);
+    try {
+      await runCheckpoint(current);
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : "Could not process the checkpoint.";
+      toast.error("Checkpoint failed", { description: message });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleRefreshReview() {
+    const reviewSessionId = assessment?.review_session_id;
+    const documentId = document?.document_id;
+    if (!reviewSessionId || !documentId) return;
+    setIsSubmitting(true);
+    try {
+      const refreshed = await resumeDocumentReview(
+        documentId,
+        reviewSessionId,
+      );
+      setAssessment(refreshed);
+      toast.success("Review state refreshed");
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : "Could not refresh the review.";
+      toast.error("Refresh failed", { description: message });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   async function handleSubmit() {
     if (!question || !answer.trim() || !assessment || !llm || !document) return;
@@ -82,30 +153,7 @@ export function ConversationPanel() {
       };
       setAssessment(recordedAssessment);
       if (recorded.turn.checkpoint_due) {
-        const checkpoint = await checkpointRemediation(
-          sessionId,
-          recorded.session_version,
-          crypto.randomUUID(),
-          llm,
-        );
-        const state = checkpoint.result.state;
-        setAssessment({
-          ...recordedAssessment,
-          assessment: state.assessment,
-          report: state.report,
-          next_question: checkpoint.result.next_question,
-          supplemental_answers: state.verified_answers,
-          framing: state.framing,
-          edge_case_coverage: state.edge_case_coverage,
-          review_session_id: checkpoint.review_session_id,
-          session_version: checkpoint.session_version,
-          workflow_state: checkpoint.workflow_state,
-          next_action: checkpoint.next_action,
-        });
-        setPendingCount(0);
-        toast.success("Checkpoint scored", {
-          description: `${checkpoint.result.previous_band} → ${checkpoint.result.current_band}`,
-        });
+        await runCheckpoint(recordedAssessment);
       } else {
         toast.success("Answer saved", {
           description: `${recorded.turn.pending_answer_count} of 5 answers collected`,
@@ -121,14 +169,24 @@ export function ConversationPanel() {
   }
 
   async function handlePreviewRevision() {
-    if (!assessment || !document || assessment.supplemental_answers.length === 0) return;
+    if (!assessment || !document || !assessment.review_session_id || !assessment.session_version || assessment.supplemental_answers.length === 0) return;
     setIsSubmitting(true);
     try {
       const preview = await previewRevision(
         document.document_id,
+        assessment.review_session_id,
+        assessment.session_version,
+        crypto.randomUUID(),
         assessment.supplemental_answers,
       );
       setRevisionPreview(preview);
+      setAssessment({
+        ...assessment,
+        review_session_id: preview.review_session_id,
+        session_version: preview.session_version,
+        workflow_state: preview.workflow_state,
+        next_action: preview.next_action,
+      });
       setRevisionActions(
         Object.fromEntries(
           preview.edits.map((edit) => [
@@ -146,11 +204,14 @@ export function ConversationPanel() {
   }
 
   async function handleCreateRevision() {
-    if (!revisionPreview || !assessment || !document || !llm) return;
+    if (!revisionPreview || !assessment || !document || !llm || !assessment.review_session_id || !assessment.session_version) return;
     setIsSubmitting(true);
     try {
       const revised = await createRevision(
         document.document_id,
+        assessment.review_session_id,
+        assessment.session_version,
+        crypto.randomUUID(),
         revisionPreview.plan_id,
         revisionActions,
         llm,
@@ -202,7 +263,7 @@ export function ConversationPanel() {
           </ScrollArea>
         )}
 
-        {question ? (
+        {question && (nextAction === "ask_question" || !nextAction) ? (
           <div className="space-y-3">
             {history.length > 0 && <Separator />}
             <div className="space-y-1.5">
@@ -273,6 +334,22 @@ export function ConversationPanel() {
                   Save answer
                 </>
               )}
+            </Button>
+          </div>
+        ) : nextAction === "prepare_checkpoint" || nextAction === "submit_delta" ? (
+          <div className="space-y-4 rounded-md border border-amber-300 bg-amber-50/50 p-5 dark:border-amber-900 dark:bg-amber-950/20">
+            <div className="space-y-1 text-center">
+              <p className="text-sm font-medium">Checkpoint required</p>
+              <p className="text-xs text-muted-foreground">
+                Your answers are saved. Process the pending answer delta before continuing.
+              </p>
+            </div>
+            <Button className="w-full" onClick={handleRetryCheckpoint} disabled={isSubmitting}>
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              Process checkpoint
+            </Button>
+            <Button variant="outline" className="w-full" onClick={handleRefreshReview} disabled={isSubmitting}>
+              Refresh saved state
             </Button>
           </div>
         ) : (

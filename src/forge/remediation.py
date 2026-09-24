@@ -162,6 +162,8 @@ def _snapshot(
     runs: list[list[CriterionExtraction]],
     verified_answers: list[SupplementalAnswer],
     coverage: EdgeCaseCoverageLedger | None,
+    remediated_criteria: list[str],
+    remediation_delta_count: int,
 ) -> tuple[Assessment, NarrativeReport, list[Question], EdgeCaseCoverageLedger | None]:
     rubric = load_rubric(state.rubric_name)
     document, _ = prepare_assessment_input(
@@ -179,6 +181,22 @@ def _snapshot(
         else None
     )
     assessment = score(rubric, runs, edge_case_coverage=verified_coverage)
+    previous_agreement = {
+        result.criterion_id: result.agreement
+        for result in state.assessment.criteria
+    }
+    for result in assessment.criteria:
+        if result.criterion_id in remediated_criteria:
+            result.agreement = previous_agreement.get(result.criterion_id, result.agreement)
+            result.agreement_basis = "source_before_remediation"
+    assessment.confidence = round(
+        sum(result.agreement for result in assessment.criteria)
+        / len(assessment.criteria),
+        4,
+    )
+    assessment.confidence_basis = "source_runs_plus_single_verified_deltas"
+    assessment.remediated_criteria = remediated_criteria
+    assessment.remediation_delta_count = remediation_delta_count
     queue = plan_question_queue(
         rubric,
         assessment,
@@ -219,14 +237,19 @@ def begin_remediation(
     )
     source_sha = _source_digest(source_path)
     resolved_display_name = display_name or document_display_name(source_path)
-    assessment = score(rubric, runs, edge_case_coverage=edge_case_coverage)
+    verified_coverage = (
+        verify_coverage_ledger(document, edge_case_coverage)
+        if edge_case_coverage is not None
+        else None
+    )
+    assessment = score(rubric, runs, edge_case_coverage=verified_coverage)
     queue = plan_question_queue(
         rubric,
         assessment,
         display_name=resolved_display_name,
         framing=framing,
     )
-    _decorate_edge_question(queue, assessment, resolved_display_name, edge_case_coverage)
+    _decorate_edge_question(queue, assessment, resolved_display_name, verified_coverage)
     report = build_narrative_report(
         assessment,
         queue[:1],
@@ -249,7 +272,7 @@ def begin_remediation(
         product_context=terms,
         framing=queue[0].framing if queue else rubric.default_framing,
         display_name=resolved_display_name,
-        edge_case_coverage=edge_case_coverage,
+        edge_case_coverage=verified_coverage,
         run_count=len(runs),
         expected_run_count=rubric.extraction_runs,
         client_models=client_models or [],
@@ -354,6 +377,7 @@ def apply_checkpoint(
     rubric = load_rubric(state.rubric_name)
     delta = parse_delta_extraction(delta_json)
     patches = verify_delta_extraction(plan, delta, rubric, state.pending_answers)
+    affected_criteria = list(dict.fromkeys(patch.criterion_id for patch in patches))
     runs = merge_criterion_patches(state.runs, patches)
     credited_block_ids = {
         field.evidence.source_block_id
@@ -387,6 +411,8 @@ def apply_checkpoint(
         runs,
         verified_answers,
         state.edge_case_coverage,
+        list(dict.fromkeys([*state.assessment.remediated_criteria, *affected_criteria])),
+        state.delta_extraction_count + 1,
     )
     updated = state.model_copy(
         update={

@@ -79,6 +79,13 @@ def build_narrative_report(
         ]
         if disputed:
             confidence_note += " Disagreement remains for: " + ", ".join(disputed) + "."
+    if assessment.remediated_criteria:
+        confidence_note += (
+            " Remediation updates for "
+            + ", ".join(assessment.remediated_criteria)
+            + f" came from {assessment.remediation_delta_count} verified delta "
+            "extraction(s), not repeated independent full-document runs."
+        )
 
     results_by_id = {
         result.criterion_id: result for result in assessment.criteria

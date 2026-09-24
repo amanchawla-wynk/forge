@@ -80,13 +80,23 @@ export function SetupPanel() {
     }
   }
 
-  async function handleResume(reviewSessionId: string) {
+  async function handleResume(reviewSessionId: string, clientName: string | null) {
     if (!uploaded) return;
+    const confirmClientChange = Boolean(clientName && clientName !== "dashboard");
+    if (
+      confirmClientChange &&
+      !window.confirm(
+        `This review was last used in ${clientName}. Resume it in the dashboard?`,
+      )
+    ) {
+      return;
+    }
     setIsSubmitting(true);
     try {
       const assessment = await resumeDocumentReview(
         uploaded.document_id,
         reviewSessionId,
+        confirmClientChange,
       );
       setAssessment(assessment);
       setDiscovery(null);
@@ -193,7 +203,7 @@ export function SetupPanel() {
                       {BAND_STYLES[match.current_band]?.label ?? match.current_band} · {match.verified_answer_count} verified · {match.pending_answer_count} pending · {new Date(match.updated_at * 1000).toLocaleString()}
                     </p>
                   </div>
-                  <Button size="sm" onClick={() => handleResume(match.review_session_id)} disabled={isSubmitting}>
+                  <Button size="sm" onClick={() => handleResume(match.review_session_id, match.client_name)} disabled={isSubmitting}>
                     Resume
                   </Button>
                 </div>

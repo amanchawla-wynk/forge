@@ -65,6 +65,29 @@ def test_ingests_docx_with_heading_locations(tmp_path):
     assert match.page is None
 
 
+def test_docx_preserves_table_order_and_ingests_headers_and_footers(tmp_path):
+    path = tmp_path / "structured.docx"
+    source = Document()
+    source.sections[0].header.paragraphs[0].text = "Owner: Product Operations"
+    source.sections[0].footer.paragraphs[0].text = "Version 7"
+    source.add_heading("Requirements", level=1)
+    source.add_paragraph("Before the table")
+    table = source.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "State"
+    table.cell(0, 1).text = "Expected behavior"
+    source.add_paragraph("After the table")
+    source.save(path)
+
+    document = ingest_document(path)
+    texts = [block.text for block in document.blocks]
+
+    assert texts.index("Before the table") < texts.index(
+        "State | Expected behavior"
+    ) < texts.index("After the table")
+    assert document.locate_quote("Owner: Product Operations").section == "Header"
+    assert document.locate_quote("Version 7").section == "Footer"
+
+
 def test_detects_pdf_pages_with_visual_content(tmp_path):
     path = tmp_path / "visual-prd.pdf"
     pdf = pymupdf.open()

@@ -147,6 +147,21 @@
 - Added restart, stale-version, duplicate-operation, wrong-document,
   exact-document discovery, explicit parallel-review, and OpenCode-to-Cursor
   resume regression coverage.
+- Verified edge-case ledgers at remediation-session creation, closing a path
+  where unsupported positive coverage could enter durable scoring state.
+- Made dashboard documents, revision plans, generated artifacts, and final
+  assessment links restart-durable; revision approval now participates in the
+  versioned review workflow.
+- Bound idempotency keys to operation type and request digest and reserve
+  external checkpoint work before inference, preventing duplicate paid calls.
+- Separated source-run agreement from remediation-delta evidence so one delta
+  cannot appear as repeated independent consensus.
+- Added preregistered development/holdout calibration splits, executable
+  acceptance thresholds, `forge-calibration`, and `docs/VALIDATION_PROTOCOL.md`.
+- Added agent-driven fallbacks for all four advisory sampling features and
+  added DOCX body-order plus header/footer ingestion.
+- Added dashboard upload, inference, timeout, retention, SQLite, loopback, and
+  response-projection safeguards.
 
 ## Current Build
 
@@ -158,7 +173,6 @@
   flag-off behavior, and the 360p fallback algorithm.
 - Evaluate local OCR output as separately provenanced, quote-verifiable evidence.
 - Harden extraction validation against duplicate or unknown criterion fields.
-- Ingest DOCX header and footer text, which is currently skipped.
 
 ## Next
 
@@ -169,12 +183,6 @@
   but live sampling behavior has not been observed firsthand there; OpenCode
   is now confirmed not to support it). Test installation and behavior in
   GitHub Copilot similarly.
-- Add non-sampling fallback tools for `detect_prd_framing`,
-  `discover_edge_case_question`, `assess_edge_case_coverage`, and
-  `contextualize_next_question`, mirroring `prepare_prd_assessment` +
-  `score_prd_extraction`, so clients without sampling (confirmed: at least
-  one OpenCode build) can still use framing and edge-case features instead of
-  losing them outright (D-039).
 - Investigate SEP-2577 (the installed MCP SDK marks the whole `sampling`
   capability `@deprecated` as of protocol revision 2026-07-28) and whether
   Forge's client-borrowed-model architecture (D-006/D-007) should move to

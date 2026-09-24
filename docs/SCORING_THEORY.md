@@ -160,6 +160,12 @@ reports token usage separately for initial extraction, remediation deltas, and
 final verification; remediation should have a configured budget and must not
 silently fall back to full-document extraction when that budget is exceeded.
 
+One remediation delta is not represented as several independent model runs.
+For remediated criteria, Forge retains the source-run agreement that existed
+before remediation, marks its basis as `source_before_remediation`, and reports
+the number of verified delta extractions separately. A copied criterion patch
+therefore cannot manufacture unanimous test/retest confidence.
+
 Each turn targets one missing required field, even when the selected criterion
 has several gaps. The response retains the full missing-field list for audit but
 shows one field-specific question and requirement. Band projection assumes only

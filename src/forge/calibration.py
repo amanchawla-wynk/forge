@@ -29,6 +29,7 @@ class CalibrationCase(BaseModel):
     source_ref: str | None = None
     prediction: Assessment
     labels: list[HumanLabel] = Field(default_factory=list)
+    study_split: Literal["development", "holdout"] = "development"
 
 
 class CalibrationSuite(BaseModel):
@@ -93,6 +94,7 @@ class CalibrationReport(BaseModel):
     calibration_case_count: int
     label_count: int
     source_counts: dict[str, int]
+    split_counts: dict[str, int]
     band_agreement: Agreement
     mean_band_distance: float | None
     band_confusion: dict[str, dict[str, int]]
@@ -102,6 +104,20 @@ class CalibrationReport(BaseModel):
     contested_band_cases: int
     criteria: dict[str, CriterionCalibration]
     warnings: list[str]
+
+
+class ValidationThresholds(BaseModel):
+    minimum_resolved_cases: int = Field(default=20, ge=1)
+    maximum_false_ready_rate: float = Field(default=0.1, ge=0, le=1)
+    minimum_band_agreement: float = Field(default=0.7, ge=0, le=1)
+    maximum_mean_band_distance: float = Field(default=0.5, ge=0)
+    minimum_inter_reviewer_agreement: float = Field(default=0.7, ge=0, le=1)
+
+
+class ValidationDecision(BaseModel):
+    passed: bool
+    checks: dict[str, bool]
+    blockers: list[str]
 
 
 def make_label_template(
@@ -223,6 +239,7 @@ def evaluate_calibration(
     criterion_contested = Counter[str]()
 
     source_counts = Counter(case.source_kind for case in suite.cases)
+    split_counts = Counter(case.study_split for case in suite.cases)
     calibration_cases = [
         case for case in suite.cases if case.source_kind == "internal"
     ]
@@ -295,6 +312,10 @@ def evaluate_calibration(
         warnings.append(
             "No case has two completed band labels; inter-reviewer agreement is unavailable."
         )
+    if split_counts["holdout"] == 0:
+        warnings.append(
+            "No holdout cases are declared; results may describe rubric tuning data."
+        )
     excluded = len(suite.cases) - len(calibration_cases)
     if excluded:
         warnings.append(
@@ -309,6 +330,7 @@ def evaluate_calibration(
         calibration_case_count=len(calibration_cases),
         label_count=sum(len(case.labels) for case in suite.cases),
         source_counts=dict(source_counts),
+        split_counts=dict(split_counts),
         band_agreement=_agreement(band_matches, band_compared),
         mean_band_distance=(
             round(band_distance / band_compared, 4) if band_compared else None
@@ -338,6 +360,45 @@ def evaluate_calibration(
         },
         warnings=warnings,
     )
+
+
+def evaluate_validation_thresholds(
+    report: CalibrationReport,
+    thresholds: ValidationThresholds,
+) -> ValidationDecision:
+    """Apply predeclared acceptance thresholds without tuning them to results."""
+    checks = {
+        "minimum_resolved_cases": (
+            report.band_agreement.compared >= thresholds.minimum_resolved_cases
+        ),
+        "maximum_false_ready_rate": (
+            report.false_ready.rate is not None
+            and report.false_ready.rate <= thresholds.maximum_false_ready_rate
+        ),
+        "minimum_band_agreement": (
+            report.band_agreement.rate is not None
+            and report.band_agreement.rate >= thresholds.minimum_band_agreement
+        ),
+        "maximum_mean_band_distance": (
+            report.mean_band_distance is not None
+            and report.mean_band_distance <= thresholds.maximum_mean_band_distance
+        ),
+        "minimum_inter_reviewer_agreement": (
+            report.inter_reviewer_band_agreement.rate is not None
+            and report.inter_reviewer_band_agreement.rate
+            >= thresholds.minimum_inter_reviewer_agreement
+        ),
+        "holdout_cases_present": report.split_counts.get("holdout", 0) > 0,
+    }
+    blockers = [name for name, passed in checks.items() if not passed]
+    return ValidationDecision(passed=not blockers, checks=checks, blockers=blockers)
+
+
+def holdout_only(suite: CalibrationSuite) -> CalibrationSuite:
+    cases = [case for case in suite.cases if case.study_split == "holdout"]
+    if not cases:
+        raise ValueError("calibration suite has no holdout cases")
+    return suite.model_copy(update={"cases": cases}, deep=True)
 
 
 def _validate_suite(rubric: Rubric, suite: CalibrationSuite) -> None:
@@ -427,6 +488,8 @@ def main() -> None:
     evaluate = subparsers.add_parser("evaluate")
     evaluate.add_argument("suite", type=Path)
     evaluate.add_argument("--rubric", default="prd")
+    evaluate.add_argument("--holdout-only", action="store_true")
+    evaluate.add_argument("--thresholds", type=Path)
 
     args = parser.parse_args()
     if args.command == "template":
@@ -454,7 +517,26 @@ def main() -> None:
 
     rubric = load_rubric(args.rubric)
     suite = CalibrationSuite.model_validate_json(args.suite.read_text())
-    print(evaluate_calibration(rubric, suite).model_dump_json(indent=2))
+    if args.holdout_only:
+        suite = holdout_only(suite)
+    report = evaluate_calibration(rubric, suite)
+    if args.thresholds:
+        thresholds = ValidationThresholds.model_validate_json(
+            args.thresholds.read_text()
+        )
+        print(
+            json.dumps(
+                {
+                    "report": report.model_dump(mode="json"),
+                    "decision": evaluate_validation_thresholds(
+                        report, thresholds
+                    ).model_dump(mode="json"),
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(report.model_dump_json(indent=2))
 
 
 if __name__ == "__main__":

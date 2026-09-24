@@ -91,6 +91,15 @@ def local_user_identity(value: str | None = None) -> str:
     return value.strip() if value and value.strip() else getpass.getuser()
 
 
+def operation_digest(operation_type: str, payload: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        {"operation_type": operation_type, "payload": payload},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def workflow_for_turn(turn: RemediationTurn) -> WorkflowState:
     if turn.checkpoint_due:
         return WorkflowState.CHECKPOINT_REQUIRED
@@ -131,9 +140,12 @@ class ReviewSessionRepository:
         configured = path or os.environ.get("FORGE_SESSION_DB") or Path(".forge/reviews.sqlite3")
         self.path = Path(configured).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.path.parent, 0o700)
         self.ttl_seconds = ttl_seconds
         self._lock = Lock()
         self._initialize()
+        os.chmod(self.path, 0o600)
+        self.purge_expired()
 
     def _connect(self) -> sqlite3.Connection:
         # `isolation_level=None` puts sqlite3 in autocommit mode so this module
@@ -144,6 +156,7 @@ class ReviewSessionRepository:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA busy_timeout = 5000")
         return connection
 
     def _initialize(self) -> None:
@@ -173,6 +186,9 @@ class ReviewSessionRepository:
                 CREATE TABLE IF NOT EXISTS review_operations (
                     review_session_id TEXT NOT NULL,
                     operation_id TEXT NOT NULL,
+                    operation_type TEXT NOT NULL,
+                    request_digest TEXT NOT NULL,
+                    status TEXT NOT NULL,
                     result_json TEXT NOT NULL,
                     created_at REAL NOT NULL,
                     PRIMARY KEY (review_session_id, operation_id),
@@ -190,6 +206,40 @@ class ReviewSessionRepository:
                       ON DELETE CASCADE
                 );
                 """
+            )
+            self._ensure_column(
+                connection,
+                "review_operations",
+                "operation_type",
+                "TEXT NOT NULL DEFAULT 'legacy'",
+            )
+            self._ensure_column(
+                connection,
+                "review_operations",
+                "request_digest",
+                "TEXT NOT NULL DEFAULT ''",
+            )
+            self._ensure_column(
+                connection,
+                "review_operations",
+                "status",
+                "TEXT NOT NULL DEFAULT 'completed'",
+            )
+
+    @staticmethod
+    def _ensure_column(
+        connection: sqlite3.Connection,
+        table: str,
+        column: str,
+        declaration: str,
+    ) -> None:
+        columns = {
+            row["name"]
+            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {declaration}"
             )
 
     def create(
@@ -278,16 +328,98 @@ class ReviewSessionRepository:
             ).fetchall()
         return [self._summary(self._session(row)) for row in rows]
 
-    def operation_result(self, review_session_id: str, operation_id: str) -> str | None:
+    def operation_result(
+        self,
+        review_session_id: str,
+        operation_id: str,
+        *,
+        operation_type: str,
+        request_digest: str,
+    ) -> str | None:
         with closing(self._connect()) as connection:
             row = connection.execute(
                 """
-                SELECT result_json FROM review_operations
+                SELECT operation_type, request_digest, status, result_json
+                FROM review_operations
                 WHERE review_session_id = ? AND operation_id = ?
                 """,
                 (review_session_id, operation_id),
             ).fetchone()
-        return None if row is None else str(row["result_json"])
+        if row is None:
+            return None
+        self._validate_operation(row, operation_type, request_digest)
+        if row["status"] == "pending":
+            raise ValueError(
+                "operation is already in progress; retry with the same operation_id"
+            )
+        return str(row["result_json"])
+
+    def reserve_operation(
+        self,
+        review_session_id: str,
+        *,
+        expected_version: int,
+        operation_id: str,
+        operation_type: str,
+        request_digest: str,
+    ) -> None:
+        if not operation_id.strip():
+            raise ValueError("operation_id must not be blank")
+        with self._lock, closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                existing = connection.execute(
+                    "SELECT operation_type, request_digest, status, result_json "
+                    "FROM review_operations WHERE review_session_id = ? "
+                    "AND operation_id = ?",
+                    (review_session_id, operation_id),
+                ).fetchone()
+                if existing is not None:
+                    self._validate_operation(
+                        existing, operation_type, request_digest
+                    )
+                    raise ValueError("operation is already in progress or completed")
+                row = connection.execute(
+                    "SELECT session_version FROM review_sessions "
+                    "WHERE review_session_id = ?",
+                    (review_session_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"unknown review_session_id {review_session_id!r}")
+                if row["session_version"] != expected_version:
+                    self._raise_stale(row["session_version"], expected_version)
+                pending = connection.execute(
+                    "SELECT operation_id FROM review_operations "
+                    "WHERE review_session_id = ? AND status = 'pending'",
+                    (review_session_id,),
+                ).fetchone()
+                if pending is not None:
+                    raise ValueError("another operation is already in progress")
+                connection.execute(
+                    "INSERT INTO review_operations "
+                    "(review_session_id, operation_id, operation_type, "
+                    "request_digest, status, result_json, created_at) "
+                    "VALUES (?, ?, ?, ?, 'pending', '', ?)",
+                    (
+                        review_session_id,
+                        operation_id,
+                        operation_type,
+                        request_digest,
+                        time.time(),
+                    ),
+                )
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+
+    def cancel_operation(self, review_session_id: str, operation_id: str) -> None:
+        with self._lock, closing(self._connect()) as connection:
+            connection.execute(
+                "DELETE FROM review_operations WHERE review_session_id = ? "
+                "AND operation_id = ? AND status = 'pending'",
+                (review_session_id, operation_id),
+            )
 
     def update(
         self,
@@ -301,24 +433,33 @@ class ReviewSessionRepository:
         result_json: str,
         event_payload: dict[str, Any] | None = None,
         client_binding: ClientBinding | None = None,
+        operation_type: str | None = None,
+        request_digest: str = "",
+        complete_reserved: bool = False,
     ) -> ReviewSession:
         if not operation_id.strip():
             raise ValueError("operation_id must not be blank")
         with self._lock, closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                operation_kind = operation_type or event_type
                 cached = connection.execute(
                     """
-                    SELECT result_json FROM review_operations
+                    SELECT operation_type, request_digest, status, result_json
+                    FROM review_operations
                     WHERE review_session_id = ? AND operation_id = ?
                     """,
                     (review_session_id, operation_id),
                 ).fetchone()
                 if cached is not None:
-                    # Idempotent replay: the same operation_id already ran, so
-                    # return the stored session instead of applying it twice.
-                    connection.rollback()
-                    return self.get(review_session_id)
+                    self._validate_operation(
+                        cached, operation_kind, request_digest
+                    )
+                    if cached["status"] == "completed":
+                        connection.rollback()
+                        return self.get(review_session_id)
+                    if not complete_reserved:
+                        raise ValueError("operation is already in progress")
                 row = connection.execute(
                     "SELECT * FROM review_sessions WHERE review_session_id = ?",
                     (review_session_id,),
@@ -326,11 +467,15 @@ class ReviewSessionRepository:
                 if row is None:
                     raise KeyError(f"unknown review_session_id {review_session_id!r}")
                 if row["session_version"] != expected_version:
-                    raise ValueError(
-                        "stale session_version: this review was updated in another "
-                        f"conversation (expected {row['session_version']}, received "
-                        f"{expected_version}). Refresh before continuing."
-                    )
+                    self._raise_stale(row["session_version"], expected_version)
+                pending = connection.execute(
+                    "SELECT operation_id FROM review_operations "
+                    "WHERE review_session_id = ? AND status = 'pending' "
+                    "AND operation_id != ?",
+                    (review_session_id, operation_id),
+                ).fetchone()
+                if pending is not None:
+                    raise ValueError("another operation is already in progress")
                 version = expected_version + 1
                 now = time.time()
                 binding = client_binding or ClientBinding(
@@ -358,10 +503,28 @@ class ReviewSessionRepository:
                         expected_version,
                     ),
                 )
-                connection.execute(
-                    "INSERT INTO review_operations VALUES (?, ?, ?, ?)",
-                    (review_session_id, operation_id, result_json, now),
-                )
+                if cached is None:
+                    connection.execute(
+                        "INSERT INTO review_operations "
+                        "(review_session_id, operation_id, operation_type, "
+                        "request_digest, status, result_json, created_at) "
+                        "VALUES (?, ?, ?, ?, 'completed', ?, ?)",
+                        (
+                            review_session_id,
+                            operation_id,
+                            operation_kind,
+                            request_digest,
+                            result_json,
+                            now,
+                        ),
+                    )
+                else:
+                    connection.execute(
+                        "UPDATE review_operations SET status = 'completed', "
+                        "result_json = ? WHERE review_session_id = ? "
+                        "AND operation_id = ?",
+                        (result_json, review_session_id, operation_id),
+                    )
                 self._event(
                     connection,
                     review_session_id,
@@ -374,6 +537,27 @@ class ReviewSessionRepository:
                 connection.rollback()
                 raise
         return self.get(review_session_id)
+
+    @staticmethod
+    def _validate_operation(
+        row: sqlite3.Row, operation_type: str, request_digest: str
+    ) -> None:
+        if row["operation_type"] != operation_type:
+            raise ValueError(
+                "operation_id was already used for a different operation type"
+            )
+        if row["request_digest"] != request_digest:
+            raise ValueError(
+                "operation_id was already used with a different request payload"
+            )
+
+    @staticmethod
+    def _raise_stale(current: int, received: int) -> None:
+        raise ValueError(
+            "stale session_version: this review was updated in another "
+            f"conversation (expected {current}, received {received}). "
+            "Refresh before continuing."
+        )
 
     def resume(
         self,
@@ -402,6 +586,14 @@ class ReviewSessionRepository:
                 "client binding changed; explicit confirm_client_change is required"
             )
         workflow = workflow_for_turn(current_turn(session.state))
+        request_digest = operation_digest(
+            "resume_review",
+            {
+                "source_sha256": source_hash,
+                "client_binding": client_binding.model_dump(),
+                "confirm_client_change": confirm_client_change,
+            },
+        )
         return self.update(
             review_session_id,
             expected_version=expected_version,
@@ -415,6 +607,8 @@ class ReviewSessionRepository:
                 "to": client_binding.model_dump(),
             },
             client_binding=client_binding,
+            operation_type="resume_review",
+            request_digest=request_digest,
         )
 
     def delete(self, review_session_id: str) -> None:
@@ -425,6 +619,14 @@ class ReviewSessionRepository:
             )
         if cursor.rowcount == 0:
             raise KeyError(f"unknown review_session_id {review_session_id!r}")
+
+    def purge_expired(self) -> int:
+        with self._lock, closing(self._connect()) as connection:
+            cursor = connection.execute(
+                "DELETE FROM review_sessions WHERE expires_at < ?",
+                (time.time(),),
+            )
+        return cursor.rowcount
 
     def events(self, review_session_id: str) -> list[dict[str, Any]]:
         with closing(self._connect()) as connection:

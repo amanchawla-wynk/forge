@@ -8,7 +8,10 @@ from forge.calibration import (
     CalibrationCase,
     CalibrationSuite,
     HumanLabel,
+    ValidationThresholds,
     evaluate_calibration,
+    evaluate_validation_thresholds,
+    holdout_only,
     make_label_template,
     merge_reviewer_labels,
 )
@@ -235,3 +238,45 @@ def test_calibration_rejects_non_exhaustive_labels():
 
     with pytest.raises(ValueError, match="label criteria do not match"):
         evaluate_calibration(rubric, suite)
+
+
+def test_holdout_thresholds_are_applied_without_tuning_data():
+    rubric = load_rubric("prd")
+    assessment = _assessment("complete")
+    not_ready = _assessment("notes")
+    suite = CalibrationSuite(
+        rubric_id=rubric.id,
+        rubric_version=rubric.version,
+        cases=[
+            CalibrationCase(
+                case_id="holdout-1",
+                source_kind="internal",
+                study_split="holdout",
+                prediction=assessment,
+                labels=[
+                    _label(assessment, "reviewer-a", assessment.band),
+                    _label(assessment, "reviewer-b", assessment.band),
+                ],
+            ),
+            CalibrationCase(
+                case_id="holdout-2",
+                source_kind="internal",
+                study_split="holdout",
+                prediction=not_ready,
+                labels=[
+                    _label(not_ready, "reviewer-a", not_ready.band),
+                    _label(not_ready, "reviewer-b", not_ready.band),
+                ],
+            ),
+        ],
+    )
+
+    report = evaluate_calibration(rubric, holdout_only(suite))
+    decision = evaluate_validation_thresholds(
+        report,
+        ValidationThresholds(minimum_resolved_cases=1),
+    )
+
+    assert report.split_counts == {"holdout": 2}
+    assert decision.passed
+    assert decision.blockers == []

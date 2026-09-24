@@ -196,3 +196,32 @@ def test_status_reports_next_question_and_action(prd, repo):
     assert status.next_action.type == "ask_question"
     assert status.next_question is not None
     assert status.pending_answer_count == 0
+
+
+def test_pending_operation_blocks_duplicate_external_work(prd, repo):
+    turn = begin_remediation(str(prd), _empty_problem_extraction())
+    session = repo.create(turn.state)
+    digest = "request-digest"
+
+    repo.reserve_operation(
+        session.review_session_id,
+        expected_version=session.session_version,
+        operation_id="checkpoint-1",
+        operation_type="dashboard_checkpoint",
+        request_digest=digest,
+    )
+
+    with pytest.raises(ValueError, match="already in progress"):
+        repo.operation_result(
+            session.review_session_id,
+            "checkpoint-1",
+            operation_type="dashboard_checkpoint",
+            request_digest=digest,
+        )
+    with pytest.raises(ValueError, match="different request payload"):
+        repo.operation_result(
+            session.review_session_id,
+            "checkpoint-1",
+            operation_type="dashboard_checkpoint",
+            request_digest="different",
+        )

@@ -50,6 +50,7 @@ class CriterionResult(BaseModel):
     rationale: str
     # Fraction of the k extraction runs that agreed on this verdict (0..1).
     agreement: float = 1.0
+    agreement_basis: str = "independent_extraction_runs"
     gate_triggered: bool = False
     # Already-verified fields, kept only so remediation questions can refer to
     # real document content. Never re-enters scoring. See
@@ -73,6 +74,9 @@ class Assessment(BaseModel):
     uncapped_band: str         # what it would have been without gates
     gates_failed: list[str]
     confidence: float          # mean agreement across criteria
+    confidence_basis: str = "independent_extraction_runs"
+    remediated_criteria: list[str] = Field(default_factory=list)
+    remediation_delta_count: int = 0
     criteria: list[CriterionResult]
     consumers: list[ConsumerReadiness]
 

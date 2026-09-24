@@ -6,6 +6,8 @@ anywhere. See `docs/DECISIONS.md` D-033.
 
 from __future__ import annotations
 
+import asyncio
+import os
 from dataclasses import dataclass
 
 from forge_dashboard.models import LLMConfig
@@ -21,6 +23,11 @@ class Completion:
     model: str
 
 
+_INFERENCE_LIMIT = int(os.environ.get("FORGE_DASHBOARD_MAX_INFERENCE_CONCURRENCY", "3"))
+_INFERENCE_TIMEOUT = float(os.environ.get("FORGE_DASHBOARD_INFERENCE_TIMEOUT", "120"))
+_inference_slots = asyncio.Semaphore(_INFERENCE_LIMIT)
+
+
 def _litellm_model_id(config: LLMConfig) -> str:
     if config.model.startswith(f"{config.provider}/"):
         return config.model
@@ -28,6 +35,18 @@ def _litellm_model_id(config: LLMConfig) -> str:
 
 
 async def call_model(
+    config: LLMConfig, prompt: str, *, max_tokens: int, temperature: float = 0
+) -> Completion:
+    try:
+        async with _inference_slots, asyncio.timeout(_INFERENCE_TIMEOUT):
+            return await _call_model(config, prompt, max_tokens=max_tokens, temperature=temperature)
+    except TimeoutError as error:
+        raise LLMCallError(
+            f"{config.provider} model call timed out after {_INFERENCE_TIMEOUT:g} seconds"
+        ) from error
+
+
+async def _call_model(
     config: LLMConfig, prompt: str, *, max_tokens: int, temperature: float = 0
 ) -> Completion:
     if config.provider == "cursor":

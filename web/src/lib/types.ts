@@ -112,6 +112,7 @@ export interface CriterionResult {
   missing: string[];
   rationale: string;
   agreement: number;
+  agreement_basis: string;
   gate_triggered: boolean;
   // Already-verified fields, kept only so remediation questions can refer to
   // real document content (see docs/DECISIONS.md D-035). Never re-enters scoring.
@@ -134,6 +135,9 @@ export interface Assessment {
   uncapped_band: string;
   gates_failed: string[];
   confidence: number;
+  confidence_basis: string;
+  remediated_criteria: string[];
+  remediation_delta_count: number;
   criteria: CriterionResult[];
   consumers: ConsumerReadiness[];
 }
@@ -243,8 +247,6 @@ export interface NextAction {
 export interface ReviewSessionSummary {
   review_session_id: string;
   display_name: string;
-  source_path: string;
-  source_sha256: string;
   current_band: string;
   workflow_state: WorkflowState;
   verified_answer_count: number;
@@ -321,6 +323,10 @@ export interface RevisionPreview {
   plan_digest: string;
   source_sha256: string;
   edits: RevisionEdit[];
+  review_session_id: string;
+  session_version: number;
+  workflow_state: WorkflowState;
+  next_action: NextAction;
 }
 
 export interface RevisionResponse {

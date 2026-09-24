@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import uuid
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -26,10 +25,15 @@ from forge_dashboard.models import (
     CheckpointRequest,
     DashboardAssessmentResponse,
     DashboardCheckpointResponse,
+    DashboardCheckpointResult,
+    DashboardReviewState,
     DashboardRemediationTurn,
+    DashboardTurnData,
     DashboardReviewDiscovery,
+    DashboardReviewSummary,
     DashboardRevisionPreview,
     DashboardRevisionResponse,
+    DashboardRevisionResult,
     LLMConfig,
     RecordAnswerRequest,
     ResumeReviewRequest,
@@ -38,7 +42,6 @@ from forge_dashboard.models import (
     UploadResponse,
 )
 from forge.remediation import (
-    RemediationCheckpointResult,
     apply_checkpoint,
     current_turn,
     prepare_checkpoint,
@@ -50,9 +53,10 @@ from forge.sessions import (
     WorkflowState,
     turn_for_session,
     workflow_for_turn,
+    operation_digest,
+    next_action_for,
 )
 from forge.revise import (
-    RevisionPlan,
     approve_revision_plan,
     materialize_integrated_prd_revision,
     preview_integrated_revision,
@@ -64,6 +68,9 @@ from forge_dashboard.runner import (
 from forge_dashboard.storage import DocumentStore
 
 _VERIFY_PROMPT = "Reply with exactly the single word: OK"
+_MAX_UPLOAD_BYTES = int(
+    os.environ.get("FORGE_DASHBOARD_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024))
+)
 
 
 class VerifyLLMResponse(BaseModel):
@@ -97,7 +104,6 @@ app.add_middleware(
 
 _store = DocumentStore()
 _review_repository: ReviewSessionRepository | None = None
-_revision_plans: dict[str, tuple[str, RevisionPlan]] = {}
 
 
 def _reviews() -> ReviewSessionRepository:
@@ -141,9 +147,14 @@ async def verify_llm(config: LLMConfig) -> VerifyLLMResponse:
 async def upload_document(file: UploadFile = File(...)) -> UploadResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="a filename is required")
-    content = await file.read()
+    content = await file.read(_MAX_UPLOAD_BYTES + 1)
     if not content:
         raise HTTPException(status_code=400, detail="the uploaded file is empty")
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"document exceeds the {_MAX_UPLOAD_BYTES}-byte upload limit",
+        )
     try:
         stored = _store.save(file.filename, content)
     except ValueError as error:
@@ -224,7 +235,19 @@ def find_document_reviews(document_id: str) -> DashboardReviewDiscovery:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return DashboardReviewDiscovery(
         document_id=document_id,
-        matches=matches,
+        matches=[
+            DashboardReviewSummary(
+                review_session_id=item.review_session_id,
+                display_name=item.display_name,
+                current_band=item.current_band,
+                workflow_state=item.workflow_state,
+                verified_answer_count=item.verified_answer_count,
+                pending_answer_count=item.pending_answer_count,
+                client_name=item.client_name,
+                updated_at=item.updated_at,
+            )
+            for item in matches
+        ],
         choices=["resume_review", "start_new_review", "cancel"],
     )
 
@@ -294,7 +317,19 @@ def record_remediation_answer(
     session_id: str, request: RecordAnswerRequest
 ) -> DashboardRemediationTurn:
     try:
-        cached = _reviews().operation_result(session_id, request.operation_id)
+        request_digest = operation_digest(
+            "record_answer",
+            {
+                "answer": request.answer,
+                "force_checkpoint": request.force_checkpoint,
+            },
+        )
+        cached = _reviews().operation_result(
+            session_id,
+            request.operation_id,
+            operation_type="record_answer",
+            request_digest=request_digest,
+        )
         if cached is not None:
             session = _reviews().get(session_id)
             return DashboardRemediationTurn(
@@ -302,7 +337,9 @@ def record_remediation_answer(
                 session_version=session.session_version,
                 workflow_state=session.workflow_state,
                 next_action=session.next_action,
-                turn=turn_for_session(session),
+                turn=DashboardTurnData.model_validate(
+                    turn_for_session(session).model_dump(exclude={"state"})
+                ),
             )
         session = _reviews().get(session_id)
         _require_workflow(
@@ -324,6 +361,8 @@ def record_remediation_answer(
             event_type="answer_recorded",
             result_json=turn.model_dump_json(),
             event_payload={"checkpoint_due": turn.checkpoint_due},
+            operation_type="record_answer",
+            request_digest=request_digest,
         )
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -334,7 +373,9 @@ def record_remediation_answer(
         session_version=session.session_version,
         workflow_state=session.workflow_state,
         next_action=session.next_action,
-        turn=turn_for_session(session),
+        turn=DashboardTurnData.model_validate(
+            turn_for_session(session).model_dump(exclude={"state"})
+        ),
     )
 
 
@@ -345,8 +386,22 @@ def record_remediation_answer(
 async def checkpoint_remediation(
     session_id: str, request: CheckpointRequest
 ) -> DashboardCheckpointResponse:
+    reserved = False
     try:
-        cached = _reviews().operation_result(session_id, request.operation_id)
+        request_digest = operation_digest(
+            "dashboard_checkpoint",
+            {
+                "session_version": request.session_version,
+                "provider": request.llm.provider,
+                "model": request.llm.model,
+            },
+        )
+        cached = _reviews().operation_result(
+            session_id,
+            request.operation_id,
+            operation_type="dashboard_checkpoint",
+            request_digest=request_digest,
+        )
         if cached is not None:
             session = _reviews().get(session_id)
             return DashboardCheckpointResponse(
@@ -354,7 +409,7 @@ async def checkpoint_remediation(
                 session_version=session.session_version,
                 workflow_state=session.workflow_state,
                 next_action=session.next_action,
-                result=RemediationCheckpointResult.model_validate_json(cached),
+                result=DashboardCheckpointResult.model_validate_json(cached),
             )
         session = _reviews().get(session_id)
         _require_workflow(
@@ -362,6 +417,14 @@ async def checkpoint_remediation(
             {WorkflowState.CHECKPOINT_REQUIRED, WorkflowState.AWAITING_DELTA_EXTRACTION},
             "checkpoint",
         )
+        _reviews().reserve_operation(
+            session_id,
+            expected_version=request.session_version,
+            operation_id=request.operation_id,
+            operation_type="dashboard_checkpoint",
+            request_digest=request_digest,
+        )
+        reserved = True
         plan = prepare_checkpoint(session.state)
         completion = await call_model(
             request.llm,
@@ -378,24 +441,59 @@ async def checkpoint_remediation(
             state=result.state,
             workflow_state=workflow_for_turn(turn),
             event_type="checkpoint_applied",
-            result_json=result.model_dump_json(),
+            result_json=DashboardCheckpointResult(
+                state=DashboardReviewState(
+                    assessment=result.state.assessment,
+                    report=result.state.report,
+                    verified_answers=result.state.verified_answers,
+                    framing=result.state.framing,
+                    edge_case_coverage=result.state.edge_case_coverage,
+                ),
+                next_question=result.next_question,
+                credited_answer_ids=result.credited_answer_ids,
+                uncredited_answer_ids=result.uncredited_answer_ids,
+                previous_band=result.previous_band,
+                current_band=result.current_band,
+            ).model_dump_json(),
             event_payload={
                 "credited_answer_ids": result.credited_answer_ids,
                 "uncredited_answer_ids": result.uncredited_answer_ids,
             },
+            operation_type="dashboard_checkpoint",
+            request_digest=request_digest,
+            complete_reserved=True,
         )
     except KeyError as error:
+        if reserved:
+            _reviews().cancel_operation(session_id, request.operation_id)
         raise HTTPException(status_code=404, detail=str(error)) from error
     except LLMCallError as error:
+        if reserved:
+            _reviews().cancel_operation(session_id, request.operation_id)
         raise HTTPException(status_code=502, detail=str(error)) from error
     except (ValueError, FileNotFoundError) as error:
+        if reserved:
+            _reviews().cancel_operation(session_id, request.operation_id)
         raise HTTPException(status_code=400, detail=str(error)) from error
     return DashboardCheckpointResponse(
         review_session_id=session_id,
         session_version=session.session_version,
         workflow_state=session.workflow_state,
         next_action=session.next_action,
-        result=result,
+        result=DashboardCheckpointResult(
+            state=DashboardReviewState(
+                assessment=result.state.assessment,
+                report=result.state.report,
+                verified_answers=result.state.verified_answers,
+                framing=result.state.framing,
+                edge_case_coverage=result.state.edge_case_coverage,
+            ),
+            next_question=result.next_question,
+            credited_answer_ids=result.credited_answer_ids,
+            uncredited_answer_ids=result.uncredited_answer_ids,
+            previous_band=result.previous_band,
+            current_band=result.current_band,
+        ),
     )
 
 
@@ -417,22 +515,69 @@ def preview_revision(
 ) -> DashboardRevisionPreview:
     try:
         stored = _store.get(document_id)
+        request_digest = operation_digest(
+            "preview_revision",
+            {
+                "document_id": document_id,
+                "answers": [
+                    answer.model_dump(mode="json")
+                    for answer in request.supplemental_answers
+                ],
+                "section_overrides": request.section_overrides,
+            },
+        )
+        cached = _reviews().operation_result(
+            request.review_session_id,
+            request.operation_id,
+            operation_type="preview_revision",
+            request_digest=request_digest,
+        )
+        if cached is not None:
+            return DashboardRevisionPreview.model_validate_json(cached)
+        session = _reviews().get(request.review_session_id)
+        _require_workflow(
+            session.workflow_state,
+            {WorkflowState.REVISION_READY},
+            "preview revision",
+        )
         plan = preview_integrated_revision(
             stored.path,
             request.supplemental_answers,
             section_overrides=request.section_overrides,
         )
+        plan_id = _store.save_revision_plan(document_id, plan)
+        response = DashboardRevisionPreview(
+            plan_id=plan_id,
+            plan_digest=plan.plan_digest,
+            source_sha256=plan.source_sha256,
+            edits=plan.edits,
+            review_session_id=session.review_session_id,
+            session_version=request.session_version + 1,
+            workflow_state=WorkflowState.AWAITING_REVISION_APPROVAL,
+            next_action=next_action_for(WorkflowState.AWAITING_REVISION_APPROVAL),
+        )
+        session = _reviews().update(
+            request.review_session_id,
+            expected_version=request.session_version,
+            operation_id=request.operation_id,
+            state=session.state,
+            workflow_state=WorkflowState.AWAITING_REVISION_APPROVAL,
+            event_type="revision_previewed",
+            result_json=response.model_dump_json(),
+            event_payload={"plan_id": plan_id, "plan_digest": plan.plan_digest},
+            operation_type="preview_revision",
+            request_digest=request_digest,
+        )
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except (ValueError, FileNotFoundError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    plan_id = uuid.uuid4().hex
-    _revision_plans[plan_id] = (document_id, plan)
-    return DashboardRevisionPreview(
-        plan_id=plan_id,
-        plan_digest=plan.plan_digest,
-        source_sha256=plan.source_sha256,
-        edits=plan.edits,
+    return response.model_copy(
+        update={
+            "session_version": session.session_version,
+            "workflow_state": session.workflow_state,
+            "next_action": session.next_action,
+        }
     )
 
 
@@ -443,9 +588,44 @@ def preview_revision(
 async def create_revision(
     document_id: str, request: MaterializeRevisionRequest
 ) -> DashboardRevisionResponse:
+    reserved = False
+    generated = None
     try:
         stored = _store.get(document_id)
-        planned_document_id, plan = _revision_plans[request.plan_id]
+        request_digest = operation_digest(
+            "materialize_revision",
+            {
+                "document_id": document_id,
+                "plan_id": request.plan_id,
+                "actions": request.actions,
+                "provider": request.llm.provider,
+                "model": request.llm.model,
+                "rubric_name": request.rubric_name,
+            },
+        )
+        cached = _reviews().operation_result(
+            request.review_session_id,
+            request.operation_id,
+            operation_type="materialize_revision",
+            request_digest=request_digest,
+        )
+        if cached is not None:
+            return DashboardRevisionResponse.model_validate_json(cached)
+        original_session = _reviews().get(request.review_session_id)
+        _require_workflow(
+            original_session.workflow_state,
+            {WorkflowState.AWAITING_REVISION_APPROVAL},
+            "materialize revision",
+        )
+        _reviews().reserve_operation(
+            request.review_session_id,
+            expected_version=request.session_version,
+            operation_id=request.operation_id,
+            operation_type="materialize_revision",
+            request_digest=request_digest,
+        )
+        reserved = True
+        planned_document_id, plan = _store.get_revision_plan(request.plan_id)
         if planned_document_id != document_id:
             raise ValueError("revision plan belongs to a different document")
         approved = approve_revision_plan(plan, actions=request.actions)
@@ -464,12 +644,25 @@ async def create_revision(
             display_name=Path(filename).stem,
         )
         _store.register_generated(generated)
-        del _revision_plans[request.plan_id]
     except KeyError as error:
+        if reserved:
+            _reviews().cancel_operation(
+                request.review_session_id, request.operation_id
+            )
         raise HTTPException(status_code=404, detail=str(error)) from error
     except (ValueError, FileNotFoundError) as error:
+        if reserved:
+            _reviews().cancel_operation(
+                request.review_session_id, request.operation_id
+            )
         raise HTTPException(status_code=400, detail=str(error)) from error
     except ExtractionFailed as error:
+        if reserved:
+            _reviews().cancel_operation(
+                request.review_session_id, request.operation_id
+            )
+        if generated is not None:
+            generated.path.unlink(missing_ok=True)
         raise HTTPException(status_code=502, detail=str(error)) from error
     payload = result.model_dump()
     payload["source_path"] = filename
@@ -488,12 +681,44 @@ async def create_revision(
     payload["workflow_state"] = session.workflow_state if session else None
     payload["next_action"] = session.next_action if session else None
     assessment = DashboardAssessmentResponse.model_validate(payload)
-    return DashboardRevisionResponse(
+    response = DashboardRevisionResponse(
         document_id=generated.document_id,
         filename=filename,
-        revision=revision,
+        revision=DashboardRevisionResult(
+            supplemental_answer_count=revision.supplemental_answer_count,
+            note=revision.note,
+            mode=revision.mode,
+            plan_digest=revision.plan_digest,
+            final_assessment_required=revision.final_assessment_required,
+        ),
         assessment=assessment,
     )
+    original_session = _reviews().update(
+        request.review_session_id,
+        expected_version=request.session_version,
+        operation_id=request.operation_id,
+        state=original_session.state,
+        workflow_state=WorkflowState.COMPLETE,
+        event_type="revision_materialized_and_verified",
+        result_json=response.model_dump_json(),
+        event_payload={
+            "plan_id": request.plan_id,
+            "generated_document_id": generated.document_id,
+            "final_review_session_id": session.review_session_id if session else None,
+        },
+        operation_type="materialize_revision",
+        request_digest=request_digest,
+        complete_reserved=True,
+    )
+    _store.link_review_artifact(
+        review_session_id=original_session.review_session_id,
+        plan_id=request.plan_id,
+        source_document_id=document_id,
+        generated_document_id=generated.document_id,
+        final_review_session_id=session.review_session_id if session else None,
+    )
+    _store.delete_revision_plan(request.plan_id)
+    return response
 
 
 @app.get("/api/documents/{document_id}/download")
@@ -505,12 +730,26 @@ def download_document(document_id: str) -> FileResponse:
     return FileResponse(stored.path, filename=stored.filename)
 
 
+@app.delete("/api/documents/{document_id}")
+def delete_document(document_id: str) -> dict[str, object]:
+    try:
+        _store.delete(document_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"document_id": document_id, "deleted": True}
+
+
 def main() -> None:
     import uvicorn
 
+    host = os.environ.get("FORGE_DASHBOARD_HOST", "127.0.0.1")
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        raise ValueError(
+            "Forge dashboard is local-only and refuses a non-loopback host"
+        )
     uvicorn.run(
         "forge_dashboard.app:app",
-        host=os.environ.get("FORGE_DASHBOARD_HOST", "127.0.0.1"),
+        host=host,
         port=int(os.environ.get("FORGE_DASHBOARD_PORT", "8000")),
         reload=False,
     )

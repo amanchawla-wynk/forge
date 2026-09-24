@@ -5,6 +5,8 @@ from pathlib import Path
 import pymupdf
 from docx import Document
 from docx.opc.constants import RELATIONSHIP_TYPE
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 
 from forge.ingest.models import (
     NormalizedDocument,
@@ -95,29 +97,57 @@ def _docx_content(path: Path) -> tuple[list[SourceBlock], list[VisualAsset]]:
     section: str | None = None
     index = 0
 
-    for paragraph in document.paragraphs:
-        text = paragraph.text.strip()
-        if not text:
-            continue
-        index += 1
-        if paragraph.style and paragraph.style.name.startswith("Heading"):
-            section = text
-        blocks.append(
-            SourceBlock(id=f"paragraph-{index}", text=text, section=section)
-        )
-
-    for table_number, table in enumerate(document.tables, start=1):
-        for row_number, row in enumerate(table.rows, start=1):
-            cells = [cell.text.strip() for cell in row.cells]
-            text = " | ".join(cell for cell in cells if cell)
-            if text:
-                blocks.append(
-                    SourceBlock(
-                        id=f"table-{table_number}-row-{row_number}",
-                        text=text,
-                        section=section,
+    table_number = 0
+    for item in document.iter_inner_content():
+        if isinstance(item, Paragraph):
+            text = item.text.strip()
+            if not text:
+                continue
+            index += 1
+            if item.style and item.style.name.startswith("Heading"):
+                section = text
+            blocks.append(
+                SourceBlock(id=f"paragraph-{index}", text=text, section=section)
+            )
+        elif isinstance(item, Table):
+            table_number += 1
+            for row_number, row in enumerate(item.rows, start=1):
+                cells = [cell.text.strip() for cell in row.cells]
+                text = " | ".join(cell for cell in cells if cell)
+                if text:
+                    blocks.append(
+                        SourceBlock(
+                            id=f"table-{table_number}-row-{row_number}",
+                            text=text,
+                            section=section,
+                        )
                     )
-                )
+
+    seen_parts: set[str] = set()
+    for section_number, doc_section in enumerate(document.sections, start=1):
+        for kind, container in (
+            ("header", doc_section.header),
+            ("footer", doc_section.footer),
+        ):
+            part_name = str(container.part.partname)
+            if part_name in seen_parts:
+                continue
+            seen_parts.add(part_name)
+            for paragraph_number, paragraph in enumerate(
+                container.paragraphs, start=1
+            ):
+                text = paragraph.text.strip()
+                if text:
+                    blocks.append(
+                        SourceBlock(
+                            id=(
+                                f"section-{section_number}-{kind}-"
+                                f"{paragraph_number}"
+                            ),
+                            text=text,
+                            section=kind.title(),
+                        )
+                    )
     image_relationships = sorted(
         (
             relationship

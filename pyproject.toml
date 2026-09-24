@@ -29,6 +29,7 @@ forge-mcp = "forge.mcp.server:main"
 forge-dashboard-api = "forge_dashboard.app:main"
 forge-setup-cursor = "forge.setup_cursor:main"
 forge-setup-opencode = "forge.setup_opencode:main"
+forge-calibration = "forge.calibration:main"
 
 [build-system]
 requires = ["hatchling"]
