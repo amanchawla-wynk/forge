@@ -240,9 +240,45 @@ connectors** and confirm that Forge and its tools appear.
 
 ## Connect OpenCode
 
-Add this to `opencode.json` in the project where you want to use Forge. For a
-user-wide configuration, add the same entry to
-`~/.config/opencode/opencode.json` instead.
+### One-command setup (recommended)
+
+From the Forge repository root, after [Install Locally](#install-locally):
+
+```bash
+uv run forge-setup-opencode
+```
+
+This registers Forge in `~/.config/opencode/opencode.json`, so it is
+available in **every** OpenCode project — no manual JSON editing, no hunting
+for absolute paths. It merges into any existing config and preserves other
+MCP servers, plugins, and settings you already have; it never overwrites the
+file. Running it again is always safe (it no-ops if Forge is already
+registered correctly).
+
+To scope Forge to one project instead, add `--scope project` (writes
+`<project>/opencode.json`, defaulting to the current directory, or pass
+`--project-dir /path/to/project`):
+
+```bash
+uv run forge-setup-opencode --scope project --project-dir /path/to/your/project
+```
+
+Then restart OpenCode and verify:
+
+```bash
+opencode mcp list
+```
+
+For a whole team, the rollout is the same shape as Cursor: everyone clones
+this repo once, runs `uv sync --extra dev` and `uv run forge-setup-opencode`,
+and restarts OpenCode. Each person's script writes their own absolute `uv`
+and repo paths, so there's no config file to share or coordinate.
+
+### Manual setup (if you'd rather edit JSON yourself)
+
+Add this to `opencode.json` in the project where you want to use Forge (or
+`~/.config/opencode/opencode.json` for every project), using the absolute
+paths from `command -v uv` and `pwd` (run from the Forge repo root):
 
 ```json
 {
@@ -267,6 +303,21 @@ Restart OpenCode and verify the server:
 
 ```bash
 opencode mcp list
+```
+
+### First prompt to try in OpenCode
+
+As with any MCP client, if `assess_prd` errors because sampling isn't
+available, fall back to the two-step flow. A prompt that works either way:
+
+```text
+Use the forge MCP server to assess the PRD at /absolute/path/to/document.pdf.
+Try assess_prd first. If that tool errors or isn't available because this
+client doesn't support MCP sampling, instead call prepare_prd_assessment,
+perform each returned extraction yourself, and submit the result to
+score_prd_extraction. Then show me the report and ask me the single
+next_question, retaining my answers as supplemental evidence, until no
+material question remains.
 ```
 
 ## Use Forge

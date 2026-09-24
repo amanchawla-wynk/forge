@@ -6,9 +6,11 @@ Forge is a local Python MCP server. It owns document parsing, evidence
 verification, rubric configuration, deterministic scoring, and remediation
 planning. It does not own or authenticate to an LLM provider.
 
-`forge-setup-cursor` (`src/forge/setup_cursor.py`) is a separate, narrowly
-scoped CLI that only writes/merges a Cursor `mcp.json` client-config file. It
-never runs, imports the server process, or touches document/domain code.
+`forge-setup-cursor` and `forge-setup-opencode` (`src/forge/setup_cursor.py`,
+`src/forge/setup_opencode.py`, sharing `src/forge/_client_setup.py`) are
+separate, narrowly scoped CLIs that only write/merge a client's own MCP
+config file (Cursor's `mcp.json`, OpenCode's `opencode.json`). Neither runs,
+imports the server process, or touches document/domain code.
 
 ## Components
 

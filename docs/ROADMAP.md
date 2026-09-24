@@ -103,10 +103,11 @@
   `1.0`: deterministic requirement/taxonomy pairs, closed-set four-state
   classification, three-run pessimistic consolidation in MCP, cell-bound
   answers, and an explicit taxonomy-relative stopping rule.
-- Added `forge-setup-cursor`, a one-command, idempotent CLI that
-  writes/merges a Cursor `mcp.json` (user- or project-scoped) so registering
-  Forge needs no manual JSON editing or path lookup, plus a fallback-aware
-  Cursor prompt and Cursor-specific troubleshooting section in the README.
+- Added `forge-setup-cursor` and `forge-setup-opencode`, one-command,
+  idempotent CLIs that write/merge each client's own MCP config file (user-
+  or project-scoped) so registering Forge needs no manual JSON editing or
+  path lookup, plus fallback-aware prompts and client-specific
+  troubleshooting notes in the README.
 
 ## Current Build
 
@@ -121,12 +122,13 @@
 
 ## Next
 
-- Confirm, in a real running Cursor session, whether `assess_prd` native
-  sampling works or whether Cursor requires the `prepare_prd_assessment` /
-  `score_prd_extraction` fallback (setup and a fallback-aware prompt are
-  documented and automated via `forge-setup-cursor`, but live sampling
-  behavior has not been observed firsthand). Test installation and behavior
-  in GitHub Copilot similarly.
+- Confirm, in real running Cursor and OpenCode sessions, whether `assess_prd`
+  native sampling works or whether the client requires the
+  `prepare_prd_assessment` / `score_prd_extraction` fallback (setup and a
+  fallback-aware prompt are documented and automated via `forge-setup-cursor`
+  and `forge-setup-opencode`, but live sampling behavior has not been
+  observed firsthand in either). Test installation and behavior in GitHub
+  Copilot similarly.
 - Test the dashboard's `dashboard` extra install and BYOK flow against real
   Anthropic, OpenAI, and Gemini keys on a clean machine.
 - Compare a direct Docling adapter with current PDF and DOCX normalization on

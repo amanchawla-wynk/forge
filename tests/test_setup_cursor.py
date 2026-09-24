@@ -22,14 +22,14 @@ def test_target_path_project_scope_uses_project_dir(tmp_path):
 
 
 def test_find_uv_raises_a_clear_error_when_missing(monkeypatch):
-    monkeypatch.setattr("forge.setup_cursor.shutil.which", lambda name: None)
+    monkeypatch.setattr("forge._client_setup.shutil.which", lambda name: None)
     with pytest.raises(SystemExit, match="Could not find `uv`"):
         find_uv()
 
 
 def test_find_uv_returns_the_resolved_path(monkeypatch):
     monkeypatch.setattr(
-        "forge.setup_cursor.shutil.which", lambda name: "/usr/local/bin/uv"
+        "forge._client_setup.shutil.which", lambda name: "/usr/local/bin/uv"
     )
     assert find_uv() == "/usr/local/bin/uv"
 

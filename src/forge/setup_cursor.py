@@ -9,22 +9,22 @@ the domain/scoring code, or any document. See README.md "Connect Cursor".
 from __future__ import annotations
 
 import argparse
-import json
-import shutil
 from pathlib import Path
 
-# src/forge/setup_cursor.py -> src/forge -> src -> repo root
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+from forge._client_setup import (
+    REPO_ROOT as _REPO_ROOT,
+    find_uv,
+    load_json_object,
+    write_json_object,
+)
 
-
-def find_uv() -> str:
-    found = shutil.which("uv")
-    if found is None:
-        raise SystemExit(
-            "Could not find `uv` on PATH. Install it first: "
-            "https://docs.astral.sh/uv/getting-started/installation/"
-        )
-    return found
+__all__ = [
+    "find_uv",
+    "target_path",
+    "forge_server_entry",
+    "write_config",
+    "main",
+]
 
 
 def target_path(scope: str, project_dir: Path | None, home: Path | None = None) -> Path:
@@ -47,18 +47,7 @@ def write_config(target: Path, uv_path: str) -> bool:
     Returns True if the file was created or changed, False if it already
     configured `forge` identically (safe to run repeatedly).
     """
-    config: dict[str, object] = {}
-    if target.exists():
-        try:
-            config = json.loads(target.read_text())
-        except json.JSONDecodeError as error:
-            raise SystemExit(
-                f"{target} exists but is not valid JSON ({error}). Fix or "
-                "remove it, then re-run this command."
-            ) from error
-        if not isinstance(config, dict):
-            raise SystemExit(f"{target} does not contain a JSON object at its root.")
-
+    config = load_json_object(target)
     servers = config.setdefault("mcpServers", {})
     if not isinstance(servers, dict):
         raise SystemExit(f"{target} has a non-object 'mcpServers' key.")
@@ -68,8 +57,7 @@ def write_config(target: Path, uv_path: str) -> bool:
         return False
 
     servers["forge"] = entry
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(config, indent=2) + "\n")
+    write_json_object(target, config)
     return True
 
 
