@@ -20,21 +20,32 @@ export const PROVIDER_LABELS: Record<Provider, string> = {
   cursor: "Cursor (Cloud Agents)",
 };
 
-// Current flagship/latest lineups as published by each provider. Kept short
-// on purpose; the model field always accepts a custom id too.
+// Current and recent lineups as published by each provider. The model field
+// always accepts a custom id too, so this list is a convenience, not a cap.
 export const PROVIDER_DEFAULT_MODELS: Record<Provider, string[]> = {
   anthropic: [
     "claude-opus-5-5",
     "claude-sonnet-5",
     "claude-haiku-4-5",
     "claude-fable-5-1",
+    "claude-opus-4-1-20250805",
+    "claude-3-5-haiku-20241022",
   ],
-  openai: ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"],
+  openai: [
+    "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
+    "gpt-6-nova",
+    "gpt-5",
+    "gpt-4.1",
+  ],
   gemini: [
     "gemini-3.8-flash",
     "gemini-3.1-pro",
     "gemini-3.5-flash-lite",
     "gemini-3.1-deep-think",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
   ],
   // No fixed list: Cursor resolves your account/team default model when
   // left blank. Enter an id from `GET /v1/models` (Cursor API) to pin one.

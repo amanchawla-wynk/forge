@@ -27,6 +27,7 @@ dashboard = [
 [project.scripts]
 forge-mcp = "forge.mcp.server:main"
 forge-dashboard-api = "forge_dashboard.app:main"
+forge-setup-cursor = "forge.setup_cursor:main"
 
 [build-system]
 requires = ["hatchling"]

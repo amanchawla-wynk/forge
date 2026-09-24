@@ -78,8 +78,45 @@ not run a separate background server.
 
 ## Connect Cursor
 
-Create `.cursor/mcp.json` in the project where you want to use Forge. To make it
-available in every Cursor workspace, use `~/.cursor/mcp.json` instead.
+This is the fastest path and the one most teams should use.
+
+### One-command setup (recommended)
+
+From the Forge repository root, after [Install Locally](#install-locally):
+
+```bash
+uv run forge-setup-cursor
+```
+
+This registers Forge in `~/.cursor/mcp.json`, so it is available in **every**
+Cursor workspace on your machine — no manual JSON editing, no hunting for
+absolute paths. It merges into any existing config and preserves other MCP
+servers you already have; it never overwrites the file. Running it again is
+always safe (it no-ops if Forge is already registered correctly).
+
+To scope Forge to one project instead of every workspace, add
+`--scope project` (writes `<project>/.cursor/mcp.json`, defaulting to the
+current directory, or pass `--project-dir /path/to/project`):
+
+```bash
+uv run forge-setup-cursor --scope project --project-dir /path/to/your/project
+```
+
+Then **fully restart Cursor** (quit and reopen, not just reload the window).
+Verify the connection by typing `/mcp list` in a Cursor agent chat, or open
+**Cursor Settings → MCP** (menu name may vary slightly by Cursor version) and
+confirm `forge` is listed and enabled.
+
+For a whole team, the easiest rollout is: everyone clones this repo once,
+runs `uv sync --extra dev` and `uv run forge-setup-cursor`, and restarts
+Cursor. No shared config file or path coordination needed, since each person's
+script writes their own absolute `uv` and repo paths.
+
+### Manual setup (if you'd rather edit JSON yourself)
+
+Create `.cursor/mcp.json` in the project where you want to use Forge (or
+`~/.cursor/mcp.json` for every workspace), using the absolute paths from
+`command -v uv` and `pwd` (run from the Forge repo root):
 
 ```json
 {
@@ -98,9 +135,58 @@ available in every Cursor workspace, use `~/.cursor/mcp.json` instead.
 }
 ```
 
-Restart Cursor, open **Customize**, and confirm that `forge` is enabled. In a
-Cursor agent chat, `/mcp list` shows configured servers. If startup fails, open
-the Output panel and select **MCP Logs**.
+Restart Cursor, then confirm `forge` is enabled the same way as above.
+
+### First prompt to try in Cursor
+
+Cursor's support for MCP *sampling* (the capability `assess_prd` needs to
+borrow its model) varies by version, so start with a prompt that lets Cursor's
+agent pick whichever path works — this mirrors the fallback logic already
+built into Forge's tool descriptions, so most of the time you can just say:
+
+```text
+Use the forge MCP server to assess the PRD at /absolute/path/to/document.pdf.
+Try assess_prd first. If that tool errors or isn't available because this
+client doesn't support MCP sampling, instead call prepare_prd_assessment,
+perform each returned extraction yourself, and submit the result to
+score_prd_extraction. Then show me the report and ask me the single
+next_question, retaining my answers as supplemental evidence, until no
+material question remains.
+```
+
+If you know your Cursor version supports sampling, the shorter prompt in
+[Use Forge](#use-forge) below works too. When in doubt, use the prompt above —
+it costs nothing extra and always resolves to a working path.
+
+### Cursor-specific troubleshooting
+
+- **`forge` doesn't appear in `/mcp list` after restart**: confirm you fully
+  quit and reopened Cursor (a window reload is not always enough to reload
+  `mcp.json`). Re-run `uv run forge-setup-cursor` to confirm the config is
+  correct, then restart again.
+- **Cursor reports it can't find `uv` or the server exits immediately**:
+  Cursor launches MCP servers without your shell's login environment on
+  macOS, so a bare `uv` on PATH inside a terminal is not enough — the config
+  needs the absolute path. `forge-setup-cursor` already resolves this for
+  you via `command -v uv`; if you edited the config by hand, double check the
+  `command` field is an absolute path, not just `"uv"`.
+- **A tool call sits waiting for approval**: Cursor may prompt to approve each
+  MCP tool call individually depending on your auto-run/approval settings.
+  Approve the first call or adjust Cursor's tool-approval setting if you want
+  the whole remediation loop to run without stopping each turn.
+- **To see raw errors**: open Cursor's MCP logs (look for an "MCP Logs" entry
+  in the Output panel, naming may vary by version) or run the launch command
+  directly in a terminal as a smoke test:
+  ```bash
+  uv --directory /absolute/path/to/forge run forge-mcp
+  ```
+  It should print nothing and hang waiting for stdio input; `Ctrl-C` to stop.
+  Any Python traceback here is an installation problem, not a Cursor problem.
+- **`assess_prd` fails with a sampling-related error**: your Cursor version
+  doesn't support MCP sampling. Use the fallback prompt above, or explicitly
+  ask for `prepare_prd_assessment` + `score_prd_extraction` (see
+  [Troubleshooting](#troubleshooting) below) — this always works regardless
+  of sampling support, since Cursor's own agent performs the extraction.
 
 ## Connect Claude Code
 
@@ -198,6 +284,10 @@ Use Forge to assess the PRD at /absolute/path/to/document.pdf. Ask me the
 single next clarification question, retain my answers as supplemental evidence,
 and continue until no material question remains.
 ```
+
+In Cursor specifically, prefer the fallback-aware prompt in
+[Connect Cursor](#connect-cursor) instead, since it works whether or not your
+Cursor version supports MCP sampling.
 
 If the host supports MCP sampling, the agent should call `assess_prd`. When that
 reports that the document needs several batches, the agent should call
@@ -378,8 +468,12 @@ supplemental evidence, exactly like the MCP conversation loop.
 
 ## Troubleshooting
 
+Using Cursor? See [Cursor-specific troubleshooting](#cursor-specific-troubleshooting)
+first; the issues below apply to every MCP client.
+
 - If a client reports that `uv` was not found, use the absolute path returned by
-  `command -v uv` rather than `uv` in its configuration.
+  `command -v uv` rather than `uv` in its configuration (or, for Cursor, just
+  run `uv run forge-setup-cursor`, which does this for you).
 - If Forge disconnects immediately, run the configured launch command in a
   terminal to expose installation or path errors.
 - If `assess_prd` cannot run because the client does not support MCP sampling,
