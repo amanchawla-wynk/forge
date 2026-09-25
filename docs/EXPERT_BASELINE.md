@@ -1,6 +1,6 @@
 # Expert Baseline
 
-Forge `0.5.0-expert-baseline` is a self-contained cross-industry PRD reviewer.
+Forge `0.6.0-expert-baseline` is a self-contained cross-industry PRD reviewer.
 It converts published product, service, privacy, accessibility, and launch
 guidance into atomic fields that an LLM extracts and Python verifies. It does
 not copy external scoring weights and does not treat an online template as a
@@ -19,10 +19,20 @@ human quality label.
 | [GOV.UK: Operate a reliable service](https://www.gov.uk/service-manual/service-standard/point-14-operate-a-reliable-service) | Monitoring, sustainable response, production-like testing, and user-outcome monitoring. |
 | [Google SRE: Reliable Product Launches at Scale](https://sre.google/sre-book/reliable-product-launches/) | Dependency readiness, capacity, failure modes, staged rollout, verification, ownership, contingencies, and rollback. |
 | [ICO data-protection principles](https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/data-protection-principles/a-guide-to-the-data-protection-principles/) | Purpose-limited collection, data minimisation, retention, deletion, and lifecycle controls. |
+| [Google Cloud: Architecture decision records](https://docs.cloud.google.com/architecture/architecture-decision-records) | Authoritative decisions, alternatives, status, and consequences for overlapping rules. |
+| [GitLab Product Development Flow](https://handbook.gitlab.com/handbook/product-development/how-we-work/product-development-flow/) | Maintained decisions, explicit testing, dependencies, and completion evidence. |
 
-Sources were reviewed on 2026-09-23. They establish an expert basis for what an
+Sources were reviewed through 2026-09-25. They establish an expert basis for what an
 actionable PRD should contain; they do not establish organization-specific band
 accuracy.
+
+Version `0.6.0` adds two required fields inside existing criteria:
+`functional_requirements.decision_rules_and_precedence` and
+`acceptance_criteria.requirement_coverage`. It also refines
+`dependencies.dependency_readiness`. Criterion weights, gates, band thresholds,
+and verdict credits are unchanged. The changes were transfer-checked against
+the repository's three sample PRDs and a synthetic complete fixture, but remain
+expert-baseline hypotheses rather than calibrated organization policy.
 
 ## Public Example Review
 

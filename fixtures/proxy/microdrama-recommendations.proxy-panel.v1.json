@@ -1,0 +1,1532 @@
+{
+  "schema_uri": "https://forge.local/schemas/proxy-panel-labels.v1.json",
+  "artifact_type": "forge.synthetic_public_guidance_proxy_panel.v1",
+  "artifact_id": "proxy-panel:microdrama-recommendations:2026-09-25:v1",
+  "label_namespace": "proxy_public_guidance",
+  "label_authority": "synthetic_ai_proxy",
+  "dataset_tier": "external_proxy_diagnostic",
+  "human_independent_review": false,
+  "organization_validation": false,
+  "calibration_eligible": false,
+  "headline_metrics_eligible": false,
+  "allowed_uses": [
+    "content_validity_hypothesis",
+    "regression_fixture",
+    "hard_negative_fixture",
+    "transfer_diagnostic"
+  ],
+  "prohibited_uses": [
+    "forge_review_eval_internal_label",
+    "weight_tuning",
+    "gate_tuning",
+    "band_tuning",
+    "severity_calibration",
+    "organization_readiness_claim"
+  ],
+  "document": {
+    "source_path": "sampleDoc/WDP-MicroDrama(Bites) Recommendations — PRD-250926-070917 (1).pdf",
+    "source_sha256": "f7ae423421377b38aca6e7788be9df10072ca0ba796a80fc14b29f4e9f8d2450",
+    "page_count": 21
+  },
+  "panel": {
+    "panel_version": "public-prd-proxy-panel.v1",
+    "reviews": [
+      {
+        "review_id": "google-proxy",
+        "source_family": "Google public guidance",
+        "notes_path": "research_notes/Public PRD proxy panel/google_review.md"
+      },
+      {
+        "review_id": "microsoft-linkedin-proxy",
+        "source_family": "Microsoft and LinkedIn public guidance",
+        "notes_path": "research_notes/Public PRD proxy panel/microsoft_linkedin_review.md"
+      },
+      {
+        "review_id": "atlassian-industry-proxy",
+        "source_family": "Atlassian, GitLab, GOV.UK, and industry public guidance",
+        "notes_path": "research_notes/Public PRD proxy panel/atlassian_industry_review.md"
+      }
+    ],
+    "independence_note": "Agent reviews are synthetic perspectives, not independent human reviewers."
+  },
+  "labels": [
+    {
+      "label_id": "PXY-MD-001",
+      "consensus_status": "supported",
+      "finding_kind": "missing_problem_outcome_evidence",
+      "evidence": [
+        {
+          "quote": "This document consolidates all product, data, and ML requirements for the MicroDrama recommendation system on XstreamPlay app.",
+          "page": 1,
+          "source_block_id": "page-1",
+          "start_char": 53,
+          "end_char": 179
+        },
+        {
+          "quote": "Reduces cognitive load: the user does not have to re-specify what they want to watch next.\nMaintains mood: if they were engaged in a romance story, recommending action content breaks the immersion.\nIncreases CTR: contextually coherent recos get clicked more than random mixes.",
+          "page": 20,
+          "source_block_id": "page-20",
+          "start_char": 1098,
+          "end_char": 1374
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "design",
+        "data_ml",
+        "leadership"
+      ],
+      "consequence": "Teams can implement a solution without agreeing on the user problem, baseline, target population, or desired outcome.",
+      "required_decision": "Define the evidenced user need, target cohort, baseline, measurable outcome, horizon, and non-goals.",
+      "blocker_status": "conditional_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "The panel treats this as a prioritization blocker, not a code-compilation blocker."
+      ],
+      "destination": [
+        "rubric"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-002",
+      "consensus_status": "supported",
+      "finding_kind": "conflicting_phase_activation",
+      "evidence": [
+        {
+          "quote": "This collection will be treated as a Source of Truth for the content ranking order in the Personalised feed along with the Player Next\nContent or Seed Content Recommendations till the ML and Analytics team is ready with the Microdrama- Content Popularity Model\nor Trending Contents or any ML Model based recommendations. (timeline : 30-60 days post MVP launch).",
+          "page": 3,
+          "source_block_id": "page-3",
+          "start_char": 736,
+          "end_char": 1097
+        },
+        {
+          "quote": "ML team is building the Multi-Armed Bandit model recommendations based on the User watching preferences and interactions(both on\nSampling screens + Full series Watch flow) from the D0 for all users.",
+          "page": 4,
+          "source_block_id": "page-4",
+          "start_char": 48,
+          "end_char": 246
+        },
+        {
+          "quote": "Replaces\ncold start\ncurated\norder.",
+          "page": 14,
+          "source_block_id": "page-14",
+          "start_char": 487,
+          "end_char": 521
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "data_ml",
+        "qa",
+        "operations",
+        "leadership"
+      ],
+      "consequence": "Different teams can ship curated-only, experimental MAB, or MAB-for-all on day zero.",
+      "required_decision": "Define build, shadow, experiment, ramp, general-availability, fallback, and source-of-truth states.",
+      "blocker_status": "implementation_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "Rule-based and MAB ranking can coexist as control and treatment, shadow evaluation, or fallback; the defect is the missing activation and exposure contract."
+      ],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-003",
+      "consensus_status": "supported",
+      "finding_kind": "impossible_and_conflicting_boundary",
+      "evidence": [
+        {
+          "quote": "Soft Skipped Contents(21secs>=X>=40secs)",
+          "page": 7,
+          "source_block_id": "page-7",
+          "start_char": 1680,
+          "end_char": 1720
+        },
+        {
+          "quote": "Hard Skipped Contents(>=5 secs)",
+          "page": 7,
+          "source_block_id": "page-7",
+          "start_char": 1879,
+          "end_char": 1910
+        },
+        {
+          "quote": "Hard skip on\nSampling\npreview\nwatch duration ≤ 5secs",
+          "page": 9,
+          "source_block_id": "page-9",
+          "start_char": 1035,
+          "end_char": 1087
+        },
+        {
+          "quote": "A hard skip (0–3 sec) is 10× more informative than a late skip (40–80%).",
+          "page": 19,
+          "source_block_id": "page-19",
+          "start_char": 243,
+          "end_char": 315
+        }
+      ],
+      "downstream_consumers": [
+        "engineering",
+        "data_ml",
+        "qa"
+      ],
+      "consequence": "The same playback can receive incompatible skip classes, and one stated interval is impossible.",
+      "required_decision": "Choose one unit and exhaustive non-overlapping boundaries, then mark older definitions superseded.",
+      "blocker_status": "implementation_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-004",
+      "consensus_status": "supported",
+      "finding_kind": "enum_domain_example_conflict",
+      "evidence": [
+        {
+          "quote": "watch duration ≤ 5secs\nTier 3",
+          "page": 9,
+          "source_block_id": "page-9",
+          "start_char": 1065,
+          "end_char": 1094
+        },
+        {
+          "quote": "Hard\n2 secs\nTier 1",
+          "page": 10,
+          "source_block_id": "page-10",
+          "start_char": 1309,
+          "end_char": 1327
+        },
+        {
+          "quote": "skip_tiers: { content_id → tier (0–2) }",
+          "page": 11,
+          "source_block_id": "page-11",
+          "start_char": 281,
+          "end_char": 320
+        }
+      ],
+      "downstream_consumers": [
+        "engineering",
+        "data_ml",
+        "qa"
+      ],
+      "consequence": "Producers, stores, examples, and ranking consumers cannot share one enum contract.",
+      "required_decision": "Define the tier domain and map every skip state and example to it.",
+      "blocker_status": "implementation_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "The Atlassian/industry proxy supports the broader skip-semantic conflict rather than isolating the enum-domain defect."
+      ],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-005",
+      "consensus_status": "supported",
+      "finding_kind": "state_lifetime_conflict",
+      "evidence": [
+        {
+          "quote": "Not using this mood outside the same session",
+          "page": 5,
+          "source_block_id": "page-5",
+          "start_char": 234,
+          "end_char": 278
+        },
+        {
+          "quote": "Explicitly Selected Mood Contents\nif any mood has been selected in\nlast 30 days window",
+          "page": 16,
+          "source_block_id": "page-16",
+          "start_char": 1094,
+          "end_char": 1180
+        },
+        {
+          "quote": "for the\nrolling 30 days at all time.",
+          "page": 11,
+          "source_block_id": "page-11",
+          "start_char": 164,
+          "end_char": 200
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "design",
+        "data_ml",
+        "risk",
+        "qa"
+      ],
+      "consequence": "Session-only behavior and 30-day reuse imply different storage, user expectation, and fallback behavior.",
+      "required_decision": "Decide whether outage behavior is an explicit exception, what persists, why, and for how long.",
+      "blocker_status": "conditional_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy"
+      ],
+      "disagreements": [
+        "The Microsoft/LinkedIn review says the 30-day outage fallback could deliberately override normal session-only behavior.",
+        "The Atlassian/industry review did not isolate this item."
+      ],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-006",
+      "consensus_status": "supported",
+      "finding_kind": "state_schedule_conflict",
+      "evidence": [
+        {
+          "quote": "First time Moods picker will be shown on the first N=3 consecutive hard skips.",
+          "page": 10,
+          "source_block_id": "page-10",
+          "start_char": 14,
+          "end_char": 92
+        },
+        {
+          "quote": "2 for each user lifecycle",
+          "page": 10,
+          "source_block_id": "page-10",
+          "start_char": 280,
+          "end_char": 305
+        },
+        {
+          "quote": "picker_shown: boolean // emit 2 times per day",
+          "page": 11,
+          "source_block_id": "page-11",
+          "start_char": 364,
+          "end_char": 409
+        },
+        {
+          "quote": "The 3-skip nudge is\npassive and dismissable; the 5-skip re-picker is blocking but still quick.",
+          "page": 19,
+          "source_block_id": "page-19",
+          "start_char": 539,
+          "end_char": 633
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "design",
+        "data_ml",
+        "qa"
+      ],
+      "consequence": "Clients and analytics will trigger different interventions and caps.",
+      "required_decision": "Choose the trigger sequence, reset window, cap, persistence key, and superseded schedule.",
+      "blocker_status": "implementation_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-007",
+      "consensus_status": "supported",
+      "finding_kind": "unresolved_runtime_precedence",
+      "evidence": [
+        {
+          "quote": "Variant 1 : New Releases (k based on release year/ingestion date) > Recommended (Top N: configurable) > Trending (Top M : Configurable)\n> Curated collection(fallback) .These sources will be deduped at each source level, given we have a limited catalog currently. No round\nrobin.",
+          "page": 4,
+          "source_block_id": "page-4",
+          "start_char": 1229,
+          "end_char": 1507
+        },
+        {
+          "quote": "Variant 2 :  Consider Recommended (ratio = X) , Trending(ratio = Y) , Curated collection(ratio = N) and place the contents from each source\nin round robin.",
+          "page": 4,
+          "source_block_id": "page-4",
+          "start_char": 1508,
+          "end_char": 1663
+        },
+        {
+          "quote": "The rung order to be implemented going forward-",
+          "page": 18,
+          "source_block_id": "page-18",
+          "start_char": 585,
+          "end_char": 632
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "data_ml",
+        "qa"
+      ],
+      "consequence": "Multiple detailed rules do not reduce to one candidate, filter, score, rerank, and dedupe pipeline.",
+      "required_decision": "Select the launch variant and canonical order, tie-breaks, defaults, fallbacks, and superseded text.",
+      "blocker_status": "implementation_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "A later backlog may supersede earlier ranking text, but later placement alone does not establish normative supersession."
+      ],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-008",
+      "consensus_status": "supported",
+      "finding_kind": "dependency_status_conflict",
+      "evidence": [
+        {
+          "quote": "Must be built and validated by the catalog team.",
+          "page": 8,
+          "source_block_id": "page-8",
+          "start_char": 2063,
+          "end_char": 2111
+        },
+        {
+          "quote": "Point closed : Genre mapping table: Xstream long-format genres → MicroDrama tropes",
+          "page": 18,
+          "source_block_id": "page-18",
+          "start_char": 70,
+          "end_char": 152
+        },
+        {
+          "quote": "Open Points : Phase 2",
+          "page": 19,
+          "source_block_id": "page-19",
+          "start_char": 120,
+          "end_char": 141
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "data_ml",
+        "qa",
+        "leadership"
+      ],
+      "consequence": "A launch-critical mapping has mutually incompatible status and ownership.",
+      "required_decision": "Identify the exact artifact and version, accountable owner, validation evidence, status, and launch gate.",
+      "blocker_status": "implementation_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "The Microsoft/LinkedIn proxy states the status conflict explicitly; the other proxies support unresolved prerequisite and authority concerns."
+      ],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-009",
+      "consensus_status": "supported",
+      "finding_kind": "unclosed_safety_and_api_dependency",
+      "evidence": [
+        {
+          "quote": "Without this, erotic content cannot be\nexcluded.",
+          "page": 8,
+          "source_block_id": "page-8",
+          "start_char": 2319,
+          "end_char": 2367
+        },
+        {
+          "quote": "Without this, A-rated content cannot be filtered from\nrecommendations.",
+          "page": 8,
+          "source_block_id": "page-8",
+          "start_char": 2432,
+          "end_char": 2502
+        },
+        {
+          "quote": "Like/Dislike field must be added to the Xstream BE Continue Watching API. Without this, Source 3 signals cannot be read in real-time.",
+          "page": 8,
+          "source_block_id": "page-8",
+          "start_char": 2503,
+          "end_char": 2636
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "data_ml",
+        "qa",
+        "risk",
+        "operations",
+        "leadership"
+      ],
+      "consequence": "The document acknowledges launch dependencies but supplies no readiness proof, fail behavior, or gate.",
+      "required_decision": "Define completion evidence, owner and date, acceptance tests, missing or stale-flag behavior, and whether exposure is blocked.",
+      "blocker_status": "implementation_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "Fail-closed handling may be prudent for restricted content, but the exact safe behavior is an organization decision."
+      ],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-010",
+      "consensus_status": "supported",
+      "finding_kind": "incomplete_pagination_consistency_contract",
+      "evidence": [
+        {
+          "quote": "In MVP, we are\nchanging the ordering of contents after the 1st pagination call based in the same session. The client calls will happen on the 7th/8th\ncontents",
+          "page": 8,
+          "source_block_id": "page-8",
+          "start_char": 2869,
+          "end_char": 3027
+        },
+        {
+          "quote": "Pagination support for MD contents is needed after every 10 contents (vertical scroll).",
+          "page": 8,
+          "source_block_id": "page-8",
+          "start_char": 3028,
+          "end_char": 3115
+        }
+      ],
+      "downstream_consumers": [
+        "engineering",
+        "data_ml",
+        "qa"
+      ],
+      "consequence": "Retries and concurrent reranking can duplicate, omit, or reorder items without a cursor and snapshot contract.",
+      "required_decision": "Define token or cursor, immutable request parameters, snapshot or version, dedupe, terminal signal, retry, and exhaustion behavior, or incorporate an approved versioned API contract.",
+      "blocker_status": "implementation_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "Google and Microsoft/LinkedIn identify pagination explicitly; Atlassian/industry supports the broader data-contract ambiguity."
+      ],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-011",
+      "consensus_status": "supported",
+      "finding_kind": "schema_type_conflict",
+      "evidence": [
+        {
+          "quote": "feed_position, genre_tags[],\nlanguage",
+          "page": 11,
+          "source_block_id": "page-11",
+          "start_char": 828,
+          "end_char": 865
+        },
+        {
+          "quote": "genre_tags\nstring\nNo\nAll genre tags\nattached to this\ncontent item",
+          "page": 12,
+          "source_block_id": "page-12",
+          "start_char": 1885,
+          "end_char": 1950
+        }
+      ],
+      "downstream_consumers": [
+        "engineering",
+        "data_ml",
+        "qa"
+      ],
+      "consequence": "Producers and consumers can serialize incompatible payloads.",
+      "required_decision": "Choose cardinality, serialization, nullability, and version or compatibility behavior.",
+      "blocker_status": "implementation_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-012",
+      "consensus_status": "supported",
+      "finding_kind": "incomplete_experiment_decision_contract",
+      "evidence": [
+        {
+          "quote": "A/B test: measure CTR improvement vs control (rule-based only). Promote MAB if CTR +5% vs control.",
+          "page": 15,
+          "source_block_id": "page-15",
+          "start_char": 194,
+          "end_char": 292
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "data_ml",
+        "qa",
+        "leadership"
+      ],
+      "consequence": "A raw observed delta cannot determine trustworthy promotion without metric, exposure, assignment, uncertainty, duration, integrity, and guardrail rules.",
+      "required_decision": "Define CTR, population, randomization unit, persistent assignment, allocation, precision or power rationale, duration, integrity checks, guardrails, stop rule, and owner.",
+      "blocker_status": "conditional_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "Panel reviewers differed on P0 versus P1 ordering; the artifact does not calibrate severity."
+      ],
+      "destination": [
+        "rubric"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-013",
+      "consensus_status": "supported",
+      "finding_kind": "missing_data_governance_contract",
+      "evidence": [
+        {
+          "quote": "user_id\nstring\nNo\nAuthenticated\nuser ID.",
+          "page": 11,
+          "source_block_id": "page-11",
+          "start_char": 1366,
+          "end_char": 1406
+        },
+        {
+          "quote": "rolling 30 days at all time.",
+          "page": 11,
+          "source_block_id": "page-11",
+          "start_char": 172,
+          "end_char": 200
+        },
+        {
+          "quote": "Persistent\npersona\nstore",
+          "page": 21,
+          "source_block_id": "page-21",
+          "start_char": 80,
+          "end_char": 104
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "data_ml",
+        "risk",
+        "operations",
+        "leadership"
+      ],
+      "consequence": "Fine-grained behavioral profiling lacks documented purpose and minimization, access, notice or control, persistent retention and deletion, logging treatment, and accountable review.",
+      "required_decision": "Define applicable governance and approval with local legal and policy owners.",
+      "blocker_status": "conditional_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "Public guidance cannot establish legal compliance or local policy applicability.",
+        "Panel reviewers differed on review priority."
+      ],
+      "destination": [
+        "rubric"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-014",
+      "consensus_status": "supported",
+      "finding_kind": "missing_security_abuse_contract",
+      "evidence": [
+        {
+          "quote": "user_id\nstring\nNo\nAuthenticated\nuser ID.",
+          "page": 11,
+          "source_block_id": "page-11",
+          "start_char": 1366,
+          "end_char": 1406
+        }
+      ],
+      "downstream_consumers": [
+        "engineering",
+        "data_ml",
+        "risk",
+        "operations",
+        "leadership"
+      ],
+      "consequence": "Event spoofing, replay, poisoning, unauthorized access, and incident ownership remain undecided in the PDF.",
+      "required_decision": "Identify trust boundaries, authentication and authorization, integrity and replay controls, abuse limits, testing, audit, response, and launch owner according to local risk.",
+      "blocker_status": "conditional_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "Microsoft/LinkedIn states the security hard negative explicitly; Google and Atlassian/industry support the broader privacy and security absence.",
+        "The artifact does not infer threat severity."
+      ],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-015",
+      "consensus_status": "supported",
+      "finding_kind": "missing_accessibility_acceptance",
+      "evidence": [
+        {
+          "quote": "the 5-skip re-picker is blocking but still quick.",
+          "page": 19,
+          "source_block_id": "page-19",
+          "start_char": 584,
+          "end_char": 633
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "design",
+        "engineering",
+        "qa",
+        "risk",
+        "leadership"
+      ],
+      "consequence": "Core picker, autoplay, and feed states have no shared accessible behavior or test oracle in the PDF.",
+      "required_decision": "Define applicable standards and platform behavior plus acceptance for semantics, focus and traversal, input, motion and autoplay, media, contrast, text, touch, errors, and automated plus manual testing.",
+      "blocker_status": "conditional_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "Applicability is launch-flow dependent, and public sources cannot establish conformance.",
+        "Panel reviewers differed on review priority."
+      ],
+      "destination": [
+        "rubric"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-016",
+      "consensus_status": "supported",
+      "finding_kind": "incomplete_reliability_operating_contract",
+      "evidence": [
+        {
+          "quote": "When ML services is\ndown(~0.001% chances)",
+          "page": 16,
+          "source_block_id": "page-16",
+          "start_char": 1052,
+          "end_char": 1093
+        },
+        {
+          "quote": "PersonaIQ / Watch History down\nFall back to the curated collection",
+          "page": 17,
+          "source_block_id": "page-17",
+          "start_char": 0,
+          "end_char": 66
+        },
+        {
+          "quote": "Increase Aerospike connections",
+          "page": 18,
+          "source_block_id": "page-18",
+          "start_char": 1388,
+          "end_char": 1418
+        }
+      ],
+      "downstream_consumers": [
+        "engineering",
+        "data_ml",
+        "qa",
+        "operations",
+        "leadership"
+      ],
+      "consequence": "Fallback ideas exist, but healthy and degraded states, targets, activation and recovery, alerts, ownership, and validation are absent; the outage probability is unsupported.",
+      "required_decision": "Set critical-flow objectives and tested operating behavior without treating the asserted probability as evidence.",
+      "blocker_status": "conditional_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "Runtime fallback presence earns partial credit and must not be mistaken for a complete reliability contract.",
+        "Panel reviewers differed on review priority."
+      ],
+      "destination": [
+        "rubric"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-017",
+      "consensus_status": "supported",
+      "finding_kind": "missing_progressive_rollout_and_rollback",
+      "evidence": [
+        {
+          "quote": "1-2 weeks\npost-\nlaunch",
+          "page": 14,
+          "source_block_id": "page-14",
+          "start_char": 637,
+          "end_char": 659
+        },
+        {
+          "quote": "3-4 weeks\npost-\nlaunch",
+          "page": 15,
+          "source_block_id": "page-15",
+          "start_char": 750,
+          "end_char": 772
+        },
+        {
+          "quote": "8–12\nweeks\npost-\nlaunch",
+          "page": 15,
+          "source_block_id": "page-15",
+          "start_char": 927,
+          "end_char": 950
+        },
+        {
+          "quote": "MAB Model will run in parallel with rule-based ranking.",
+          "page": 15,
+          "source_block_id": "page-15",
+          "start_char": 137,
+          "end_char": 192
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "data_ml",
+        "qa",
+        "operations",
+        "leadership"
+      ],
+      "consequence": "Calendar stages and a parallel model do not define exposure, health gates, observation windows, kill switch, stop thresholds, owner, or recovery.",
+      "required_decision": "Define cohorts and stages, prerequisites, checks, pause or rollback triggers and action, and post-change verification.",
+      "blocker_status": "conditional_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "Runtime ranking fallback is not release rollback.",
+        "Panel reviewers differed on review priority."
+      ],
+      "destination": [
+        "rubric"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-018",
+      "consensus_status": "supported",
+      "finding_kind": "unresolved_placeholder_and_partial_ownership",
+      "evidence": [
+        {
+          "quote": "content_type : To be decided by Supply",
+          "page": 1,
+          "source_block_id": "page-1",
+          "start_char": 416,
+          "end_char": 454
+        },
+        {
+          "quote": "S2 :\nAdjustment(TBD)",
+          "page": 13,
+          "source_block_id": "page-13",
+          "start_char": 1866,
+          "end_char": 1886
+        },
+        {
+          "quote": "ML +\nProduct\nP0",
+          "page": 19,
+          "source_block_id": "page-19",
+          "start_char": 1472,
+          "end_char": 1487
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "data_ml",
+        "qa",
+        "leadership"
+      ],
+      "consequence": "A few role owners do not close launch decisions, and embedded placeholders can look like evidence.",
+      "required_decision": "Resolve or explicitly track each committed-scope placeholder with one accountable owner, date or milestone, acceptance proof, and approver.",
+      "blocker_status": "conditional_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "Blocker status depends on whether the referenced decision is in committed launch scope."
+      ],
+      "destination": [
+        "rubric"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-019",
+      "consensus_status": "supported",
+      "finding_kind": "known_audience_fallback_gap",
+      "evidence": [
+        {
+          "quote": "Hindi (primary), English (secondary);",
+          "page": 1,
+          "source_block_id": "page-1",
+          "start_char": 598,
+          "end_char": 635
+        },
+        {
+          "quote": "Language handling for TTMK users\n(Tamil, Telugu, Malayalam, Kannada):\ncatalog is currently Hindi > English.\nDefine fallback experience.",
+          "page": 19,
+          "source_block_id": "page-19",
+          "start_char": 1657,
+          "end_char": 1792
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "design",
+        "engineering",
+        "data_ml",
+        "qa",
+        "leadership"
+      ],
+      "consequence": "A named audience can receive undefined launch behavior despite language participating in ranking.",
+      "required_decision": "Define launch eligibility, fallback, disclosure or empty state, quality measure, and whether Phase 2 status is acceptable.",
+      "blocker_status": "conditional_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "Google notes baseline language behavior needs closure; Microsoft/LinkedIn and Atlassian/industry identify the audience explicitly.",
+        "Blocker status depends on the launch cohort."
+      ],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-HN-001",
+      "consensus_status": "hard_negative",
+      "finding_kind": "hard_negative_scope_absent",
+      "evidence": [
+        {
+          "quote": "[Out of MVP Scope]Product 5 - New in your language(out of scope in MVP)",
+          "page": 13,
+          "source_block_id": "page-13",
+          "start_char": 1303,
+          "end_char": 1374
+        },
+        {
+          "quote": "Products in MVP",
+          "page": 1,
+          "source_block_id": "page-1",
+          "start_char": 1457,
+          "end_char": 1472
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "qa"
+      ],
+      "consequence": "Prevents the false claim that scope is wholly absent.",
+      "required_decision": "Preserve scope credit and assess conflicting phase authority separately.",
+      "blocker_status": "non_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [],
+      "destination": [
+        "rubric"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-HN-002",
+      "consensus_status": "hard_negative",
+      "finding_kind": "hard_negative_user_cohorts_absent",
+      "evidence": [
+        {
+          "quote": "Existing User\nHas streamed ≥1 content on Xstream play app",
+          "page": 4,
+          "source_block_id": "page-4",
+          "start_char": 2142,
+          "end_char": 2199
+        },
+        {
+          "quote": "Cold Start User\nAll the remaining users",
+          "page": 4,
+          "source_block_id": "page-4",
+          "start_char": 2308,
+          "end_char": 2347
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "data_ml"
+      ],
+      "consequence": "Prevents erasing implementable signal-availability cohorts even though needs research is missing.",
+      "required_decision": "Credit cohort definitions without calling them research-backed needs.",
+      "blocker_status": "non_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "Google and Atlassian/industry state the cohort definitions explicitly; Microsoft/LinkedIn credits personas and decomposition."
+      ],
+      "destination": [
+        "rubric"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-HN-003",
+      "consensus_status": "hard_negative",
+      "finding_kind": "hard_negative_instrumentation_absent",
+      "evidence": [
+        {
+          "quote": "playback_progre\nss",
+          "page": 11,
+          "source_block_id": "page-11",
+          "start_char": 685,
+          "end_char": 703
+        },
+        {
+          "quote": "scroll_skip",
+          "page": 11,
+          "source_block_id": "page-11",
+          "start_char": 866,
+          "end_char": 877
+        },
+        {
+          "quote": "item_impression",
+          "page": 11,
+          "source_block_id": "page-11",
+          "start_char": 1057,
+          "end_char": 1072
+        }
+      ],
+      "downstream_consumers": [
+        "engineering",
+        "data_ml",
+        "qa"
+      ],
+      "consequence": "Prevents erasing substantial event, trigger, and payload enumeration.",
+      "required_decision": "Credit event presence while separately flagging schema, governance, exposure, and health gaps.",
+      "blocker_status": "non_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [],
+      "destination": [
+        "rubric"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-HN-004",
+      "consensus_status": "hard_negative",
+      "finding_kind": "hard_negative_fallback_absent",
+      "evidence": [
+        {
+          "quote": "When ML services is\ndown(~0.001% chances)",
+          "page": 16,
+          "source_block_id": "page-16",
+          "start_char": 1052,
+          "end_char": 1093
+        },
+        {
+          "quote": "PersonaIQ / Watch History down\nFall back to the curated collection",
+          "page": 17,
+          "source_block_id": "page-17",
+          "start_char": 0,
+          "end_char": 66
+        }
+      ],
+      "downstream_consumers": [
+        "engineering",
+        "data_ml",
+        "qa",
+        "operations"
+      ],
+      "consequence": "Prevents the false claim that runtime fallback concepts are absent.",
+      "required_decision": "Credit degraded-flow evidence while still requiring activation, targets, ownership, and tests.",
+      "blocker_status": "non_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-HN-005",
+      "consensus_status": "hard_negative",
+      "finding_kind": "hard_negative_safety_intent_absent",
+      "evidence": [
+        {
+          "quote": "Without this, erotic content cannot be\nexcluded.",
+          "page": 8,
+          "source_block_id": "page-8",
+          "start_char": 2319,
+          "end_char": 2367
+        },
+        {
+          "quote": "Without this, A-rated content cannot be filtered from\nrecommendations.",
+          "page": 8,
+          "source_block_id": "page-8",
+          "start_char": 2432,
+          "end_char": 2502
+        },
+        {
+          "quote": "Pre-filter —\nremove from\nall\nrecommenda\ntion pools",
+          "page": 21,
+          "source_block_id": "page-21",
+          "start_char": 762,
+          "end_char": 812
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "data_ml",
+        "risk"
+      ],
+      "consequence": "Prevents falsely claiming that content-safety intent is ignored.",
+      "required_decision": "Credit safety intent while retaining dependency closure and missing or stale flag behavior as blockers.",
+      "blocker_status": "non_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [],
+      "destination": [
+        "rubric"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-HN-006",
+      "consensus_status": "compatible",
+      "finding_kind": "compatible_explicit_alternatives",
+      "evidence": [
+        {
+          "quote": "Handling Scenarios :\nVariant 1",
+          "page": 4,
+          "source_block_id": "page-4",
+          "start_char": 1208,
+          "end_char": 1238
+        },
+        {
+          "quote": "Variant 2",
+          "page": 4,
+          "source_block_id": "page-4",
+          "start_char": 1508,
+          "end_char": 1517
+        },
+        {
+          "quote": "Note to create experiment variants so that in future we can test multiple ML models and sorting strategies based on user affinity\nfeatures.",
+          "page": 4,
+          "source_block_id": "page-4",
+          "start_char": 551,
+          "end_char": 690
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "data_ml"
+      ],
+      "consequence": "Prevents treating intentionally different treatment algorithms as a contradiction merely because their rules differ.",
+      "required_decision": "Require assignment and selection criteria without forcing one pre-experiment behavior if both are intentional treatments.",
+      "blocker_status": "non_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [
+        "The panel disagrees on whether selecting the launch variant is already due; Atlassian/industry says source composition remains open."
+      ],
+      "destination": [
+        "rubric",
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-HN-007",
+      "consensus_status": "compatible",
+      "finding_kind": "compatible_distinct_surface_rules",
+      "evidence": [
+        {
+          "quote": "Product 1 : Genre × Language-Based Recommendations",
+          "page": 4,
+          "source_block_id": "page-4",
+          "start_char": 1934,
+          "end_char": 1984
+        },
+        {
+          "quote": "Product 2 : Player End State Recommendations(Go Live with Launch)",
+          "page": 12,
+          "source_block_id": "page-12",
+          "start_char": 3,
+          "end_char": 68
+        },
+        {
+          "quote": "N next coherent microdrama contents (N=5) based on the same genre and\nlanguage",
+          "page": 12,
+          "source_block_id": "page-12",
+          "start_char": 611,
+          "end_char": 689
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "data_ml",
+        "qa"
+      ],
+      "consequence": "Prevents cross-surface ranking false positives for a discovery feed and a seed-based player-end flow.",
+      "required_decision": "Preserve product and surface scope unless the PDF claims shared behavior.",
+      "blocker_status": "non_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy"
+      ],
+      "disagreements": [
+        "The Atlassian/industry proxy did not isolate this compatible pair."
+      ],
+      "destination": [
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-HN-008",
+      "consensus_status": "compatible",
+      "finding_kind": "compatible_distinct_signal_cadence",
+      "evidence": [
+        {
+          "quote": "Social proofing (views, likes, dislikes) updated at\nD+1 frequency via Data Platform (DP)->Catalog",
+          "page": 1,
+          "source_block_id": "page-1",
+          "start_char": 1314,
+          "end_char": 1411
+        },
+        {
+          "quote": "Real-time for\nsession; D+1\nfor persona",
+          "page": 20,
+          "source_block_id": "page-20",
+          "start_char": 1918,
+          "end_char": 1956
+        }
+      ],
+      "downstream_consumers": [
+        "engineering",
+        "data_ml"
+      ],
+      "consequence": "Prevents treating aggregate popularity cadence and individual session adaptation as inherently contradictory.",
+      "required_decision": "Define merge and freshness behavior without requiring the cadences to be identical.",
+      "blocker_status": "non_blocker",
+      "supporting_proxy_reviews": [
+        "microsoft-linkedin-proxy"
+      ],
+      "disagreements": [
+        "Only the Microsoft/LinkedIn proxy isolated this compatibility; it is consistent with the report's cited LinkedIn batch-plus-recent-feature pattern."
+      ],
+      "destination": [
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-HN-009",
+      "consensus_status": "compatible",
+      "finding_kind": "compatible_model_progression",
+      "evidence": [
+        {
+          "quote": "MVP-\nPhase 1.0\nLaunch\nday\nMulti-\nArmed\nBandit",
+          "page": 14,
+          "source_block_id": "page-14",
+          "start_char": 211,
+          "end_char": 256
+        },
+        {
+          "quote": "MVP-\nPhase 1.1\n1-2 weeks\npost-\nlaunch\nContent-\nBased\nFiltering",
+          "page": 14,
+          "source_block_id": "page-14",
+          "start_char": 622,
+          "end_char": 684
+        },
+        {
+          "quote": "MVP-\nPhase 2\n8–12\nweeks\npost-\nlaunch\nApriori /\nCollaborati\nve\nFiltering",
+          "page": 15,
+          "source_block_id": "page-15",
+          "start_char": 914,
+          "end_char": 985
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "data_ml"
+      ],
+      "consequence": "Prevents treating phase-scoped models as duplicate or conflicting merely because they differ.",
+      "required_decision": "Preserve explicit phase scope and resolve only the activation contradictions identified separately.",
+      "blocker_status": "non_blocker",
+      "supporting_proxy_reviews": [
+        "google-proxy",
+        "microsoft-linkedin-proxy",
+        "atlassian-industry-proxy"
+      ],
+      "disagreements": [],
+      "destination": [
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    },
+    {
+      "label_id": "PXY-MD-HN-010",
+      "consensus_status": "contested",
+      "finding_kind": "overlapping_schedule_ranges",
+      "evidence": [
+        {
+          "quote": "DP data(2–4 weeks post-launch)",
+          "page": 1,
+          "source_block_id": "page-1",
+          "start_char": 1702,
+          "end_char": 1732
+        },
+        {
+          "quote": "Product 4 — Trending Feed Based on DP Pipeline (2-3 weeks post-launch)",
+          "page": 13,
+          "source_block_id": "page-13",
+          "start_char": 989,
+          "end_char": 1059
+        }
+      ],
+      "downstream_consumers": [
+        "product",
+        "engineering",
+        "data_ml",
+        "leadership"
+      ],
+      "consequence": "Prevents exact-conflict logic from treating overlapping schedule ranges as mathematically contradictory.",
+      "required_decision": "Ask for one committed target or readiness gate only when scheduling requires it.",
+      "blocker_status": "non_blocker",
+      "supporting_proxy_reviews": [
+        "microsoft-linkedin-proxy"
+      ],
+      "disagreements": [
+        "Microsoft/LinkedIn classifies this as ambiguity rather than contradiction; the other proxies group it into the broader timing conflict."
+      ],
+      "destination": [
+        "deep_review"
+      ],
+      "advisory": true,
+      "score_effect": "none"
+    }
+  ],
+  "source_registry": [
+    {
+      "source_id": "google-aip-158",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://google.aip.dev/158",
+      "claim_scope": "Google API pagination guidance used as an anchored contract example, not universal PRD policy."
+    },
+    {
+      "source_id": "firebase-ab-testing",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://firebase.google.com/docs/ab-testing/ab-concepts",
+      "claim_scope": "Firebase product guidance on experiment objectives, duration, users, and meaningful results."
+    },
+    {
+      "source_id": "microsoft-online-experimentation",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://www.microsoft.com/en-us/research/publication/online-experimentation-at-microsoft/",
+      "claim_scope": "Microsoft Research evidence for trustworthy randomized online experimentation."
+    },
+    {
+      "source_id": "linkedin-variant-assignment",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://www.linkedin.com/blog/engineering/ab-testing-experimentation/a-b-testing-variant-assignment",
+      "claim_scope": "LinkedIn guidance on deterministic assignment, concurrent-experiment independence, and sample-ratio checks."
+    },
+    {
+      "source_id": "google-cloud-privacy",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://docs.cloud.google.com/architecture/framework/security/meet-regulatory-compliance-and-privacy-needs",
+      "claim_scope": "Google Cloud guidance on identifying privacy needs and data-lifecycle controls."
+    },
+    {
+      "source_id": "microsoft-dpia",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://learn.microsoft.com/en-us/compliance/regulatory/gdpr-dpia-office365",
+      "claim_scope": "Microsoft guidance on context-dependent data protection impact assessment topics."
+    },
+    {
+      "source_id": "govuk-secure-service",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://www.gov.uk/service-manual/service-standard/point-9-create-a-secure-service",
+      "claim_scope": "GOV.UK guidance on secure, privacy-respecting service delivery."
+    },
+    {
+      "source_id": "webdev-accessibility",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://web.dev/learn/accessibility/",
+      "claim_scope": "Google-published accessibility design and testing guidance."
+    },
+    {
+      "source_id": "linkedin-accessibility-testing",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://www.linkedin.com/blog/engineering/accessibility/automated-accessibility-testing",
+      "claim_scope": "LinkedIn guidance combining automated and manual accessibility testing."
+    },
+    {
+      "source_id": "govuk-accessibility",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://www.gov.uk/service-manual/service-standard/point-5-make-sure-everyone-can-use-the-service",
+      "claim_scope": "GOV.UK guidance on ensuring intended users, including people with access needs, can use a service."
+    },
+    {
+      "source_id": "google-cloud-reliability",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://docs.cloud.google.com/architecture/framework/reliability/define-reliability-based-on-user-experience-goals",
+      "claim_scope": "Google Cloud guidance on user-journey reliability objectives."
+    },
+    {
+      "source_id": "microsoft-reliability-metrics",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://learn.microsoft.com/en-us/azure/well-architected/reliability/metrics",
+      "claim_scope": "Microsoft guidance on measurable reliability targets for customer interactions."
+    },
+    {
+      "source_id": "govuk-reliable-service",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://www.gov.uk/service-manual/service-standard/point-14-operate-a-reliable-service",
+      "claim_scope": "GOV.UK guidance on reliable service operation, monitoring, testing, and response."
+    },
+    {
+      "source_id": "google-sre-reliable-launches",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://sre.google/sre-book/reliable-product-launches/",
+      "claim_scope": "Google SRE guidance on staged launches, verification, ownership, and rollback."
+    },
+    {
+      "source_id": "microsoft-safe-deployments",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://learn.microsoft.com/en-us/azure/well-architected/operational-excellence/safe-deployments",
+      "claim_scope": "Microsoft guidance on progressive, quality-gated deployment and recovery."
+    },
+    {
+      "source_id": "gitlab-rollout-plans",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://handbook.gitlab.com/handbook/engineering/workflow/development-processes/rollout-plans/",
+      "claim_scope": "GitLab guidance on rollout outcomes, checks, monitoring, failure handling, and rollback."
+    },
+    {
+      "source_id": "linkedin-personalization",
+      "source_kind": "public_first_party_guidance",
+      "url": "https://www.linkedin.com/blog/engineering/member-customer-experience/near-real-time-features-for-near-real-time-personalization",
+      "claim_scope": "LinkedIn evidence that batch and recent personalization signals can have compatible cadences."
+    }
+  ]
+}

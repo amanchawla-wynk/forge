@@ -25,6 +25,8 @@ class Evidence(BaseModel):
     source_parent_block_id: str | None = None
     source_start_char: int | None = None
     source_end_char: int | None = None
+    quote_start_char: int | None = None
+    quote_end_char: int | None = None
 
 
 class FieldExtraction(BaseModel):

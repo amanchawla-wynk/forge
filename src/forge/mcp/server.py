@@ -31,7 +31,11 @@ from forge.rubric.models import Rubric
 from forge.extract.parse import parse_extraction
 from forge.extract.prompt import build_extraction_prompt
 from forge.ingest.batching import batch_document, plan_fingerprint
-from forge.ingest.models import ProductContextTerm, SupplementalAnswer
+from forge.ingest.models import (
+    NormalizedDocument,
+    ProductContextTerm,
+    SupplementalAnswer,
+)
 from forge.ingest.visuals import render_visual_asset
 from forge.rubric.loader import load_rubric
 from forge.revise import (
@@ -82,6 +86,16 @@ from forge.score.contextualize import (
     parse_coverage_classification,
     parse_edge_case_choice,
     parse_framing_choice,
+)
+from forge.score.consistency import (
+    ConsistencyCandidate,
+    ConsistencyLedger,
+    ConsistencyRelation,
+    build_consistency_candidates,
+    build_consistency_prompt,
+    consolidate_consistency_ledgers,
+    parse_consistency_classification,
+    verify_consistency_ledger,
 )
 from forge.score.engine import Assessment
 from forge.score.edge_coverage import (
@@ -837,12 +851,15 @@ def score_prd_extraction(
     product_context: list[ProductContextTerm] | None = None,
     framing: str | None = None,
     edge_case_coverage: EdgeCaseCoverageLedger | None = None,
+    consistency_ledger: ConsistencyLedger | None = None,
 ) -> AssessmentResponse:
     """Verify and score extraction JSON produced by the connected agent.
 
     Pass the `framing` returned by `detect_prd_framing` to phrase questions
     for this kind of document. An unknown framing is ignored rather than
-    rejected, so questions always fall back to the rubric default.
+    rejected, so questions always fall back to the rubric default. Pass the
+    `consistency_ledger` returned by the `consistency` advisory to include
+    verified conflict findings in the deep review.
     """
     return assess_extraction_json(
         source_path,
@@ -852,6 +869,7 @@ def score_prd_extraction(
         product_context=product_context,
         framing=framing,
         edge_case_coverage=edge_case_coverage,
+        consistency_ledger=consistency_ledger,
     )
 
 
@@ -1892,10 +1910,84 @@ class ContextualizedQuestion(BaseModel):
 
 
 class PreparedAdvisory(BaseModel):
-    kind: Literal["framing", "edge_case_coverage", "edge_case_question", "contextualize"]
+    kind: Literal[
+        "framing",
+        "edge_case_coverage",
+        "edge_case_question",
+        "contextualize",
+        "consistency",
+    ]
     prompt: str
     completion_count: int
     instructions: str
+
+
+class ConsistencyResult(BaseModel):
+    ledger: ConsistencyLedger
+    candidate_count: int
+    conflict_count: int
+    unclear_count: int
+    client_model: str
+    scoring_note: str
+
+
+_CONSISTENCY_NOTE = (
+    "Advisory conflict classification. Forge enumerated every candidate pair "
+    "deterministically from named subjects it had already parsed; the model "
+    "could only return one option index per pair. Both quotes are re-verified "
+    "against the document, disagreement across runs resolves to `unclear`, and "
+    "no relation changes verdicts, weights, gates, or the band."
+)
+
+
+@dataclass(frozen=True)
+class _ConsistencyPlan:
+    response: AssessmentResponse
+    document: NormalizedDocument
+    candidates: list[ConsistencyCandidate]
+    prompt: str
+
+
+def _prepare_consistency_plan(
+    source_path: str,
+    extraction_json: str | dict[str, object] | None,
+    rubric_name: str,
+    supplemental_answers: list[SupplementalAnswer] | None,
+    product_context: list[ProductContextTerm] | None,
+) -> _ConsistencyPlan:
+    # The MCP layer pre-parses JSON strings for union-typed parameters, so this
+    # argument can legitimately arrive as either a string or a decoded object.
+    payload = (
+        extraction_json
+        if isinstance(extraction_json, str)
+        else json.dumps(extraction_json)
+    )
+    if extraction_json is None:
+        raise ValueError("consistency requires extraction_json")
+    response = assess_extraction_json(
+        source_path,
+        payload,
+        rubric_name=rubric_name,
+        supplemental_answers=supplemental_answers,
+        product_context=product_context,
+    )
+    claims = response.deep_review.claims if response.deep_review else []
+    candidates = build_consistency_candidates(claims)
+    if not candidates:
+        raise ValueError(
+            "no statement pairs share a named subject in this document, so "
+            "there is nothing to classify; the deterministic deep-review "
+            "findings are already complete"
+        )
+    document, _ = prepare_assessment_input(
+        source_path, rubric_name, supplemental_answers, product_context
+    )
+    return _ConsistencyPlan(
+        response=response,
+        document=document,
+        candidates=candidates,
+        prompt=build_consistency_prompt(candidates),
+    )
 
 
 class AdvisoryFallbackResult(BaseModel):
@@ -2046,7 +2138,11 @@ async def contextualize_next_question(
 @_anticipated
 def prepare_prd_advisory(
     kind: Literal[
-        "framing", "edge_case_coverage", "edge_case_question", "contextualize"
+        "framing",
+        "edge_case_coverage",
+        "edge_case_question",
+        "contextualize",
+        "consistency",
     ],
     source_path: str,
     extraction_json: str | dict[str, object] | None = None,
@@ -2092,6 +2188,16 @@ def prepare_prd_advisory(
         )
         prompt = plan.prompt
         count = 1
+    elif kind == "consistency":
+        plan = _prepare_consistency_plan(
+            source_path,
+            extraction_json,
+            rubric_name,
+            supplemental_answers,
+            product_context,
+        )
+        prompt = plan.prompt
+        count = 3
     else:
         if not isinstance(extraction_json, str):
             raise ValueError("contextualize requires extraction_json as a JSON string")
@@ -2122,7 +2228,11 @@ def prepare_prd_advisory(
 @_anticipated
 def apply_prd_advisory(
     kind: Literal[
-        "framing", "edge_case_coverage", "edge_case_question", "contextualize"
+        "framing",
+        "edge_case_coverage",
+        "edge_case_question",
+        "contextualize",
+        "consistency",
     ],
     source_path: str,
     completions: list[str],
@@ -2135,7 +2245,7 @@ def apply_prd_advisory(
     framing: str | None = None,
 ) -> AdvisoryFallbackResult:
     """Mechanically validate and apply agent-produced advisory choices."""
-    completion_count = 3 if kind == "edge_case_coverage" else 1
+    completion_count = 3 if kind in {"edge_case_coverage", "consistency"} else 1
     if len(completions) != completion_count:
         raise ValueError(
             f"{kind} requires exactly {completion_count} completion(s)"
@@ -2231,6 +2341,31 @@ def apply_prd_advisory(
             discovery_source="closed_set_choice" if text else "none",
             client_model="agent_fallback",
             scoring_note=_EDGE_CASE_NOTE,
+        )
+    elif kind == "consistency":
+        plan = _prepare_consistency_plan(
+            source_path, extraction_json, rubric_name, supplemental_answers,
+            product_context,
+        )
+        parsed_runs = [
+            parse_consistency_classification(completion, plan.candidates)
+            for completion in completions
+        ]
+        if any(item is None for item in parsed_runs):
+            raise ValueError("agent returned invalid consistency classification JSON")
+        ledger = verify_consistency_ledger(
+            plan.document,
+            consolidate_consistency_ledgers(parsed_runs),  # type: ignore[arg-type]
+        )
+        result = ConsistencyResult(
+            ledger=ledger,
+            candidate_count=len(ledger.items),
+            conflict_count=len(ledger.publishable),
+            unclear_count=sum(
+                item.relation is ConsistencyRelation.UNCLEAR for item in ledger.items
+            ),
+            client_model="agent_fallback",
+            scoring_note=_CONSISTENCY_NOTE,
         )
     else:
         if not isinstance(extraction_json, str):

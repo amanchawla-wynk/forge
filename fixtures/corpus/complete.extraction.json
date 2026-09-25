@@ -115,6 +115,13 @@
           "evidence": {
             "quote": "The request and validation flows are must-have for launch, and manager approval is a should-have."
           }
+        },
+        {
+          "name": "decision_rules_and_precedence",
+          "value": "Eligibility rejection wins over approval; duplicates return the original result; otherwise use standard settlement",
+          "evidence": {
+            "quote": "If eligibility rejection and manager approval both apply, eligibility rejection wins; duplicate requests return the original result, and all other eligible requests use the standard settlement path."
+          }
         }
       ]
     },
@@ -140,6 +147,13 @@
           ],
           "evidence": {
             "quote": "Requests without permission, above the captured amount, or submitted twice must be rejected without creating a second refund."
+          }
+        },
+        {
+          "name": "requirement_coverage",
+          "value": "AC-1 maps request flow, AC-2 eligibility, and AC-3 permission, amount, duplicate, and approval boundaries",
+          "evidence": {
+            "quote": "AC-1 covers the must-have request flow, AC-2 covers eligibility validation, and AC-3 covers permission, amount, duplicate, and manager-approval boundaries."
           }
         }
       ]
@@ -222,9 +236,9 @@
         },
         {
           "name": "dependency_readiness",
-          "value": "Payments ready by build, Ledger idempotency by QA, vendor outage falls back to queued legacy path",
+          "value": "Owned API, idempotency, and vendor interfaces have readiness checks; stale or unavailable vendor input queues on the legacy path",
           "evidence": {
-            "quote": "Payments owns platform readiness by build start; Ledger owns idempotency by QA; if the vendor is unavailable, requests remain queued on the legacy path."
+            "quote": "Payments owns the refund API and must pass its availability check by build start; Ledger owns the idempotency endpoint and must pass duplicate-request tests by QA; the payout vendor must confirm its daily file interface before pilot, and if it is stale or unavailable, requests remain queued on the legacy path."
           }
         },
         {

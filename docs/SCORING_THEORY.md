@@ -263,6 +263,13 @@ The `0.4.1-expert-baseline` revision adds framing-aware, rubric-authored
 question variants without changing criteria, weights, gates, or bands.
 The `0.5.0-expert-baseline` revision adds the edge-case coverage ledger and
 changes how `edge_cases_and_states` is derived when that ledger is supplied.
+The `0.6.0-expert-baseline` revision adds required evidence for runtime rule
+precedence and launch-critical requirement-to-test coverage, and strengthens
+material dependency readiness to cover interface proof, applicable freshness or
+availability expectations, and stale/unavailable fallback. It leaves every
+weight, gate, band threshold, and deterministic verdict credit unchanged. The
+change is a public-guidance content-validity hypothesis supported by synthetic
+proxy labels, not calibration.
 
 Implementation repositories may provide non-evidence terminology context. This
 can clarify that two names refer to the same product or explain internal domain
@@ -272,6 +279,39 @@ remain questions for the owner; Forge never lets current implementation silently
 rewrite intended requirements.
 
 ## Output Restraint
+
+The primary deep-review output is a separate advisory projection of verified
+source claims. Deterministic checks identify impossible numeric ranges,
+conflicting named skip thresholds, conflicting exact or relative timelines, and
+explicit event formulas whose operands are absent from the declared event set.
+It also detects exact-key structured contract conflicts: incompatible tier enum
+mappings or out-of-domain values for the same classification, incompatible types
+for the same machine field name, opposite polarity for one subject on one
+decision axis, duplicate ranks in one named ordering, and cycles in explicit
+precedence edges. Flattened source-table snippets are
+retained as exact evidence spans. Explicit product, variant, phase, surface, and
+fallback scopes are compared only within the same scope; ambiguity causes
+abstention rather than a cross-scope finding.
+Timeline analysis deliberately abstains on deadlines, approximate periods,
+uncertain or historical statements, differently named milestones, overlapping
+relative windows, and comparisons between an exact date and a relative window. Metric
+analysis requires machine-style event identifiers, a supported formula shape,
+and at least one explicit event declaration; absence of instrumentation alone
+remains a rubric gap rather than a deep-review finding. Every finding cites
+mechanically located quotes and uses fixed consequence and decision templates;
+it cannot alter criterion verdicts, weights, gates, or bands.
+
+Conflicts requiring language understanding use consistency taxonomy `1.1`,
+which adds `implied_exception` and `ambiguous_scope` so an unbounded exception
+or an unreconcilable scope is reported as itself instead of being forced into
+"contradiction" or silently treated as compatible.
+Candidate pairs are enumerated deterministically from named subjects, never from
+similarity. The model contributes one relation index per pair, three runs
+consolidate by strict majority, and every tie or plurality resolves to
+`unclear`. Both quotes must re-locate in the normalized document before a
+relation may be published, and published findings are labelled `classified`
+rather than proved. This deliberately favours silence over false conflict
+reports; measured recall against human labels remains outstanding work.
 
 The concise narrative report is a deterministic projection of the scored
 assessment. It may summarize verdict counts, failed gates, blocked consumers,
@@ -355,5 +395,12 @@ Public or synthetic PRDs without human readiness labels may be used for format
 coverage, robustness, and gaming tests. They cannot determine criterion
 weights, gate placement, or band thresholds. Dataset-level claims of quality or
 completeness are not substitutes for document-level reviewer judgments.
+
+AI proxy panels grounded in public first-party guidance are synthetic even when
+agents use different company source families. Their agreement can propose field
+wording, anchored examples, hard negatives, and transfer tests, but cannot be
+reported as inter-reviewer agreement. Proxy artifacts use a separate schema,
+are excluded from `forge-review-eval` headline metrics, and must declare no
+score effect for their individual findings.
 
 No rubric version should be called calibrated until these tests have been run.

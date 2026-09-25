@@ -139,6 +139,8 @@ async def test_assess_prd_borrows_client_model_three_times(tmp_path):
     assert result.structured_content["run_count"] == 3
     assert result.structured_content["recommended_additional_runs"] == 0
     assert result.structured_content["assessment"]["band"] == "not_a_prd"
+    assert result.structured_content["deep_review"]["advisory"] is True
+    assert "source-backed claim" in result.structured_content["deep_review"]["summary"]
     assert result.structured_content["report"]["headline"] == (
         "Insufficient actionable evidence"
     )
@@ -1274,3 +1276,47 @@ async def test_agent_fallback_can_prepare_and_apply_framing(tmp_path):
 
     assert applied.structured_content["kind"] == "framing"
     assert applied.structured_content["result"]["client_model"] == "agent_fallback"
+
+
+@pytest.mark.anyio
+async def test_agent_fallback_can_classify_statement_consistency(tmp_path):
+    path = tmp_path / "prd.md"
+    path.write_text(
+        "Mood picker is shown after 3 consecutive hard skips.\n"
+        "Mood picker is shown after 5 consecutive hard skips.\n"
+    )
+    inputs = {
+        "kind": "consistency",
+        "source_path": str(path),
+        "extraction_json": _bare_extraction(),
+    }
+
+    async with Client(mcp, raise_exceptions=True) as client:
+        prepared = await client.call_tool("prepare_prd_advisory", inputs)
+        assert prepared.structured_content["completion_count"] == 3
+        assert "CANDIDATE 1:" in prepared.structured_content["prompt"]
+
+        completion = '{"relations": [{"candidate": 1, "relation": 2}]}'
+        applied = await client.call_tool(
+            "apply_prd_advisory",
+            {**inputs, "completions": [completion] * 3},
+        )
+
+        result = applied.structured_content["result"]
+        assert result["conflict_count"] == 1
+        assert result["unclear_count"] == 0
+
+        scored = await client.call_tool(
+            "score_prd_extraction",
+            {
+                "source_path": str(path),
+                "extraction_json": _bare_extraction(),
+                "consistency_ledger": result["ledger"],
+            },
+        )
+
+    kinds = {
+        finding["kind"]
+        for finding in scored.structured_content["deep_review"]["findings"]
+    }
+    assert "scoped_contradiction" in kinds

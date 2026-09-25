@@ -112,6 +112,10 @@
   OpenCode does not support MCP sampling; the connected agent self-corrects
   to `prepare_prd_assessment`/`score_prd_extraction` as reported by a user.
   README's OpenCode section now states this directly instead of hedging.
+- Confirmed in a real Cursor 3.22.7 session that `assess_prd` fails for the
+  same reason: Cursor does not declare the MCP sampling capability. Cursor's
+  setup guidance now goes directly to `prepare_prd_assessment` /
+  `score_prd_extraction` instead of probing native sampling first (D-044).
 - Replaced the raw `MCP error -32021: Client did not declare the sampling
   capability...` (reported in practice against `detect_prd_framing`) with a
   proactive capability check in every sampling resolver: a clear, catchable
@@ -162,9 +166,74 @@
   added DOCX body-order plus header/footer ingestion.
 - Added dashboard upload, inference, timeout, retention, SQLite, loopback, and
   response-projection safeguards.
+- Added the first D-045 deep-review vertical slice: verified claims survive
+  pre-score batch consolidation and repeated runs, carry exact quote-local
+  offsets, and feed deterministic findings for impossible numeric ranges and
+  conflicting named skip thresholds. Assessment responses and durable
+  remediation state retain the advisory review, and the dashboard presents it
+  before readiness scoring.
+- Added the bounded requirement-graph phase with claim, milestone, metric, and
+  event nodes plus source-backed schedule, declaration, and formula edges.
+  Deterministic review now also finds conflicting exact and relative timelines
+  and formulas that reference undeclared events, while abstaining on deadlines,
+  ambiguous dates, unsupported formulas, and wholly missing event inventories.
+- Added closed-set conflict classification (D-046): deterministic candidate
+  pairing by named subject, a fixed relation taxonomy, three-run strict-majority
+  consolidation with ties resolving to `unclear`, quote re-verification, and
+  template-rendered `classified` findings exposed through the `consistency`
+  advisory kind and `score_prd_extraction`.
+- Added the offline `forge-review-eval` golden-case harness (D-047): blinded
+  reviewer sheets, strict-majority consensus, one-to-one quote matching,
+  development/holdout splits, internal-only headline metrics, preregistered
+  threshold checks, and precision, recall, blocker recall, quote-alignment,
+  duplicate, false-positive, and inter-reviewer reports.
+- Ran three source-family AI proxy reviews over the MicroDrama recommendations
+  PDF using public Google, Microsoft/LinkedIn, Atlassian/GitLab/GOV.UK, and
+  related first-party guidance. Materialized 29 proxy labels with 75 verified
+  source spans, including hard negatives and disagreements, under a
+  calibration-ineligible schema (D-048).
+- Advanced the expert baseline to `0.6.0` with required runtime precedence and
+  requirement-to-test mapping evidence plus stronger dependency-readiness
+  wording. Weights, gates, bands, and verdict credits are unchanged.
+- Added measured deep-review recall (D-051): `forge-proxy-diagnostics` reports
+  finding recall, blocker recall, coverage, and hard-negative violations against
+  the synthetic proxy ledger. First measurement: recall 3/19 (0.158), blocker
+  recall 3/9 (0.333), 0 hard-negative violations. Candidate generation gained
+  category pairing, budget reservation, quote-pair deduplication, and exclusion
+  of pairs already proved deterministically.
+- Completed the deterministic core and deferred both frameworks (D-050):
+  overlapping relative timelines and exact-versus-relative schedules now abstain,
+  every claim carries a deterministic `ClaimInterpretation`, same-scope
+  `opposite_polarity`, `duplicate_rank`, and `precedence_cycle` checks were
+  added, consistency taxonomy `1.1` added `implied_exception` and
+  `ambiguous_scope`, and executable LangGraph/property-graph spikes recorded a
+  do-not-adopt-yet result.
+- Added deterministic structured-contract findings (D-049): flattened tier
+  rows and declared domains now expose incompatible enum mappings, and exact
+  machine field names expose array/scalar or other schema-type conflicts.
+  Explicitly different product, variant, phase, surface, or fallback scopes and
+  repeated compatible declarations are hard negatives.
 
 ## Current Build
 
+- Specify the deep-review finding, claim-ledger, and consistency-ledger schemas
+  required by D-045, including exact quote provenance, scope, phase, modality,
+  affected consumers, implementation consequence, and required author decision.
+- Fix claim granularity for multi-line source units. Measured with
+  `forge-proxy-diagnostics`, PDF line splitting breaks one statement into
+  several claims, so state-lifetime, activation, dependency-status, and
+  precedence conflicts cannot form candidate pairs at all. This is the binding
+  constraint on recall and blocks the detectors below.
+- Then extend classified conflict coverage to state lifetimes, activation
+  states, dependency status, undefined boundaries, and unstated fallbacks,
+  re-measuring recall after each addition and retaining the proxy ledger's
+  scoped and compatible hard negatives.
+- Replace the MicroDrama proxy labels with at least two blinded human reviews
+  when reviewers become available, then add a separate post-prediction pass for
+  priority agreement and actionability.
+- Re-run `spikes/graph_framework_comparison.py` only when durable branching,
+  background execution, or multi-party approvals become real requirements; both
+  frameworks were measured and deferred in D-050.
 - Grow the regression corpus with a multi-batch document.
 - Run the checkpointed one-question remediation loop on both internal PRDs,
   materialize approved answers into new copies, and measure score,
@@ -176,13 +245,8 @@
 
 ## Next
 
-- Confirm, in a real running Cursor session, whether `assess_prd` native
-  sampling works or whether Cursor also requires the
-  `prepare_prd_assessment` / `score_prd_extraction` fallback (setup and a
-  fallback-aware prompt are documented and automated via `forge-setup-cursor`,
-  but live sampling behavior has not been observed firsthand there; OpenCode
-  is now confirmed not to support it). Test installation and behavior in
-  GitHub Copilot similarly.
+- Test installation, MCP sampling capability, and fallback behavior in GitHub
+  Copilot.
 - Investigate SEP-2577 (the installed MCP SDK marks the whole `sampling`
   capability `@deprecated` as of protocol revision 2026-07-28) and whether
   Forge's client-borrowed-model architecture (D-006/D-007) should move to

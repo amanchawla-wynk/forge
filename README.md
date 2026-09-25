@@ -1,8 +1,10 @@
 # Forge
 
-Forge is a local MCP server that checks whether a PRD is complete and
-actionable for its downstream consumers. It borrows the connected MCP client's
-LLM and never requires an LLM provider API key.
+Forge is a local MCP server that identifies what prevents downstream teams from
+implementing a PRD correctly, where the document conflicts with itself, and
+which decisions the author must make. A deterministic completeness and
+actionability assessment remains as a supporting audit. Forge borrows the
+connected MCP client's LLM and never requires an LLM provider API key.
 
 The bundled rubric is a source-backed cross-industry expert baseline. It works
 without company data and returns evidence-based bands and questions immediately.
@@ -12,8 +14,8 @@ still requires independent labels from the organization's own reviewers.
 ## Current Tools
 
 - `assess_prd`: three extraction runs using MCP client sampling, followed by
-  evidence verification, deterministic scoring, a concise narrative report,
-  and one `next_question`.
+  evidence verification, advisory deep-review findings, deterministic scoring,
+  a concise audit report, and one `next_question`.
 - `list_prd_batches`: lists the exhaustive extraction batches for a document.
 - `assess_prd_batch`: extracts one batch using three MCP client sampling runs,
   for documents too large for a single `assess_prd` call.
@@ -139,24 +141,22 @@ Restart Cursor, then confirm `forge` is enabled the same way as above.
 
 ### First prompt to try in Cursor
 
-Cursor's support for MCP *sampling* (the capability `assess_prd` needs to
-borrow its model) varies by version, so start with a prompt that lets Cursor's
-agent pick whichever path works — this mirrors the fallback logic already
-built into Forge's tool descriptions, so most of the time you can just say:
+**Confirmed in Cursor 3.22.7:** Cursor does not declare MCP *sampling* (the
+capability `assess_prd` needs to borrow its model), so go straight to the
+fallback workflow:
 
 ```text
 Use the forge MCP server to assess the PRD at /absolute/path/to/document.pdf.
-Try assess_prd first. If that tool errors or isn't available because this
-client doesn't support MCP sampling, instead call prepare_prd_assessment,
+This client doesn't support MCP sampling, so call prepare_prd_assessment,
 perform each returned extraction yourself, and submit the result to
 score_prd_extraction. Then show me the report and ask me the single
 next_question, retaining my answers as supplemental evidence, until no
 material question remains.
 ```
 
-If you know your Cursor version supports sampling, the shorter prompt in
-[Use Forge](#use-forge) below works too. When in doubt, use the prompt above —
-it costs nothing extra and always resolves to a working path.
+The shorter prompt in [Use Forge](#use-forge) may try `assess_prd` first. The
+prompt above skips that known failed call while preserving the same verified
+scoring path.
 
 ### Cursor-specific troubleshooting
 
@@ -183,9 +183,9 @@ it costs nothing extra and always resolves to a working path.
   It should print nothing and hang waiting for stdio input; `Ctrl-C` to stop.
   Any Python traceback here is an installation problem, not a Cursor problem.
 - **`assess_prd`, `detect_prd_framing`, or another sampling tool fails with
-  "has not declared the 'sampling' capability"**: your Cursor version doesn't
-  support MCP sampling. For `assess_prd`/`assess_prd_batch`, the error itself
-  names the fallback — use the prompt above, or explicitly ask for
+  "has not declared the 'sampling' capability"**: Cursor 3.22.7 is confirmed
+  not to support MCP sampling. For `assess_prd`/`assess_prd_batch`, the error
+  itself names the fallback — use the prompt above, or explicitly ask for
   `prepare_prd_assessment` + `score_prd_extraction` (see
   [Troubleshooting](#troubleshooting) below), which always works regardless
   of sampling support since Cursor's own agent performs the extraction.
@@ -358,8 +358,8 @@ and continue until no material question remains.
 ```
 
 In Cursor specifically, prefer the fallback-aware prompt in
-[Connect Cursor](#connect-cursor) instead, since it works whether or not your
-Cursor version supports MCP sampling.
+[Connect Cursor](#connect-cursor) instead, since Cursor 3.22.7 is confirmed not
+to support MCP sampling.
 
 If the host supports MCP sampling, the agent should call `assess_prd`. When that
 reports that the document needs several batches, the agent should call
@@ -452,12 +452,84 @@ such as “Rush,” “Microdrama,” or “package,” but it is excluded from 
 evidence and cannot earn score credit. Any quoted evidence must still occur in
 the PRD or criterion-bound supplemental answer.
 
-Every assessment returns `report` before the detailed `assessment` audit. The
-report contains the readiness headline, criterion summary, three highest-impact
-gaps, exhaustive structured gap records, consumer-specific gap views, blocked
-downstream consumers, next step, and an extraction-confidence note. Python
-derives it from the same verified assessment; the model does not write or score
-the narrative.
+Every new assessment returns `deep_review` alongside the deterministic `report`
+and detailed `assessment` audit. Deep review is the primary result: it retains
+source-backed claims and surfaces mechanically verified implementation defects
+with exact evidence, downstream consequences, and the author decision required.
+Implemented finding types cover impossible numeric ranges, conflicting named
+skip thresholds, conflicting exact or post-launch timelines, and event-based
+metric formulas whose operands are not declared. Structured contract checks
+also identify one classification mapped to incompatible enum values or outside
+its declared domain, and one exact field name declared with incompatible schema
+types. Same-scope checks also cover opposite polarity for one subject, duplicate
+ranks in one ordering, and cycles in explicit precedence rules. Conflicts that
+Python cannot prove — precedence conflicts, scoped contradictions, superseded
+requirements, implied exceptions, and ambiguous scope — are classified through a
+bounded closed-set ledger and marked
+`classified` instead of proved. Findings are advisory and do not change
+readiness scores. The response also exposes the bounded claim, milestone,
+metric, and event graph used for this analysis.
+
+To collect classified conflicts without MCP sampling, call
+`prepare_prd_advisory` with `kind="consistency"`, run its prompt three times,
+call `apply_prd_advisory` with the three completions, then pass the returned
+`ledger` to `score_prd_extraction` as `consistency_ledger`.
+
+### Validate Deep-Review Findings
+
+`forge-review-eval` is an offline developer workflow for measuring findings
+against independent human labels. First capture a prediction and create a
+blinded sheet for each reviewer:
+
+```bash
+forge-review-eval case assessment.json predictions.json \
+  --case-id prd-001 --source-ref prd.md --split holdout
+forge-review-eval template reviewer-a.json \
+  --case-id prd-001 --reviewer reviewer-a --source-ref prd.md
+forge-review-eval template reviewer-b.json \
+  --case-id prd-001 --reviewer reviewer-b --source-ref prd.md
+```
+
+Reviewers record defects and exact source fragments without seeing Forge's
+findings. Merge the completed sheets only after both reviews are fixed, then
+evaluate the suite:
+
+```bash
+forge-review-eval merge predictions.json golden-suite.json \
+  reviewer-a.json reviewer-b.json
+forge-review-eval evaluate golden-suite.json --holdout-only \
+  --thresholds review-thresholds.json
+```
+
+The report includes precision, recall, blocker recall, false positives per case,
+human quote alignment, evidence completeness, duplicate rate, per-kind metrics,
+contested expectations, and inter-reviewer agreement. At least two distinct
+reviewers are required for headline metrics. Public and synthetic cases are
+reported as robustness diagnostics but excluded from headline results.
+
+When independent reviewers are unavailable, Forge also supports a distinct
+public-guidance proxy artifact for regression development. The current
+MicroDrama artifact is
+`fixtures/proxy/microdrama-recommendations.proxy-panel.v1.json`; its 29 labels
+are synthetic, calibration-ineligible, and individually advisory with no score
+effect. The supporting research is in `reports/Public PRD proxy panel.md`.
+
+To measure how much of that ledger the deterministic review actually finds:
+
+```bash
+forge-proxy-diagnostics fixtures/proxy/microdrama-recommendations.proxy-panel.v1.json
+```
+
+The current measurement is finding recall 3/19, blocker recall 3/9, and zero
+hard-negative violations. Recall is deliberately reported even though it is low:
+the detectors favour silence over false conflict reports, and the remaining gap
+is tracked in `docs/ROADMAP.md`.
+
+The supporting `report` contains the readiness headline, criterion summary,
+three highest-priority gaps, exhaustive structured gap records,
+consumer-specific gap views, blocked downstream consumers, the next step, and
+an extraction-confidence note. Python derives both outputs from verified data;
+the model does not write or score the narrative.
 
 ## Calibrate The Rubric
 

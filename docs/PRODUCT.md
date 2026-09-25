@@ -2,13 +2,22 @@
 
 ## Purpose
 
-Forge helps a product author answer one bounded question:
+Forge helps a product author answer one primary question:
+
+> What specifically prevents downstream teams from implementing this PRD
+> correctly, where does the document conflict with itself, and what decisions
+> must the author make?
+
+The readiness assessment answers a narrower supporting question:
 
 > Is this PRD complete and actionable enough for downstream teams to begin
 > work without avoidable clarification cycles?
 
-It is an advisory reviewer, not an approval gate and not a judge of whether the
-product bet itself is strategically correct.
+The primary experience is an evidence-backed deep review of contradictions,
+ambiguities, non-testable requirements, missing decisions, and downstream
+impact. The versioned readiness score remains a deterministic audit underneath
+that review. Forge is an advisory reviewer, not an approval gate and not a
+judge of whether the product bet itself is strategically correct.
 
 ## Users
 
@@ -29,8 +38,16 @@ product bet itself is strategically correct.
   interpretation stays advisory until its evidence model is validated.
 - A source-backed cross-industry expert baseline that works without company
   inputs, with optional company-specific terminology and later validation.
+  Public-guidance AI proxy panels may propose generic coverage hypotheses and
+  regression cases, but are synthetic diagnostics and cannot validate weights,
+  gates, bands, severity, or organization readiness.
 - A readiness band, downstream-consumer breakdown, evidence, confidence, and
   concise reasons.
+- A deep-review layer that retains multiple source-backed claims, identifies
+  candidate contradictions and ambiguities across sections, explains their
+  implementation impact, and names the decision required from the author.
+  Findings remain advisory until their evidence and evaluation model have been
+  validated; the claim graph never assigns readiness points.
 - A conversational question loop that shows exactly one highest-impact missing
   field at a time while collecting several answers before a checkpoint. At a
   checkpoint, Forge processes only the pending answers and affected criteria,
@@ -72,9 +89,12 @@ product bet itself is strategically correct.
 4. Forge verifies evidence and computes deterministic verdicts and bands.
 5. Forge makes one closed-set framing classification so rubric-authored
    questions fit the kind of product bet without allowing generated prose.
-6. The user receives a concise deterministic narrative followed by the readiness
-   band, consumer breakdown, failed gates, confidence, evidence-based reasons,
-   and the single next question to answer.
+6. The user receives a prioritized evidence-backed review of decision blockers,
+   contradictions, ambiguities, non-testable requirements, and missing
+   operational decisions. Each finding cites source locations, explains the
+   downstream consequence, and states the resolution needed. The deterministic
+   readiness band, consumer breakdown, failed gates, confidence, and audit
+   follow as supporting information.
 7. Forge records the exact answer as pending supplemental evidence and asks the
    next queued question without re-extracting the unchanged PRD.
 8. After a bounded checkpoint (default five answers, completion of a failed
@@ -158,3 +178,8 @@ tune the expert baseline for organization-specific policy and language:
 - Internal guidance or examples of what "good" means.
 - Several real PRDs spanning strong, average, and weak quality.
 - Human labels and reviewer rationale, ideally from multiple roles.
+
+When reviewers are temporarily unavailable, public first-party guidance and
+source-verified AI proxy labels may improve the expert baseline's content
+coverage. They do not satisfy any input above and must remain visibly separate
+from internal human labels.

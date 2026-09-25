@@ -205,9 +205,102 @@ export interface NarrativeReport {
   confidence_note: string;
 }
 
+export interface ClaimOccurrence {
+  claim_id: string;
+  criterion_id: string;
+  field_name: string;
+  value: string;
+  quote: string;
+  run_indexes: number[];
+  batch_ids: string[];
+  provenance: string;
+  source_block_id: string;
+  source_parent_block_id: string | null;
+  page: number | null;
+  section: string | null;
+  quote_start_char: number | null;
+  quote_end_char: number | null;
+}
+
+export interface DeepReviewFindingEvidence {
+  claim_id: string;
+  quote: string;
+  page: number | null;
+  section: string | null;
+  source_block_id: string;
+}
+
+export interface ClaimInterpretation {
+  interpretation_id: string;
+  claim_id: string;
+  subject_keys: string[];
+  scope_keys: string[];
+  phase_keys: string[];
+  modality: "must" | "should" | "may" | "unknown";
+  provenance: "deterministic";
+}
+
+export interface DeepReviewFinding {
+  finding_id: string;
+  kind:
+    | "impossible_range"
+    | "conflicting_threshold"
+    | "conflicting_timeline"
+    | "metric_not_computable"
+    | "enum_domain_conflict"
+    | "schema_type_conflict"
+    | "opposite_polarity"
+    | "duplicate_rank"
+    | "precedence_cycle"
+    | "precedence_conflict"
+    | "scoped_contradiction"
+    | "superseded_requirement"
+    | "implied_exception"
+    | "ambiguous_scope";
+  title: string;
+  summary: string;
+  evidence: DeepReviewFindingEvidence[];
+  affected_consumers: string[];
+  implementation_consequence: string;
+  required_decision: string;
+  review_order: number;
+  confidence: "deterministic" | "classified";
+}
+
+export interface RequirementGraphNode {
+  node_id: string;
+  kind: "claim" | "milestone" | "metric" | "event";
+  label: string;
+  claim_id: string | null;
+}
+
+export interface RequirementGraphEdge {
+  edge_id: string;
+  source_id: string;
+  target_id: string;
+  relation: "scheduled_on" | "declares_event" | "computes_metric" | "computed_from";
+  claim_id: string;
+}
+
+export interface RequirementGraph {
+  nodes: RequirementGraphNode[];
+  edges: RequirementGraphEdge[];
+}
+
+export interface DeepReviewReport {
+  summary: string;
+  findings: DeepReviewFinding[];
+  claims: ClaimOccurrence[];
+  interpretations: ClaimInterpretation[];
+  graph: RequirementGraph;
+  candidate_count: number;
+  advisory: boolean;
+}
+
 export interface AssessmentResponse {
   source_path: string;
   report: NarrativeReport;
+  deep_review: DeepReviewReport | null;
   assessment: Assessment;
   next_question: Question | null;
   supplemental_answers: SupplementalAnswer[];
@@ -264,6 +357,7 @@ export interface ReviewDiscovery {
 export interface RemediationState {
   assessment: Assessment;
   report: NarrativeReport;
+  deep_review: DeepReviewReport | null;
   question_queue: Question[];
   verified_answers: SupplementalAnswer[];
   pending_answers: unknown[];

@@ -287,6 +287,7 @@ def resume_document_review(
         source_path=stored.filename,
         document_id=document_id,
         report=session.state.report,
+        deep_review=session.state.deep_review,
         assessment=session.state.assessment,
         next_question=turn.next_question,
         supplemental_answers=session.state.verified_answers,

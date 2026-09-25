@@ -4,7 +4,12 @@ import json
 
 from pydantic import BaseModel
 
-from forge.extract.batch import ExtractionBatch, verify_extraction_batch
+from forge.deep_review import (
+    DeepReviewReport,
+    build_deep_review,
+    mechanical_claim_occurrences,
+)
+from forge.extract.batch import ExtractionBatch, verify_extraction_batch_with_claims
 from forge.ingest.batching import batch_document
 from forge.ingest.document import (
     add_product_context,
@@ -27,12 +32,18 @@ from forge.score.edge_coverage import (
     render_coverage_question,
     verify_coverage_ledger,
 )
+from forge.score.consistency import (
+    ConsistencyLedger,
+    consistency_findings,
+    verify_consistency_ledger,
+)
 from forge.score.planner import Question, document_display_name, plan_questions
 from forge.score.report import NarrativeReport, build_narrative_report
 
 
 class AssessmentResponse(BaseModel):
     source_path: str
+    deep_review: DeepReviewReport | None = None
     report: NarrativeReport
     assessment: Assessment
     next_question: Question | None
@@ -45,6 +56,7 @@ class AssessmentResponse(BaseModel):
     product_context: list[ProductContextTerm]
     framing: str | None
     edge_case_coverage: EdgeCaseCoverageLedger | None
+    consistency_ledger: ConsistencyLedger | None = None
     warnings: list[str]
 
 
@@ -59,6 +71,7 @@ def assess_extractions(
     framing: str | None = None,
     display_name: str | None = None,
     edge_case_coverage: EdgeCaseCoverageLedger | None = None,
+    consistency_ledger: ConsistencyLedger | None = None,
 ) -> AssessmentResponse:
     answers = supplemental_answers or []
     terms = product_context or []
@@ -66,7 +79,9 @@ def assess_extractions(
         source_path, rubric_name, answers, terms
     )
     document_batches = batch_document(document)
-    runs = verify_extraction_batch(document_batches, batch, rubric)
+    runs, claims = verify_extraction_batch_with_claims(
+        document_batches, batch, rubric
+    )
     verified_coverage = (
         verify_coverage_ledger(
             document, apply_coverage_answers(edge_case_coverage, answers)
@@ -152,8 +167,30 @@ def assess_extractions(
             "every imaginable edge case."
         )
 
+    claims.extend(mechanical_claim_occurrences(document, claims))
+    verified_consistency = (
+        verify_consistency_ledger(document, consistency_ledger)
+        if consistency_ledger is not None
+        else None
+    )
+    if verified_consistency is not None:
+        warnings.append(
+            f"Consistency taxonomy {verified_consistency.taxonomy_version} "
+            f"classified {len(verified_consistency.items)} source-verified "
+            "statement pair(s). Conflict relations are advisory and never "
+            "change the readiness score."
+        )
     return AssessmentResponse(
         source_path=document.source_path,
+        deep_review=build_deep_review(
+            rubric,
+            claims,
+            extra_findings=(
+                consistency_findings(rubric, verified_consistency, claims)
+                if verified_consistency is not None
+                else None
+            ),
+        ),
         report=build_narrative_report(
             assessment,
             questions,
@@ -171,6 +208,7 @@ def assess_extractions(
         product_context=terms,
         framing=questions[0].framing if questions else rubric.default_framing,
         edge_case_coverage=verified_coverage,
+        consistency_ledger=verified_consistency,
         warnings=warnings,
     )
 
@@ -184,6 +222,7 @@ def assess_extraction_json(
     product_context: list[ProductContextTerm] | None = None,
     framing: str | None = None,
     edge_case_coverage: EdgeCaseCoverageLedger | None = None,
+    consistency_ledger: ConsistencyLedger | None = None,
 ) -> AssessmentResponse:
     payload = json.loads(extraction_json)
     if "runs" not in payload:
@@ -196,6 +235,7 @@ def assess_extraction_json(
         product_context=product_context,
         framing=framing,
         edge_case_coverage=edge_case_coverage,
+        consistency_ledger=consistency_ledger,
     )
 
 

@@ -30,12 +30,14 @@ Sellers can request a refund from the order detail screen.
 The system validates that the order is eligible before submitting.
 A refund that exceeds 500 USD requires manager approval.
 The request and validation flows are must-have for launch, and manager approval is a should-have.
+If eligibility rejection and manager approval both apply, eligibility rejection wins; duplicate requests return the original result, and all other eligible requests use the standard settlement path.
 
 ## 5. Acceptance criteria
 
 A refund request on an eligible order settles within 2 business days.
 An ineligible order shows a rejection reason and does not create a refund record.
 Requests without permission, above the captured amount, or submitted twice must be rejected without creating a second refund.
+AC-1 covers the must-have request flow, AC-2 covers eligibility validation, and AC-3 covers permission, amount, duplicate, and manager-approval boundaries.
 
 ## 6. Error and empty states
 
@@ -54,7 +56,7 @@ Operations monitors settlement queue depth on a dashboard and receives an alert 
 ## 8. Dependencies
 
 This depends on the Payments platform team, the Ledger service, and our payout vendor.
-Payments owns platform readiness by build start; Ledger owns idempotency by QA; if the vendor is unavailable, requests remain queued on the legacy path.
+Payments owns the refund API and must pass its availability check by build start; Ledger owns the idempotency endpoint and must pass duplicate-request tests by QA; the payout vendor must confirm its daily file interface before pilot, and if it is stale or unavailable, requests remain queued on the legacy path.
 Settlement cannot exceed the vendor daily cut-off of 18:00 UTC.
 
 ## 9. Privacy and compliance

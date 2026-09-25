@@ -87,12 +87,26 @@ class NormalizedDocument(BaseModel):
         return "\n\n".join(rendered)
 
     def locate_quote(self, quote: str) -> SourceBlock | None:
+        located = self.locate_quote_span(quote)
+        return located[0] if located is not None else None
+
+    def locate_quote_span(self, quote: str) -> tuple[SourceBlock, int, int] | None:
+        """Locate a quote and retain its exact span within the source block."""
         needle = normalize_for_match(quote)
         if not needle:
             return None
         for block in self.blocks:
-            if needle in normalize_for_match(block.text):
-                return block
+            exact_start = block.text.find(quote)
+            if exact_start >= 0:
+                return block, exact_start, exact_start + len(quote)
+
+            words = quote.strip().split()
+            if not words:
+                continue
+            pattern = r"\s+".join(re.escape(word) for word in words)
+            match = re.search(pattern, block.text, flags=re.IGNORECASE)
+            if match is not None and normalize_for_match(match.group()) == needle:
+                return block, match.start(), match.end()
         return None
 
     @property

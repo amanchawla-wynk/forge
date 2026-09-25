@@ -60,6 +60,56 @@ Record completion, abandonment, checkpoint count, extraction failures, token
 and latency use, unresolved contradictions, and the difference between the
 conversational assessment and final artifact assessment.
 
+## Deep-Review Finding Study
+
+Evaluate D-045 findings separately from readiness calibration. Before reviewers
+see Forge output, create one blinded sheet per reviewer with
+`forge-review-eval template`. Reviewers record each implementation-blocking or
+material defect using exact source fragments; they may identify the expected
+finding kind, but taxonomy knowledge is not required. Use at least two distinct
+reviewers per internal case.
+
+After labels are fixed, create the prediction case with `forge-review-eval
+case`, merge sheets with `forge-review-eval merge`, and evaluate the frozen
+holdout with:
+
+```bash
+forge-review-eval evaluate golden-suite.json --holdout-only \
+  --thresholds review-thresholds.json
+```
+
+Preregister the minimum internal case count, minimum precision, minimum blocker
+recall, maximum false positives per case, and minimum inter-reviewer agreement.
+Do not infer accuracy from public or synthetic examples. They remain useful for
+failure-mode development but are excluded from headline metrics. A finding
+recorded by only half or fewer reviewers remains contested and cannot enter
+consensus recall. Undefined metrics fail threshold checks rather than passing by
+absence of evidence.
+
+Human quote alignment is not source verification: it reports whether a
+prediction cited the same text reviewers used to identify a defect. Forge's
+normal source verifier remains responsible for proving that every published
+quote occurs in the normalized document. Priority agreement and actionability
+require a second, post-prediction reviewer pass and are not claimed by the
+initial blinded-discovery evaluator.
+
+## Public-Guidance Proxy Panels
+
+When independent reviewers are unavailable, separate AI agents may review a PRD
+through different public first-party source families. Record these as synthetic
+proxy diagnostics, never as human labels. The artifact must use
+`forge.synthetic_public_guidance_proxy_panel.v1`, retain exact verified source
+spans, preserve hard negatives and disagreements, and set human review,
+organization validation, calibration eligibility, and headline eligibility to
+false. Individual labels remain advisory with no score effect.
+
+Proxy agreement may justify content-validity hypotheses, generic field wording,
+anchored examples, adversarial fixtures, and transfer tests. It cannot justify
+weights, gates, bands, calibrated severity, acceptance thresholds, legal or
+accessibility conformance, or a claim that the cited companies endorse the
+rubric. A rubric field added from proxy evidence advances the expert-baseline
+version and must preserve this limitation in the decision log.
+
 ## Release Claim
 
 Forge remains an `expert_baseline` unless the preregistered holdout thresholds

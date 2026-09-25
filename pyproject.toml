@@ -30,6 +30,8 @@ forge-dashboard-api = "forge_dashboard.app:main"
 forge-setup-cursor = "forge.setup_cursor:main"
 forge-setup-opencode = "forge.setup_opencode:main"
 forge-calibration = "forge.calibration:main"
+forge-review-eval = "forge.review_eval:main"
+forge-proxy-diagnostics = "forge.proxy_diagnostics:main"
 
 [build-system]
 requires = ["hatchling"]

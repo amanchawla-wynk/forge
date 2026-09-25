@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from forge.extract.models import CriterionExtraction, Evidence, FieldExtraction
+from forge.deep_review import ClaimOccurrence, claim_occurrences
 from forge.ingest.batching import DocumentBatch, plan_fingerprint
 from forge.ingest.models import NormalizedDocument
 from forge.rubric.models import Rubric
@@ -28,13 +29,43 @@ def verify_extraction_batch(
     batches: list[DocumentBatch], batch: ExtractionBatch, rubric: Rubric
 ) -> list[list[CriterionExtraction]]:
     """Verify every submitted run against the prepared document batches."""
+    runs, _ = verify_extraction_batch_with_claims(batches, batch, rubric)
+    return runs
+
+
+def verify_extraction_batch_with_claims(
+    batches: list[DocumentBatch], batch: ExtractionBatch, rubric: Rubric
+) -> tuple[list[list[CriterionExtraction]], list[ClaimOccurrence]]:
+    """Verify runs while retaining every source-backed pre-consolidation claim."""
     _validate_run_indexes(batch.runs)
-    return [verify_extraction_run(batches, run, rubric) for run in batch.runs]
+    verified_runs: list[list[CriterionExtraction]] = []
+    claims: list[ClaimOccurrence] = []
+    for fallback_run_index, run in enumerate(batch.runs, start=1):
+        run_index = _run_index(run, fallback_run_index)
+        verified, run_claims = _verify_extraction_run_with_claims(
+            batches, run, rubric, run_index=run_index
+        )
+        verified_runs.append(verified)
+        claims.extend(run_claims)
+    return verified_runs, claims
 
 
 def verify_extraction_run(
     batches: list[DocumentBatch], run: ExtractionRun, rubric: Rubric
 ) -> list[CriterionExtraction]:
+    verified, _ = _verify_extraction_run_with_claims(
+        batches, run, rubric, run_index=_run_index(run, 1)
+    )
+    return verified
+
+
+def _verify_extraction_run_with_claims(
+    batches: list[DocumentBatch],
+    run: ExtractionRun,
+    rubric: Rubric,
+    *,
+    run_index: int,
+) -> tuple[list[CriterionExtraction], list[ClaimOccurrence]]:
     if run.criteria and run.fragments:
         raise ValueError("an extraction run cannot contain criteria and fragments")
     if run.fragments:
@@ -52,22 +83,33 @@ def verify_extraction_run(
                 details.append("unknown " + ", ".join(unknown))
             raise ValueError("invalid extraction fragments: " + "; ".join(details))
         _validate_plan_fingerprint(batches, run, rubric)
-        verified = [
-            verify_run(
+        verified: list[list[CriterionExtraction]] = []
+        claims: list[ClaimOccurrence] = []
+        for fragment in run.fragments:
+            fragment_verified = verify_run(
                 by_id[fragment.batch_id].document,
                 ExtractionRun(
                     criteria=_validate_fragment_schema(rubric, fragment.criteria)
                 ),
             )
-            for fragment in run.fragments
-        ]
-        return _consolidate_fragments(rubric, verified)
+            verified.append(fragment_verified)
+            claims.extend(
+                claim_occurrences(
+                    fragment_verified,
+                    run_index=run_index,
+                    batch_id=fragment.batch_id,
+                )
+            )
+        return _consolidate_fragments(rubric, verified), claims
 
     if len(batches) > 1:
         raise ValueError(
             "document requires batched extraction; submit every prepared batch fragment"
         )
-    return verify_run(batches[0].document, run)
+    verified = verify_run(batches[0].document, run)
+    return verified, claim_occurrences(
+        verified, run_index=run_index, batch_id=batches[0].id
+    )
 
 
 def verify_run(
@@ -86,10 +128,11 @@ def verify_run(
             field.item_evidence = []
             if field.evidence is None:
                 continue
-            block = document.locate_quote(field.evidence.quote)
-            if block is None:
+            located = document.locate_quote_span(field.evidence.quote)
+            if located is None:
                 field.evidence = None
                 continue
+            block, quote_start, quote_end = located
             if (
                 block.provenance == "supplemental_answer"
                 and block.criterion_id != criterion.criterion_id
@@ -105,12 +148,15 @@ def verify_run(
                 source_parent_block_id=block.parent_id,
                 source_start_char=block.start_char,
                 source_end_char=block.end_char,
+                quote_start_char=quote_start,
+                quote_end_char=quote_end,
             )
             if isinstance(field.value, list):
                 for item in field.value:
-                    item_block = document.locate_quote(item)
-                    if item_block is None:
+                    item_located = document.locate_quote_span(item)
+                    if item_located is None:
                         continue
+                    item_block, item_start, item_end = item_located
                     if (
                         item_block.provenance == "supplemental_answer"
                         and item_block.criterion_id != criterion.criterion_id
@@ -126,6 +172,8 @@ def verify_run(
                             source_parent_block_id=item_block.parent_id,
                             source_start_char=item_block.start_char,
                             source_end_char=item_block.end_char,
+                            quote_start_char=item_start,
+                            quote_end_char=item_end,
                         )
                     )
         verified.append(criterion_copy)
@@ -194,6 +242,15 @@ def _validate_run_indexes(runs: list[ExtractionRun]) -> None:
                 "repeated runs cannot establish test/retest stability"
             )
         seen.add(index)
+
+
+def _run_index(run: ExtractionRun, fallback: int) -> int:
+    indexes = {
+        fragment.run_index
+        for fragment in run.fragments
+        if fragment.run_index is not None
+    }
+    return indexes.pop() if len(indexes) == 1 else fallback
 
 
 def _validate_fragment_schema(

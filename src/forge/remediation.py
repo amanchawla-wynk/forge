@@ -7,7 +7,15 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from forge.extract.batch import ExtractionBatch, verify_extraction_batch
+from forge.deep_review import (
+    DeepReviewReport,
+    build_deep_review,
+    mechanical_claim_occurrences,
+)
+from forge.extract.batch import (
+    ExtractionBatch,
+    verify_extraction_batch_with_claims,
+)
 from forge.extract.delta import (
     DeltaExtractionPlan,
     PendingDeltaAnswer,
@@ -48,6 +56,7 @@ class RemediationState(BaseModel):
     runs: list[list[CriterionExtraction]]
     assessment: Assessment
     report: NarrativeReport
+    deep_review: DeepReviewReport | None = None
     question_queue: list[Question]
     verified_answers: list[SupplementalAnswer] = Field(default_factory=list)
     pending_answers: list[PendingDeltaAnswer] = Field(default_factory=list)
@@ -232,7 +241,7 @@ def begin_remediation(
     payload = json.loads(extraction_json)
     if "runs" not in payload:
         payload = {"runs": [payload]}
-    runs = verify_extraction_batch(
+    runs, claims = verify_extraction_batch_with_claims(
         batch_document(document), ExtractionBatch.model_validate(payload), rubric
     )
     source_sha = _source_digest(source_path)
@@ -243,6 +252,7 @@ def begin_remediation(
         else None
     )
     assessment = score(rubric, runs, edge_case_coverage=verified_coverage)
+    claims.extend(mechanical_claim_occurrences(document, claims))
     queue = plan_question_queue(
         rubric,
         assessment,
@@ -267,6 +277,7 @@ def begin_remediation(
         ),
         runs=runs,
         assessment=assessment,
+        deep_review=build_deep_review(rubric, claims),
         report=report,
         question_queue=queue,
         product_context=terms,

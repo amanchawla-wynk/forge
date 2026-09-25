@@ -6,6 +6,7 @@ import { BandSummaryCard } from "@/components/dashboard/band-summary-card";
 import { ConsumerGrid } from "@/components/dashboard/consumer-grid";
 import { GapsPanel } from "@/components/dashboard/gaps-panel";
 import { ConversationPanel } from "@/components/dashboard/conversation-panel";
+import { DeepReviewPanel } from "@/components/dashboard/deep-review-panel";
 import { Badge } from "@/components/ui/badge";
 
 export function AssessmentDashboard() {
@@ -27,6 +28,7 @@ export function AssessmentDashboard() {
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
+        {assessment.deep_review && <DeepReviewPanel review={assessment.deep_review} />}
         <WarningsBanner warnings={allWarnings} />
         <BandSummaryCard response={assessment} />
         <ConsumerGrid consumers={assessment.assessment.consumers} />

@@ -20,12 +20,66 @@ MCP client / coding agent
       -> document ingestion (PDF / DOCX / text)
       -> normalized text blocks and detected visual assets
       -> exhaustive, source-mapped extraction batches
+      -> source-backed claim ledger and bounded requirement graph
+      -> advisory cross-section consistency analysis
       -> extraction prompt and JSON schema
       -> client's LLM through MCP sampling, when supported
       -> evidence verification and extraction validation
       -> deterministic scoring and gates
-      -> deterministic narrative report, audit, and remediation question
+      -> deep-review findings, deterministic audit, and remediation question
 ```
+
+The target deep-review path does not collapse each rubric field to one value
+before analysis. It retains verified claims with their exact quote, source
+location, scope, phase, modality, and extraction-run identity. A bounded graph
+links requirements, actors, metrics, dependencies, states, rollout rules, and
+sections. Deterministic candidate generation and closed-set model
+classification may identify possible contradictions, precedence conflicts,
+undefined boundaries, stale requirements, or non-testable formulas. Python
+verifies every cited source span before a finding reaches the user.
+
+The graph is an advisory analysis structure, not a retrieval eligibility filter
+or scoring authority. Exhaustive batching remains the basis for evidence
+coverage, and only versioned rubric rules may affect readiness points or bands.
+This bounded per-document graph does not require embeddings, community
+summaries, or a general GraphRAG store.
+
+The implemented deterministic path retains every verified field claim before
+batch consolidation, records quote-local source offsets, and supplements model
+extraction with a bounded source scan. It projects claims into an in-process
+graph containing claim, milestone, metric, and event nodes with source-backed
+schedule, declaration, and formula edges. It publishes mechanically provable
+impossible ranges, conflicting named skip thresholds, conflicting exact or
+post-launch timelines, and metric formulas that reference undeclared events.
+The same structured source scan retains flattened table rows that sentence
+splitting would destroy. Exact classification labels plus tier rows/domains can
+prove incompatible enum mappings, while exact machine field names plus explicit
+array/table/inline type declarations can prove schema-type conflicts. Explicit
+product, variant, phase, surface, or fallback scopes partition declarations;
+different scopes are not compared. These checks use no fuzzy matching or model
+classification.
+
+Exact machine identifiers additionally support three same-scope checks:
+opposite polarity for one subject on one decision axis, duplicate ranks in one
+named ordering, and cycles in explicit precedence edges. Timeline analysis
+compares only commensurable values: two exact dates, or two relative windows
+that do not overlap. Overlapping ranges and mixed absolute/relative schedules
+abstain, because neither is a provable contradiction.
+
+Every merged claim also receives a deterministic `ClaimInterpretation` carrying
+its subject, scope, phase, and modality keys with `provenance: deterministic`.
+It is explicit-language projection only and never a model's reading of intent.
+`AssessmentResponse.deep_review` is presented before the readiness audit in the
+dashboard, and the same baseline review is retained in remediation state.
+
+Conflicts that Python cannot prove are handled by `forge.score.consistency`
+under versioned taxonomy `1.1` (D-046, extended by D-050). Python enumerates bounded candidate
+pairs from named subjects, the model returns only one relation index per pair,
+three runs consolidate by strict majority with ties resolving to `unclear`, and
+both quotes are re-verified before a finding is rendered from a fixed template.
+MCP clients obtain the ledger through the `consistency` advisory kind and pass
+it back to `score_prd_extraction`; the resulting findings are marked
+`classified` and remain outside scoring.
 
 ## Inference Modes
 
@@ -46,10 +100,10 @@ protocol:
 This is not a server-side model fallback. The connected agent still performs
 the inference, then submits structured data to deterministic Forge code.
 
-Confirmed in practice: OpenCode does not support MCP sampling, so `assess_prd`
-fails there and the two-step fallback is the only working path. Cursor's
-sampling support has not yet been confirmed either way in a live session (see
-`docs/ROADMAP.md`).
+Confirmed in practice: OpenCode and Cursor 3.22.7 do not support MCP sampling,
+so `assess_prd` fails in both and the two-step fallback is the working path.
+Cursor's public MCP documentation describes server and tool integration but
+does not claim support for `sampling/createMessage`.
 
 Every sampling resolver checks the connected client's declared capabilities
 itself (via the injected `Context`, see D-039) before building a `Sample`
@@ -243,9 +297,24 @@ explicit `start_new` flag so two independent reviews of the same PRD remain
 separate. A successful resume records a `client_binding_changed` event when
 applicable and returns the authoritative `next_action` and next question.
 
-LangGraph remains deferred. If adopted later, its `thread_id` maps to
-`review_session_id`, never to a vendor chat id. GraphRAG has no role in session
-identity or scoring-state persistence.
+LangGraph remains an implementation option for durable execution, resumable
+human interrupts, and multi-step orchestration. Adoption requires a spike
+against the existing SQLite state machine and must preserve Forge's opaque
+`review_session_id`, optimistic versioning, idempotency, ownership checks, and
+event audit. If adopted, LangGraph's `thread_id` maps to `review_session_id`,
+never to a vendor chat id.
+
+LangChain is an optional adapter for tool invocation and structured model
+output, not a domain boundary. Forge continues to own prompts, extraction
+schemas, source verification, claim consolidation, and deterministic scoring.
+A framework must not introduce provider credentials or direct model calls into
+the MCP/core path.
+
+General GraphRAG remains outside session identity and scoring-state persistence.
+A Graphify-like static requirement graph may be built directly from Forge's
+verified source blocks for advisory cross-section discovery. A larger graph or
+property-graph framework should be adopted only if a measured prototype
+outperforms that bounded design on representative PRDs.
 
 `prepare_prd_assessment` returns `extraction_batches` rather than a single
 `extraction_prompt`, because a long document requires several exhaustive
@@ -299,6 +368,39 @@ system does not resolve disagreement in its own favour.
 Headline calibration metrics include only `internal` cases. Public and
 synthetic examples remain robustness diagnostics because implementation status,
 popularity, or template provenance is not an independent readiness label.
+
+`forge.review_eval` applies the same boundary to D-045 deep-review findings. It
+is a separate offline developer workflow because finding detection and readiness
+scoring have different labels and error costs. Reviewer sheets identify one
+case, contain exact source fragments, and exclude Forge's prediction. Two
+distinct reviewers are required before an internal case enters headline
+metrics; strict-majority defects define recall, while contested defects remain
+visible. Predictions are matched one-to-one using normalized quote containment,
+optionally constrained by finding kind. The report exposes precision, recall,
+blocker recall, false positives per case, human quote alignment, evidence
+completeness, duplicate rate, per-kind metrics, and inter-reviewer agreement.
+Thresholds are applied only after they are preregistered; this workflow never
+changes scoring or review output.
+
+`forge.proxy_diagnostics` runs the deterministic deep review against a proxy
+artifact and reports finding recall, blocker recall, candidate coverage,
+unmatched findings, and hard-negative violations. Its report is permanently
+`calibration_eligible: false`, so it can guide detector work without being
+mistaken for accuracy evidence. Candidate generation supports it with category
+pairing that requires a shared trigger category plus at least two shared content
+words, reserved budget so category pairs are not starved by exact-subject pairs,
+quote-text deduplication, and exclusion of pairs already proved in Python.
+
+`forge.proxy_labels` defines a separate closed schema for public-guidance AI
+proxy panels. Every artifact is permanently typed as
+`external_proxy_diagnostic`, `synthetic_ai_proxy`, calibration-ineligible,
+headline-ineligible, advisory, and no-score-effect. It stores a source hash and
+verified block-local evidence spans plus supported, hard-negative, compatible,
+contested, and unclear labels. It is intentionally not convertible to the human
+label DTOs above; both schemas forbid unknown fields. Proxy artifacts may drive
+regression and transfer diagnostics or motivate a versioned expert-baseline
+field change, but never weight, gate, band, severity, or organization-validity
+tuning.
 
 ## Portability
 

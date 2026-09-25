@@ -1,5 +1,5 @@
 id: prd
-version: "0.5.0-expert-baseline"
+version: "0.6.0-expert-baseline"
 doc_type: prd
 description: >
   Source-backed cross-industry PRD completeness and actionability baseline.
@@ -35,6 +35,12 @@ sources:
   - title: "ICO data minimisation and storage limitation guidance"
     url: "https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/data-protection-principles/a-guide-to-the-data-protection-principles/"
     contribution: "Purpose-limited collection, retention, deletion, and lifecycle controls."
+  - title: "Google Cloud: Architecture decision records"
+    url: "https://docs.cloud.google.com/architecture/architecture-decision-records"
+    contribution: "Authoritative decisions, considered options, status, and consequences for overlapping technical rules."
+  - title: "GitLab Product Development Flow"
+    url: "https://handbook.gitlab.com/handbook/product-development/how-we-work/product-development-flow/"
+    contribution: "Maintained decisions, explicit testing, definition of done, dependencies, and completion evidence."
 
 extraction_runs: 3
 
@@ -236,6 +242,12 @@ criteria:
       - name: prioritisation
         description: "Must/should/could or equivalent ranking across requirements."
         remediation_question: "Which requirements are must-haves, and which can wait?"
+      - name: decision_rules_and_precedence
+        description: >
+          For behaviours with overlapping conditions, ranked inputs, or multiple
+          applicable rules: the authoritative order, tie-break, default, and
+          fallback; or an explicit statement that no rule collision applies.
+        remediation_question: "When two rules can apply at once, which one wins, and what default or fallback applies?"
     remediation_prompt: >
       Can you list the required behaviours as discrete, individually testable
       statements, and mark which are must-have for launch?
@@ -257,6 +269,11 @@ criteria:
         description: "Observable acceptance conditions for failure, invalid input, permissions, or boundary cases."
         type: "string[]"
         remediation_question: "Which failure or boundary cases must pass before this can ship?"
+      - name: requirement_coverage
+        description: >
+          A mapping from every launch-critical functional requirement and
+          decision-rule boundary to at least one observable pass/fail case.
+        remediation_question: "Which pass/fail case covers each must-have requirement and each boundary where behavior changes?"
     remediation_prompt: >
       What are the observable pass/fail conditions that mean this is done?
 
@@ -330,8 +347,12 @@ criteria:
         type: "string[]"
         remediation_question: "Which teams, services, vendors, or data does this depend on?"
       - name: dependency_readiness
-        description: "Owner, readiness condition, failure impact, and fallback for material dependencies."
-        remediation_question: "Who owns each material dependency, when must it be ready, and what happens if it is not?"
+        description: >
+          For each material team, service, vendor, model, or data source: owner,
+          interface and readiness condition, freshness or availability
+          expectation where applicable, failure impact, and stale or unavailable
+          fallback.
+        remediation_question: "Who owns each material dependency, what proves it is ready, and what happens when it is stale or unavailable?"
       - name: constraints
         description: >
           Technical, performance, capacity, vendor, market, legal, or timing

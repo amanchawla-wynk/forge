@@ -774,3 +774,238 @@ supersedes the old one.
   headers, footers, and body table order are covered; and organization-validity
   claims remain gated by the preregistered holdout protocol in
   `docs/VALIDATION_PROTOCOL.md`.
+
+## D-044: Treat Cursor As A Non-Sampling Client
+
+- Status: accepted
+- Decision: Treat Cursor 3.22.7 as not supporting MCP sampling and direct its
+  documented Forge workflow to `prepare_prd_assessment` and
+  `score_prd_extraction`, rather than probing `assess_prd` first. Continue to
+  retain the runtime capability guard because a future Cursor release may add
+  and advertise sampling.
+- Reason: A live Cursor 3.22.7 test produced Forge's proactive error that the
+  MCP client had not declared the `sampling` capability. This is the same
+  protocol condition already confirmed in OpenCode. Cursor's public MCP
+  documentation describes connecting and invoking MCP tools but does not claim
+  support for the distinct server-to-client `sampling/createMessage` flow.
+- Consequence: Cursor and OpenCode use the agent-driven fallback by default.
+  This changes where extraction inference is orchestrated, not Forge's evidence
+  verification, deterministic scoring, or no-provider-key boundary. Native
+  sampling remains available to clients that declare the capability.
+
+## D-045: Make Evidence-Backed Deep Review The Primary Experience
+
+- Status: accepted
+- Supersedes: D-015 and the product experience only where the concise readiness
+  narrative was the primary user-facing result. Deterministic scoring,
+  evidence verification, advisory status, and one-question remediation remain
+  unchanged.
+- Decision: Forge's primary response answers: "What specifically prevents
+  downstream teams from implementing this PRD correctly, where does the
+  document conflict with itself, and what decisions must the author make?"
+  Lead with prioritized, source-backed findings covering contradictions,
+  ambiguities, precedence conflicts, non-testable requirements, stale or
+  superseded statements, undefined fallbacks, and missing operational
+  decisions. Each finding must cite verified source locations, explain the
+  downstream implementation consequence, and state the author decision needed.
+  The readiness band and criterion audit remain supporting deterministic
+  evidence rather than the primary review narrative.
+- Reason: The MicroDrama recommendations PRD contained implementability defects
+  more consequential than its missing rubric fields: incompatible skip
+  thresholds, an impossible interval, conflicting mood-picker state and
+  frequency rules, inconsistent launch timelines, and unclear ranking
+  precedence. The existing report reduced these to generic omissions because
+  extraction retained only one value per field and the deterministic narrative
+  was designed for concise remediation, not cross-section review. More model
+  runs or conventional RAG would not repair that representation loss.
+- Consequence: Add a multi-claim evidence ledger and a bounded, per-document
+  requirement graph before consolidation. Add a quote-verified advisory
+  consistency ledger and a deep-review output schema. Keep exhaustive batching;
+  the graph may discover relationships but cannot decide which source text is
+  eligible for evidence or assign numeric scores. Initially, deep-review
+  findings remain outside the readiness band until representative human review
+  establishes their precision, recall, priority usefulness, and acceptable
+  false-positive rate. Evaluate LangGraph and LangChain only as replaceable
+  orchestration adapters, and compare any property-graph dependency against a
+  smaller Forge-owned static graph before adoption.
+
+## D-046: Classify Statement Conflicts Through A Verified Closed-Set Ledger
+
+- Status: implemented
+- Decision: Semantic conflicts that Python cannot prove are classified through
+  the same closed-output boundary as D-035, D-036, and D-038. Forge
+  deterministically enumerates candidate statement pairs from named subjects it
+  already parses (event identifiers, milestone aliases, skip classifications),
+  bounded per subject and in total. The connected model may return only one
+  enumerated relation index per candidate from a fixed taxonomy:
+  `precedence_conflict`, `scoped_contradiction`, `superseded_requirement`,
+  `compatible`, or unclear. Three independent runs are consolidated by strict
+  majority; any tie or plurality resolves to `unclear`. Python re-locates both
+  quotes in the normalized document before publication and renders every
+  user-facing word from a fixed template plus verified quotes. Findings are
+  advisory, marked `confidence: classified`, and cannot change verdicts,
+  weights, gates, or bands.
+- Reason: The MicroDrama PRD's most expensive defects included rules that were
+  individually well-formed but jointly unimplementable, such as two mood-picker
+  trigger rules and ranking orders that differ between sections. Deterministic
+  numeric checks cannot decide whether two differently worded rules govern the
+  same situation, and free-text model review would reintroduce exactly the
+  unverifiable critique D-025 rejected.
+- Consequence: Adds `forge.score.consistency` with versioned taxonomy `1.0`,
+  a `consistency` kind on `prepare_prd_advisory`/`apply_prd_advisory`, and an
+  optional `consistency_ledger` input to `score_prd_extraction`. Conservative
+  resolution means Forge will miss real conflicts rather than invent them;
+  recall improvements require the human-labelled golden case before any
+  threshold or scoring effect is considered.
+
+## D-047: Validate Deep Review With Blinded Finding Labels
+
+- Status: implemented
+- Decision: Measure D-045 deep-review findings in a separate offline developer
+  workflow rather than reusing criterion calibration labels. Reviewers identify
+  defects from the source document without seeing Forge's findings and attach
+  exact source fragments. At least two distinct reviewers are required for an
+  internal case to enter headline metrics. Strict-majority defects define the
+  expected set; ties and minority findings remain contested. Python matches
+  predictions one-to-one by normalized quote containment and, when supplied,
+  finding kind. Public and synthetic cases remain robustness diagnostics.
+  Preregistered thresholds fail closed when a required metric is undefined.
+- Reason: Deep-review precision and recall cannot be inferred from readiness
+  band agreement, synthetic regression cases, or Forge's own quote verifier.
+  Showing predictions before labelling would anchor reviewers, while treating a
+  single reviewer as truth or averaging away false positives would overstate
+  reliability. False accusations of contradiction are especially damaging to
+  author trust and therefore need an explicit per-case measure.
+- Consequence: Add `forge.review_eval` and the `forge-review-eval` CLI for
+  prediction cases, blinded label templates, label merging, holdout evaluation,
+  and threshold decisions. Reports include precision, recall, blocker recall,
+  false positives per case, human quote alignment, evidence completeness,
+  duplicate rate, per-kind metrics, contested expectations, and inter-reviewer
+  agreement. The harness does not validate the feature by itself; representative
+  human-labelled internal cases are still required. Priority agreement and
+  actionability remain a separate post-prediction study so the discovery labels
+  stay blind.
+
+## D-048: Use Public-Guidance AI Panels Only As Proxy Diagnostics
+
+- Status: implemented
+- Decision: When independent reviewers are unavailable, use separate AI agents
+  grounded in distinct public first-party guidance families to propose synthetic
+  proxy labels, hard negatives, disagreements, and generic rubric hypotheses.
+  Store the result in a closed artifact type that is permanently marked
+  `synthetic_ai_proxy`, `external_proxy_diagnostic`, calibration-ineligible,
+  headline-ineligible, advisory, and no-score-effect. Proxy agreement is not
+  human inter-reviewer agreement. It may support field wording and regression
+  coverage, but never weights, gates, bands, severity calibration, legal claims,
+  or organization validation.
+- Reason: The MicroDrama recommendations PRD provides useful, source-verifiable
+  transfer cases while human reviewers are unavailable, and public Google,
+  Microsoft, LinkedIn, Atlassian, GitLab, GOV.UK, and related guidance supplies
+  a broader content basis than one template. However, agents share model and
+  prompt biases, cannot represent the cited companies, and cannot supply an
+  independent readiness label. Treating their agreement as calibration would
+  violate D-024 and D-047.
+- Consequence: Add `forge.proxy_labels` and a 29-label MicroDrama proxy artifact
+  with 75 verified source spans, hard negatives, compatible cases, and preserved
+  disagreement. Advance the bundled rubric to `0.6.0-expert-baseline` by adding
+  `functional_requirements.decision_rules_and_precedence`, adding
+  `acceptance_criteria.requirement_coverage`, and refining
+  `dependencies.dependency_readiness`. Every existing criterion weight, gate,
+  band threshold, and verdict credit remains unchanged. The new fields are
+  content-validity hypotheses until representative blinded human review exists.
+
+## D-049: Prove Exact-Key Structured Contract Conflicts In Python
+
+- Status: implemented
+- Decision: Extend the deterministic deep-review source scan to preserve
+  structured snippets that PDF table flattening separates across lines. Publish
+  an enum-domain finding only when one exact classification label maps to
+  incompatible tier values or an assigned value falls outside an explicitly
+  declared matching domain. Publish a schema-type finding only when one exact
+  machine field name has incompatible explicit array, table, or inline type
+  declarations. Partition declarations by explicit product, variant, phase,
+  surface, or fallback scope and abstain across different scopes. Continue to
+  render consequence and required-decision text from fixed Python templates.
+- Reason: Proxy labels `PXY-MD-004` and `PXY-MD-011` are mechanically provable
+  from the MicroDrama source: hard skip maps to tiers 3 and 1 while the stored
+  tier domain is 0-2, and `genre_tags[]` conflicts with a scalar `string`
+  declaration. Sending these exact contracts to a semantic classifier would
+  add model variance without adding judgment. At the same time, similarly named
+  fields or enum values can legitimately differ by product or variant, so an
+  exact scope boundary is required before comparison.
+- Consequence: Add deterministic `enum_domain_conflict` and
+  `schema_type_conflict` finding kinds, structured source-span extraction, fixed
+  evidence/consequence/decision projections, and positive plus hard-negative
+  tests. Findings remain advisory and cannot change rubric verdicts, weights,
+  gates, or bands. State lifetime, activation, dependency-status, precedence,
+  and implicit scope conflicts still require closed-set classification.
+
+## D-050: Complete The Deterministic Core, Extend The Taxonomy, And Defer Both Frameworks
+
+- Status: implemented
+- Decision: (1) Timeline analysis compares only commensurable values. Two exact
+  dates may conflict, and two relative post-launch windows conflict only when
+  they are disjoint. Overlapping windows and exact-versus-relative comparisons
+  abstain. (2) Every merged claim gains a `ClaimInterpretation` recording
+  subject, scope, phase, and modality keys with `provenance: deterministic`;
+  it is an explicit-language projection, not a model's reading of intent.
+  (3) Add same-scope `opposite_polarity`, `duplicate_rank`, and
+  `precedence_cycle` checks over exact machine identifiers. (4) Advance the
+  consistency taxonomy to `1.1` with `implied_exception` and `ambiguous_scope`.
+  (5) After executable spikes, do not adopt LangGraph or a property-graph
+  index now.
+- Reason: The prior timeline rule reported `2-4 weeks` against `2-3 weeks` as a
+  conflict, contradicting proxy hard negative `PXY-MD-HN-010`, which records
+  overlap as ambiguity rather than contradiction. Polarity, duplicate ranks, and
+  cycles are mechanically decidable and should not consume model classification.
+  Forcing an unbounded exception or an unreconcilable scope into
+  `scoped_contradiction` or `compatible` either overstates a conflict or hides a
+  real decision the author must make. The measured spikes showed LangGraph
+  provides working SQLite checkpoints, interrupts, and replay but no native
+  source/rubric/workspace binding or operation-digest idempotency, and that a
+  property-graph store can hold the bounded graph without improving exact
+  evidence verification.
+- Evidence: `spikes/graph_framework_comparison.py`, run 2026-09-25 with
+  `langgraph` 1.0.8 and `llama-index-core` 0.14.6. LangGraph exposed
+  `__interrupt__`, resumed from `Command(resume=...)`, wrote 3 checkpoints, and
+  mapped `thread_id` to a Forge review id. The property graph stored 100 nodes
+  and 99 relations with no duplicates on re-upsert, but `get_triplets()` returns
+  an empty list unless a filter is supplied, so an unfiltered read is not a
+  graph dump. Forge's static graph built the same shape with no dependency.
+- Consequence: Deep review adds five deterministic finding kinds and two
+  classified kinds, all advisory and still outside scoring. Neither framework
+  enters production dependencies; the spike stays runnable through `uv run
+  --with` so the comparison can be repeated rather than trusted from prose.
+  Revisit LangGraph only for concrete durable branching, background execution,
+  or multi-party approval requirements.
+
+## D-051: Measure Deep-Review Recall Before Adding More Detectors
+
+- Status: implemented
+- Decision: Add `forge.proxy_diagnostics` and `forge-proxy-diagnostics`, which
+  run the deterministic deep review against a synthetic proxy artifact and
+  report finding recall, blocker recall, candidate-or-finding coverage,
+  findings per kind, unmatched findings, and hard-negative violations. The
+  report is permanently marked `calibration_eligible: false`. Broaden candidate
+  generation with category pairing (`lifetime`, `status`, `ranking`) that
+  requires the same trigger category plus at least two shared content words,
+  after removing words common to a quarter of that category's statements.
+  Reserve candidate budget for category pairs, deduplicate pairs by normalized
+  quote text, and skip pairs a deterministic finding already cites together.
+- Reason: Every detector so far was added on judgment. Running the measurement
+  showed the honest position: finding recall against the 29-label proxy ledger
+  is 3/19 (0.158) and blocker recall is 3/9 (0.333), with 0 hard-negative
+  violations. Without this number, further detectors would be justified by
+  intuition, and the conservative bias could be mistaken for good coverage.
+- Evidence: `forge-proxy-diagnostics fixtures/proxy/microdrama-recommendations.proxy-panel.v1.json`
+  on 2026-09-25: 5 findings, 29 candidates, recall 0.158, blocker recall 0.333,
+  coverage 0.211, hard-negative violations 0. Matched labels are `PXY-MD-003`,
+  `PXY-MD-004`, and `PXY-MD-011`. Deduplication removed repeated identical
+  `feed_position` and `genre_tags` pairs that had consumed classification budget.
+- Consequence: Low recall is now a recorded, reproducible fact rather than an
+  assumption, and precision-style counts here are diagnostic only because the
+  labels are synthetic (D-048). The measurement also isolated the next
+  blocker: PDF line splitting fragments one statement into several claims, so
+  the p16 mood rule survives only as `"last 30 days window (top 5"` and can
+  never pair with the p5 session rule. Claim granularity for multi-line source
+  units must be fixed before further semantic detectors are worth adding.
