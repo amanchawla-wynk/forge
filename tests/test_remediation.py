@@ -1,10 +1,23 @@
 from __future__ import annotations
 
 import json
+import hashlib
 
+import pytest
+
+from forge.evaluate.models import (
+    Applicability,
+    AssertionOutcome,
+    CriterionEvaluation,
+    EvaluationConfidence,
+    EvaluationGap,
+    SemanticStatus,
+)
 from forge.remediation import (
     apply_checkpoint,
     begin_remediation,
+    begin_remediation_prepared,
+    _active_atomic_evaluations,
     prepare_checkpoint,
     record_answer,
 )
@@ -14,6 +27,7 @@ from forge.score.edge_coverage import (
     EdgeCaseCoverageLedger,
 )
 from forge.rubric.loader import load_rubric
+from forge.service import prepare_assessment
 
 
 def _empty_problem_extraction() -> str:
@@ -41,11 +55,7 @@ def _problem_delta(turn) -> str:
         pending.target_field: pending.answer.answer
         for pending in turn.state.pending_answers
     }
-    values = {
-        "problem": answers["problem"],
-        "affected_users": answers["affected_users"],
-        "evidence": answers["evidence"],
-    }
+    values = answers
     plan = prepare_checkpoint(turn.state)
     return json.dumps(
         {
@@ -69,6 +79,282 @@ def _problem_delta(turn) -> str:
             ],
         }
     )
+
+
+def _atomic_problem_evaluation(prepared, *, issue_ids: list[str] | None = None):
+    issues = issue_ids or ["3" * 64]
+    return CriterionEvaluation(
+        evaluation_id="4" * 64,
+        criterion_id="problem_statement",
+        snapshot_id=prepared.snapshot.snapshot_id,
+        rubric_id=prepared.rubric.id,
+        rubric_version=prepared.rubric.version,
+        plan_fingerprint=prepared.plan_fingerprint,
+        run_ids=["run-1", "run-2", "run-3"],
+        batch_ids=[batch.id for batch in prepared.batches],
+        coverage_complete=True,
+        applicability=Applicability.APPLICABLE,
+        status=SemanticStatus.UNSUPPORTED,
+        gaps=[
+            EvaluationGap(
+                gap_id=issue_id,
+                assertion_ids=["problem"],
+                kind="missing_decision",
+                question="State the problem.",
+            )
+            for issue_id in issues
+        ],
+        assertion_outcomes=[
+            AssertionOutcome(
+                assertion_id="problem",
+                status="gap",
+                agreement=1,
+                run_count=3,
+                issue_ids=issues,
+            )
+        ],
+        confidence=EvaluationConfidence(
+            agreement=1,
+            run_count=3,
+            expected_run_count=3,
+            basis="independent_evaluation_runs",
+        ),
+        origin="criterion_evaluation",
+    )
+
+
+def _atomic_problem_turn(tmp_path, *, issue_ids: list[str] | None = None):
+    source = tmp_path / "prd.md"
+    source.write_text("An incomplete product note.")
+    prepared = prepare_assessment(str(source))
+    target = _atomic_problem_evaluation(prepared, issue_ids=issue_ids)
+    evaluations = [target]
+    for criterion in prepared.rubric.criteria:
+        if criterion.id == target.criterion_id:
+            continue
+        evaluations.append(
+            CriterionEvaluation(
+                evaluation_id=hashlib.sha256(criterion.id.encode()).hexdigest(),
+                criterion_id=criterion.id,
+                snapshot_id=prepared.snapshot.snapshot_id,
+                rubric_id=prepared.rubric.id,
+                rubric_version=prepared.rubric.version,
+                plan_fingerprint=prepared.plan_fingerprint,
+                run_ids=["run-1", "run-2", "run-3"],
+                batch_ids=[batch.id for batch in prepared.batches],
+                coverage_complete=True,
+                applicability=Applicability.APPLICABLE,
+                status=SemanticStatus.UNCLEAR,
+                confidence=EvaluationConfidence(
+                    agreement=1,
+                    run_count=3,
+                    expected_run_count=3,
+                    basis="independent_evaluation_runs",
+                ),
+                origin="criterion_evaluation",
+            )
+        )
+    return begin_remediation_prepared(
+        prepared,
+        _empty_problem_extraction(),
+        question_mode="atomic_assertion",
+        criterion_evaluations=evaluations,
+    )
+
+
+def test_atomic_mode_rejects_incomplete_evaluation_coverage(tmp_path):
+    source = tmp_path / "prd.md"
+    source.write_text("An incomplete product note.")
+    prepared = prepare_assessment(str(source))
+
+    with pytest.raises(ValueError, match="every rubric criterion exactly once"):
+        begin_remediation_prepared(
+            prepared,
+            _empty_problem_extraction(),
+            question_mode="atomic_assertion",
+            criterion_evaluations=[_atomic_problem_evaluation(prepared)],
+        )
+
+
+def test_atomic_mode_uses_durable_deterministic_question_identity(tmp_path):
+    turn = _atomic_problem_turn(tmp_path)
+
+    assert turn.state.question_mode == "atomic_assertion"
+    assert turn.next_question is not None
+    assert turn.next_question.question_kind == "atomic_assertion"
+    assert turn.next_question.question_id
+    assert turn.next_question.plan_id
+    assert turn.next_question.assertion_id == "problem"
+    assert turn.next_question.issue_ids == ["3" * 64]
+    assert turn.next_question.generation_mode == "deterministic_template"
+    assert turn.next_question.score_effect == "none"
+
+
+def test_atomic_answer_requires_exact_question_and_revision_binding(tmp_path):
+    turn = _atomic_problem_turn(tmp_path)
+    question = turn.next_question
+    assert question is not None
+
+    with pytest.raises(ValueError, match="question_id"):
+        record_answer(
+            turn.state,
+            "Users cannot discover short stories.",
+            question_id="0" * 64,
+            evaluation_revision=question.evaluation_revision,
+        )
+    with pytest.raises(ValueError, match="evaluation_revision"):
+        record_answer(
+            turn.state,
+            "Users cannot discover short stories.",
+            question_id=question.question_id,
+            evaluation_revision=question.evaluation_revision + 1,
+        )
+
+    answered = record_answer(
+        turn.state,
+        "Users cannot discover short stories.",
+        question_id=question.question_id,
+        evaluation_revision=question.evaluation_revision,
+    )
+    assert answered.checkpoint_due
+    assert answered.checkpoint_reason == "atomic_answer_recorded"
+    pending = answered.state.pending_answers[0]
+    assert pending.question_id == question.question_id
+    assert pending.plan_id == question.plan_id
+    assert pending.assertion_id == question.assertion_id
+    assert pending.issue_ids == question.issue_ids
+    assert pending.evaluation_revision == question.evaluation_revision
+
+
+def test_atomic_questions_close_only_rendered_issue_and_preserve_same_field_answers(
+    tmp_path,
+):
+    issue_ids = ["3" * 64, "6" * 64]
+    turn = _atomic_problem_turn(tmp_path, issue_ids=issue_ids)
+    question = turn.next_question
+    assert question is not None
+    assert question.issue_ids == [issue_ids[0]]
+    answered = record_answer(
+        turn.state,
+        "Users cannot discover short stories.",
+        question_id=question.question_id,
+        evaluation_revision=question.evaluation_revision,
+    )
+
+    result = apply_checkpoint(answered.state, _problem_delta(answered))
+
+    assert result.credited_answer_ids
+    assert len(result.state.atomic_resolutions) == 1
+    resolution = result.state.atomic_resolutions[0]
+    assert resolution.question_id == question.question_id
+    assert resolution.issue_ids == [issue_ids[0]]
+    assert resolution.answer_id == result.credited_answer_ids[0]
+    second = result.next_question
+    assert second is not None
+    assert second.assertion_id == "problem"
+    assert second.issue_ids == [issue_ids[1]]
+
+    second_answer = "Authors cannot distinguish the current problem from the solution."
+    answered_again = record_answer(
+        result.state,
+        second_answer,
+        question_id=second.question_id,
+        evaluation_revision=second.evaluation_revision,
+    )
+    final = apply_checkpoint(answered_again.state, _problem_delta(answered_again))
+
+    assert [item.issue_ids for item in final.state.atomic_resolutions] == [
+        [issue_ids[0]],
+        [issue_ids[1]],
+    ]
+    problem = next(
+        criterion
+        for criterion in final.state.runs[0]
+        if criterion.criterion_id == "problem_statement"
+    ).field("problem")
+    assert problem is not None
+    assert problem.value == [
+        "Users cannot discover short stories.",
+        second_answer,
+    ]
+    assert len(problem.item_evidence) == 2
+
+
+def test_atomic_answer_does_not_close_issue_from_another_field(tmp_path):
+    turn = _atomic_problem_turn(tmp_path)
+    question = turn.next_question
+    assert question is not None
+    answered = record_answer(
+        turn.state,
+        "Mobile viewers are affected.",
+        question_id=question.question_id,
+        evaluation_revision=question.evaluation_revision,
+    )
+    plan = prepare_checkpoint(answered.state)
+    criterion = load_rubric("prd").criterion("problem_statement")
+    delta = {
+        "delta_fingerprint": plan.delta_fingerprint,
+        "criteria": [
+            {
+                "criterion_id": criterion.id,
+                "fields": [
+                    {
+                        "name": field.name,
+                        "value": answered.state.pending_answers[0].answer.answer
+                        if field.name == "affected_users"
+                        else None,
+                        "evidence": {
+                            "quote": answered.state.pending_answers[0].answer.answer
+                        }
+                        if field.name == "affected_users"
+                        else None,
+                    }
+                    for field in criterion.fields
+                ],
+            }
+        ],
+    }
+
+    result = apply_checkpoint(answered.state, json.dumps(delta))
+
+    assert result.credited_answer_ids == []
+    assert result.state.atomic_resolutions == []
+    assert result.next_question is not None
+    assert result.next_question.assertion_id == "problem"
+
+
+def test_atomic_resolutions_are_scoped_by_criterion(tmp_path):
+    turn = _atomic_problem_turn(tmp_path)
+    question = turn.next_question
+    assert question is not None
+    answered = record_answer(
+        turn.state,
+        "Users cannot discover short-form stories.",
+        question_id=question.question_id,
+        evaluation_revision=question.evaluation_revision,
+    )
+    resolved = apply_checkpoint(answered.state, _problem_delta(answered)).state
+    other = next(
+        item
+        for item in resolved.criterion_evaluations
+        if item.criterion_id == "success_metrics"
+    ).model_copy(deep=True)
+    other.assertion_outcomes = [
+        AssertionOutcome(
+            assertion_id="problem",
+            status="gap",
+            agreement=1,
+            run_count=3,
+            issue_ids=["7" * 64],
+        )
+    ]
+    resolved.criterion_evaluations.append(other)
+
+    active = _active_atomic_evaluations(resolved)
+    cross_criterion = active[-1].assertion_outcomes[0]
+
+    assert cross_criterion.status == "gap"
+    assert cross_criterion.issue_ids == ["7" * 64]
 
 
 def test_collects_gate_answers_without_rescoring_then_checkpoints(tmp_path):

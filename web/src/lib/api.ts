@@ -53,12 +53,14 @@ export async function uploadDocument(file: File): Promise<UploadResponse> {
 export interface CreateAssessmentPayload {
   document_id: string;
   llm: LLMConfig;
+  operation_id?: string;
   rubric_name?: string;
   supplemental_answers?: SupplementalAnswer[];
   product_context?: { term: string; meaning: string; source_ref?: string | null }[];
   framing?: string | null;
   edge_case_coverage?: EdgeCaseCoverageLedger | null;
   start_new?: boolean;
+  question_mode?: "legacy_field" | "atomic_assertion";
 }
 
 export async function createAssessment(
@@ -82,6 +84,8 @@ export async function recordRemediationAnswer(
   operationId: string,
   answer: string,
   forceCheckpoint = false,
+  questionId: string | null = null,
+  evaluationRevision: number | null = null,
 ): Promise<RemediationTurnResponse> {
   const response = await fetch(
     `${API_BASE_URL}/api/remediation/${sessionId}/answers`,
@@ -93,6 +97,8 @@ export async function recordRemediationAnswer(
         operation_id: operationId,
         answer,
         force_checkpoint: forceCheckpoint,
+        question_id: questionId,
+        evaluation_revision: evaluationRevision,
       }),
     },
   );

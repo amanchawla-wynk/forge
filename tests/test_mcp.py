@@ -10,6 +10,12 @@ from mcp import Client
 from mcp.types import CreateMessageResult, TextContent
 
 import forge.ingest.document as ingest_document_module
+from forge.evaluate.batch import (
+    CriterionEvaluationBatch,
+    CriterionEvaluationFragment,
+    CriterionEvaluationRun,
+)
+from forge.evaluate.models import CriterionEvaluationSubmission, SubmittedGap
 from forge.ingest.models import SupplementalAnswer
 from forge.ingest.parsers import LegacyDocumentParser
 from forge.ingest.snapshot import SnapshotCache
@@ -17,6 +23,7 @@ from forge.mcp.server import mcp
 from forge.remediation import begin_remediation
 from forge.rubric.loader import load_rubric
 from forge.sessions import ReviewSessionRepository, operation_digest
+from forge.service import prepare_assessment
 
 
 @pytest.fixture
@@ -189,6 +196,8 @@ def test_mcp_exposes_sampling_and_fallback_tools():
         "operation_id",
         "answer",
         "force_checkpoint",
+        "question_id",
+        "evaluation_revision",
     }
 
 
@@ -267,7 +276,7 @@ async def test_prepare_prd_assessment_returns_every_long_document_batch(tmp_path
     path = tmp_path / "long-prd.md"
     path.write_text(("A requirement sentence. " * 7_000).strip())
 
-    async with Client(mcp, raise_exceptions=True) as client:
+    async with Client(mcp) as client:
         result = await client.call_tool(
             "prepare_prd_assessment", {"source_path": str(path)}
         )
@@ -516,7 +525,7 @@ async def test_assess_prd_without_sampling_gives_an_actionable_fallback_error(
 
     # No sampling_callback => the client declares no sampling capability,
     # exactly like the reported host.
-    async with Client(mcp) as client:
+    async with Client(mcp, raise_exceptions=True) as client:
         result = await client.call_tool("assess_prd", {"source_path": str(path)})
 
     assert result.is_error
@@ -1114,6 +1123,120 @@ async def test_observe_prd_visual_reports_an_unknown_asset(tmp_path):
 
 def _bare_extraction() -> str:
     return json.dumps(_complete_null_extraction())
+
+
+def _empty_atomic_evaluation(path) -> str:
+    prepared = prepare_assessment(str(path))
+    submissions = [
+        CriterionEvaluationSubmission(
+            criterion_id=criterion.id,
+            gaps=[
+                SubmittedGap(
+                    gap_ref=f"{criterion.id}-{assertion.id}",
+                    assertion_ids=[assertion.id],
+                    kind="missing_decision",
+                    missing_decision=assertion.answer_contract,
+                )
+                for assertion in criterion.evaluation.assertions
+                if assertion.required
+            ],
+        )
+        for criterion in prepared.rubric.criteria
+    ]
+    return CriterionEvaluationBatch(
+        runs=[
+            CriterionEvaluationRun(
+                run_index=run_index,
+                fragments=[
+                    CriterionEvaluationFragment(
+                        batch_id=batch.id,
+                        plan_fingerprint=prepared.plan_fingerprint,
+                        criteria=submissions,
+                    )
+                    for batch in prepared.batches
+                ],
+            )
+            for run_index in range(1, prepared.rubric.extraction_runs + 1)
+        ]
+    ).model_dump_json()
+
+
+@pytest.mark.anyio
+async def test_atomic_review_binds_mcp_answer_to_question_revision(tmp_path):
+    source = tmp_path / "prd.md"
+    source.write_text("An incomplete product note.")
+    start_payload = {
+        "source_path": str(source),
+        "extraction_json": _bare_extraction(),
+        "question_mode": "atomic_assertion",
+        "evaluation_json": json.loads(_empty_atomic_evaluation(source)),
+        "operation_id": "start-atomic-review",
+    }
+    async with Client(mcp, raise_exceptions=True) as client:
+        started = await client.call_tool(
+            "start_prd_review",
+            start_payload,
+        )
+        assert not started.is_error, started.content[0].text
+        replayed_start = await client.call_tool("start_prd_review", start_payload)
+        assert replayed_start.structured_content == started.structured_content
+        content = started.structured_content
+        question = content["turn"]["next_question"]
+        assert content["turn"]["state"]["question_mode"] == "atomic_assertion"
+        assert question["question_kind"] == "atomic_assertion"
+
+        missing_binding = await client.call_tool(
+            "record_prd_answer",
+            {
+                "review_session_id": content["review_session_id"],
+                "session_version": content["session_version"],
+                "operation_id": "missing-atomic-binding",
+                "answer": "Viewers cannot discover short-form stories.",
+            },
+        )
+        assert missing_binding.is_error
+        assert "question_id" in missing_binding.content[0].text
+
+        answered = await client.call_tool(
+            "record_prd_answer",
+            {
+                "review_session_id": content["review_session_id"],
+                "session_version": content["session_version"],
+                "operation_id": "bound-atomic-answer",
+                "answer": "Viewers cannot discover short-form stories.",
+                "question_id": question["question_id"],
+                "evaluation_revision": question["evaluation_revision"],
+            },
+        )
+        prepared_checkpoint = await client.call_tool(
+            "prepare_prd_checkpoint",
+            {
+                "review_session_id": content["review_session_id"],
+                "session_version": answered.structured_content["session_version"],
+                "operation_id": "prepare-after-bound-answer",
+            },
+        )
+        assert prepared_checkpoint.structured_content["workflow_state"] == (
+            "awaiting_delta_extraction"
+        )
+        late_retry = await client.call_tool(
+            "record_prd_answer",
+            {
+                "review_session_id": content["review_session_id"],
+                "session_version": content["session_version"],
+                "operation_id": "bound-atomic-answer",
+                "answer": "Viewers cannot discover short-form stories.",
+                "question_id": question["question_id"],
+                "evaluation_revision": question["evaluation_revision"],
+            },
+        )
+
+    assert not answered.is_error
+    assert late_retry.structured_content == answered.structured_content
+    assert answered.structured_content["workflow_state"] == "checkpoint_required"
+    pending = answered.structured_content["turn"]["state"]["pending_answers"][0]
+    assert pending["question_id"] == question["question_id"]
+    assert pending["issue_ids"] == question["issue_ids"]
 
 
 def _revision_ready_session(path, answer: SupplementalAnswer):

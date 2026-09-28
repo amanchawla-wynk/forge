@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +33,8 @@ from forge.ingest.models import ProductContextTerm, SupplementalAnswer
 from forge.ingest.snapshot import DocumentSnapshot
 from forge.rubric.loader import load_rubric
 from forge.revise import RevisionPlan
+from forge.questions.apply import render_deterministic_question
+from forge.questions.prepare import prepare_question_generations
 from forge.score.edge_coverage import (
     CoverageStatus,
     EdgeCaseCoverageLedger,
@@ -66,8 +69,19 @@ class FinalVerification(BaseModel):
     assessment: AssessmentResponse
 
 
+class AtomicIssueResolution(BaseModel):
+    question_id: str
+    plan_id: str
+    criterion_id: str
+    assertion_id: str
+    issue_ids: list[str]
+    answer_id: str
+    source_evaluation_revision: int = Field(ge=0)
+    resolved_evaluation_revision: int = Field(ge=1)
+
+
 class RemediationState(BaseModel):
-    state_schema_version: int = 3
+    state_schema_version: int = 4
     source_path: str
     source_sha256: str
     snapshot_id: str | None = None
@@ -78,6 +92,8 @@ class RemediationState(BaseModel):
     criterion_evaluations: list[CriterionEvaluation] = Field(
         default_factory=list, exclude=True
     )
+    question_mode: Literal["legacy_field", "atomic_assertion"] = "legacy_field"
+    atomic_resolutions: list[AtomicIssueResolution] = Field(default_factory=list)
     rubric_name: str = "prd"
     rubric_id: str
     rubric_version: str
@@ -263,6 +279,124 @@ def _decorate_edge_questions(
     queue.sort(key=lambda question: priority.get(question.criterion_id, len(priority)))
 
 
+def _active_atomic_evaluations(state: RemediationState) -> list[CriterionEvaluation]:
+    resolved_issues = {
+        (item.criterion_id, issue_id)
+        for item in state.atomic_resolutions
+        for issue_id in item.issue_ids
+    }
+    evaluations = [item.model_copy(deep=True) for item in state.criterion_evaluations]
+    for evaluation in evaluations:
+        for index, outcome in enumerate(evaluation.assertion_outcomes):
+            remaining_issue_ids = [
+                issue_id
+                for issue_id in outcome.issue_ids
+                if (evaluation.criterion_id, issue_id) not in resolved_issues
+            ]
+            if outcome.issue_ids and not remaining_issue_ids:
+                evaluation.assertion_outcomes[index] = outcome.model_copy(
+                    update={
+                        "status": "supported",
+                        "agreement": 1.0,
+                        "run_count": max(3, outcome.run_count),
+                        "issue_ids": [],
+                    }
+                )
+            elif remaining_issue_ids != outcome.issue_ids:
+                evaluation.assertion_outcomes[index] = outcome.model_copy(
+                    update={"issue_ids": remaining_issue_ids}
+                )
+    return evaluations
+
+
+def _plan_question_queue(state: RemediationState, assessment: Assessment) -> list[Question]:
+    rubric = load_rubric(state.rubric_name)
+    legacy = plan_question_queue(
+        rubric,
+        assessment,
+        display_name=state.display_name,
+        framing=state.framing,
+    )
+    if state.question_mode == "legacy_field":
+        for question in legacy:
+            question.evaluation_revision = assessment.evaluation_revision
+        return legacy
+
+    prepared = prepare_question_generations(
+        rubric,
+        _active_atomic_evaluations(state),
+        framing=state.framing,
+    )
+    atomic: list[Question] = []
+    for item in prepared:
+        target = item.target
+        rendered = render_deterministic_question(item)
+        criterion = rubric.criterion(target.criterion_id)
+        result = next(
+            value
+            for value in assessment.criteria
+            if value.criterion_id == target.criterion_id
+        )
+        matching_legacy = next(
+            (value for value in legacy if value.criterion_id == target.criterion_id),
+            None,
+        )
+        atomic.append(
+            Question(
+                question_id=rendered.question_id,
+                question_kind="atomic_assertion",
+                plan_id=target.plan_id,
+                criterion_id=target.criterion_id,
+                criterion_name=target.criterion_name,
+                target_field=criterion.assertion(target.assertion_id).legacy_field,
+                question=rendered.question,
+                base_question=rendered.question,
+                framing=state.framing,
+                missing_fields=result.missing,
+                answer_requirements=[target.answer_contract],
+                is_gate=result.gate_triggered,
+                band_if_answered=(
+                    matching_legacy.band_if_answered
+                    if matching_legacy is not None
+                    else assessment.band
+                ),
+                unblocks_consumers=[value.value for value in result.consumers],
+                assertion_id=target.assertion_id,
+                status=target.status,
+                issue_ids=[rendered.issue_id],
+                evidence_ids=rendered.evidence_ids,
+                generation_mode="deterministic_template",
+                score_effect="none",
+                evaluation_revision=assessment.evaluation_revision,
+            )
+        )
+    atomic_criteria = {question.criterion_id for question in atomic}
+    combined = [*atomic, *(q for q in legacy if q.criterion_id not in atomic_criteria)]
+    priority = {
+        result.criterion_id: index
+        for index, result in enumerate(
+            sorted(
+                assessment.criteria,
+                key=lambda value: (
+                    not value.gate_triggered,
+                    -value.weight,
+                    -len(value.consumers),
+                    value.criterion_id,
+                ),
+            )
+        )
+    }
+    combined.sort(
+        key=lambda question: (
+            priority[question.criterion_id],
+            question.question_kind != "atomic_assertion",
+        )
+    )
+    for question in combined:
+        question.evaluation_revision = assessment.evaluation_revision
+    return combined
+
+
 def _current_claims(
     state: RemediationState,
     patches: list[CriterionExtraction],
@@ -289,6 +423,7 @@ def _snapshot(
     remediated_criteria: list[str],
     remediation_delta_count: int,
     delta_patches: list[CriterionExtraction],
+    atomic_resolutions: list[AtomicIssueResolution],
 ) -> tuple[
     Assessment,
     NarrativeReport,
@@ -331,14 +466,10 @@ def _snapshot(
     assessment.confidence_basis = "source_runs_plus_single_verified_deltas"
     assessment.remediated_criteria = remediated_criteria
     assessment.remediation_delta_count = remediation_delta_count
-    queue = plan_question_queue(
-        rubric,
-        assessment,
-        display_name=state.display_name,
-        framing=state.framing,
+    planning_state = state.model_copy(
+        update={"atomic_resolutions": atomic_resolutions}, deep=True
     )
-    for question in queue:
-        question.evaluation_revision = evaluation_revision
+    queue = _plan_question_queue(planning_state, assessment)
     _decorate_edge_questions(queue, assessment, state.display_name, verified_coverage)
     report = build_narrative_report(
         assessment,
@@ -370,6 +501,8 @@ def begin_remediation(
     client_models: list[str] | None = None,
     display_name: str | None = None,
     checkpoint_policy: CheckpointPolicy | None = None,
+    question_mode: Literal["legacy_field", "atomic_assertion"] = "legacy_field",
+    criterion_evaluations: list[CriterionEvaluation] | None = None,
 ) -> RemediationTurn:
     prepared = prepare_assessment(
         source_path,
@@ -385,6 +518,8 @@ def begin_remediation(
         client_models=client_models,
         display_name=display_name,
         checkpoint_policy=checkpoint_policy,
+        question_mode=question_mode,
+        criterion_evaluations=criterion_evaluations,
     )
 
 
@@ -397,6 +532,8 @@ def begin_remediation_prepared(
     client_models: list[str] | None = None,
     display_name: str | None = None,
     checkpoint_policy: CheckpointPolicy | None = None,
+    question_mode: Literal["legacy_field", "atomic_assertion"] = "legacy_field",
+    criterion_evaluations: list[CriterionEvaluation] | None = None,
 ) -> RemediationTurn:
     document = prepared.document
     rubric = prepared.rubric
@@ -407,7 +544,38 @@ def begin_remediation_prepared(
     runs, claims = verify_extraction_batch_with_claims(
         list(prepared.batches), ExtractionBatch.model_validate(payload), rubric
     )
-    evaluation_artifacts, _ = build_legacy_criterion_evaluations(prepared, runs)
+    legacy_evaluations, _ = build_legacy_criterion_evaluations(prepared, runs)
+    evaluation_artifacts = list(criterion_evaluations or legacy_evaluations)
+    if question_mode == "atomic_assertion":
+        if not criterion_evaluations:
+            raise ValueError(
+                "atomic_assertion question mode requires verified criterion evaluations"
+            )
+        criterion_ids = [
+            evaluation.criterion_id for evaluation in evaluation_artifacts
+        ]
+        expected_criterion_ids = {criterion.id for criterion in rubric.criteria}
+        if (
+            len(criterion_ids) != len(set(criterion_ids))
+            or set(criterion_ids) != expected_criterion_ids
+        ):
+            raise ValueError(
+                "atomic question evaluations must cover every rubric criterion exactly once"
+            )
+        for evaluation in evaluation_artifacts:
+            if (
+                evaluation.origin != "criterion_evaluation"
+                or not evaluation.coverage_complete
+                or evaluation.confidence.run_count < rubric.extraction_runs
+                or len(evaluation.run_ids) < rubric.extraction_runs
+                or evaluation.snapshot_id != prepared.snapshot.snapshot_id
+                or evaluation.rubric_id != rubric.id
+                or evaluation.rubric_version != rubric.version
+                or evaluation.plan_fingerprint != prepared.plan_fingerprint
+            ):
+                raise ValueError(
+                    "atomic question evaluation does not match the verified assessment plan"
+                )
     source_sha = prepared.snapshot.source.sha256
     resolved_display_name = display_name or document_display_name(document.source_path)
     verified_coverage = (
@@ -443,6 +611,7 @@ def begin_remediation_prepared(
         plan_fingerprint=prepared.plan_fingerprint,
         source_snapshot=prepared.snapshot,
         criterion_evaluations=evaluation_artifacts,
+        question_mode=question_mode,
         rubric_name=prepared.rubric_name,
         rubric_id=rubric.id,
         rubric_version=rubric.version,
@@ -470,10 +639,30 @@ def begin_remediation_prepared(
         client_models=client_models or [],
         checkpoint_policy=checkpoint_policy or CheckpointPolicy(),
     )
+    if question_mode == "atomic_assertion":
+        state.question_queue = _plan_question_queue(state, assessment)
+        _decorate_edge_questions(
+            state.question_queue,
+            assessment,
+            resolved_display_name,
+            verified_coverage,
+        )
+        state.report = build_narrative_report(
+            assessment,
+            state.question_queue[:1],
+            run_count=len(runs),
+            expected_run_count=rubric.extraction_runs,
+        )
+        state.report.evaluation_revision = 0
     return _turn(state)
 
 
 def _checkpoint_reason(state: RemediationState) -> str | None:
+    if any(
+        pending.question_mode == "atomic_assertion"
+        for pending in state.pending_answers
+    ):
+        return "atomic_answer_recorded"
     if state.pending_answers and not state.question_queue:
         return "queue_exhausted"
     if len(state.pending_answers) >= state.checkpoint_policy.max_pending_answers:
@@ -526,11 +715,20 @@ def record_answer(
     answer: str,
     *,
     force_checkpoint: bool = False,
+    question_id: str | None = None,
+    evaluation_revision: int | None = None,
 ) -> RemediationTurn:
     assert_current_source(state)
     if not state.question_queue:
         raise ValueError("no remediation question remains")
     question = state.question_queue[0]
+    if question.question_kind == "atomic_assertion":
+        if question_id != question.question_id:
+            raise ValueError("question_id does not match the current atomic question")
+        if evaluation_revision != question.evaluation_revision:
+            raise ValueError(
+                "evaluation_revision does not match the current atomic question"
+            )
     answer_id = uuid.uuid4().hex
     supplemental = SupplementalAnswer(
         answer_id=answer_id,
@@ -544,10 +742,22 @@ def record_answer(
         answer_id=answer_id,
         target_field=question.target_field,
         answer=supplemental,
+        question_id=question.question_id,
+        question_mode=question.question_kind,
+        plan_id=question.plan_id,
+        assertion_id=question.assertion_id,
+        issue_ids=question.issue_ids,
+        evaluation_revision=question.evaluation_revision,
     )
     updated = state.model_copy(deep=True)
     updated.pending_answers.append(pending)
     updated.question_queue.pop(0)
+    if question.question_kind == "atomic_assertion":
+        updated.question_queue = [
+            item
+            for item in updated.question_queue
+            if item.criterion_id != question.criterion_id
+        ]
     return _turn(updated, forced_reason="explicit" if force_checkpoint else None)
 
 
@@ -572,18 +782,46 @@ def apply_checkpoint(
     delta = parse_delta_extraction(delta_json)
     patches = verify_delta_extraction(plan, delta, rubric, state.pending_answers)
     affected_criteria = list(dict.fromkeys(patch.criterion_id for patch in patches))
-    runs = merge_criterion_patches(state.runs, patches)
-    credited_block_ids = {
-        field.evidence.source_block_id
+    atomic_targets = {
+        (pending.answer.criterion_id, pending.target_field)
+        for pending in state.pending_answers
+        if pending.question_mode == "atomic_assertion"
+        and pending.target_field is not None
+    }
+    runs = merge_criterion_patches(
+        state.runs,
+        patches,
+        append_fields=atomic_targets,
+    )
+    credited_targets = {
+        (
+            field.evidence.source_block_id,
+            patch.criterion_id,
+            field.name,
+        )
         for patch in patches
         for field in patch.fields
         if field.evidence is not None and field.evidence.source_block_id is not None
     }
+    credited_block_ids = {item[0] for item in credited_targets}
     credited = [
         pending
         for pending in state.pending_answers
         if (
-            f"supplemental-answer-{pending.answer_id}" in credited_block_ids
+            (
+                pending.question_mode == "atomic_assertion"
+                and pending.target_field is not None
+                and (
+                    f"supplemental-answer-{pending.answer_id}",
+                    pending.answer.criterion_id,
+                    pending.target_field,
+                )
+                in credited_targets
+            )
+            or (
+                pending.question_mode != "atomic_assertion"
+                and f"supplemental-answer-{pending.answer_id}" in credited_block_ids
+            )
             or (
                 pending.answer.requirement_quote is not None
                 and pending.answer.edge_case_id is not None
@@ -600,6 +838,27 @@ def apply_checkpoint(
         *state.verified_answers,
         *(pending.answer for pending in credited),
     ]
+    atomic_resolutions = list(state.atomic_resolutions)
+    for pending in credited:
+        if (
+            pending.question_mode == "atomic_assertion"
+            and pending.question_id is not None
+            and pending.plan_id is not None
+            and pending.assertion_id is not None
+            and pending.issue_ids
+        ):
+            atomic_resolutions.append(
+                AtomicIssueResolution(
+                    question_id=pending.question_id,
+                    plan_id=pending.plan_id,
+                    criterion_id=pending.answer.criterion_id,
+                    assertion_id=pending.assertion_id,
+                    issue_ids=pending.issue_ids,
+                    answer_id=pending.answer_id,
+                    source_evaluation_revision=pending.evaluation_revision or 0,
+                    resolved_evaluation_revision=state.evaluation_revision + 1,
+                )
+            )
     assessment, report, deep_review, queue, coverage = _snapshot(
         state,
         runs,
@@ -608,6 +867,7 @@ def apply_checkpoint(
         list(dict.fromkeys([*state.assessment.remediated_criteria, *affected_criteria])),
         state.delta_extraction_count + 1,
         patches,
+        atomic_resolutions,
     )
     updated = state.model_copy(
         update={
@@ -622,6 +882,7 @@ def apply_checkpoint(
                 *state.uncredited_answers,
                 *(pending.answer for pending in uncredited),
             ],
+            "atomic_resolutions": atomic_resolutions,
             "edge_case_coverage": coverage,
             "revision": state.revision + 1,
             "evaluation_revision": state.evaluation_revision + 1,

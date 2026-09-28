@@ -9,8 +9,9 @@ amount of other work can lift the band while a gate is failed.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from forge.rubric.models import Rubric, Verdict
 from forge.score.engine import BAND_ORDER, Assessment, _band_for
@@ -41,6 +42,9 @@ def level0_question(base_question: str, display_name: str | None) -> str:
 
 
 class Question(BaseModel):
+    question_id: str | None = None
+    question_kind: Literal["legacy_field", "atomic_assertion"] = "legacy_field"
+    plan_id: str | None = None
     criterion_id: str
     criterion_name: str
     target_field: str | None
@@ -62,6 +66,12 @@ class Question(BaseModel):
     requirement_quote: str | None = None
     edge_case_id: str | None = None
     taxonomy_version: str | None = None
+    assertion_id: str | None = None
+    status: Literal["gap", "contradictory", "ambiguous"] | None = None
+    issue_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    generation_mode: Literal["deterministic_template"] | None = None
+    score_effect: Literal["none"] | None = None
     evaluation_revision: int = 0
 
 

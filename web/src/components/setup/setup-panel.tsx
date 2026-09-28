@@ -39,6 +39,9 @@ export function SetupPanel() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [uploaded, setUploaded] = useState<UploadResponse | null>(null);
   const [discovery, setDiscovery] = useState<ReviewDiscovery | null>(null);
+  const [questionMode, setQuestionMode] = useState<
+    "legacy_field" | "atomic_assertion"
+  >("atomic_assertion");
 
   const canSubmit = Boolean(llm && file);
 
@@ -47,8 +50,10 @@ export function SetupPanel() {
     const assessment = await createAssessment({
       document_id: document.document_id,
       llm,
+      operation_id: crypto.randomUUID(),
       supplemental_answers: [],
       start_new: startNew,
+      question_mode: questionMode,
     });
     setAssessment(assessment);
     toast.success("Assessment complete", {
@@ -179,6 +184,52 @@ export function SetupPanel() {
         </CardHeader>
         <CardContent>
           <DocumentUpload file={file} onChange={setFile} />
+        </CardContent>
+      </Card>
+
+      <div className="py-4" />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">3. Choose review depth</CardTitle>
+          <CardDescription>
+            Atomic review checks each decision independently. Field review is
+            faster and preserves the original workflow.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            aria-pressed={questionMode === "atomic_assertion"}
+            onClick={() => setQuestionMode("atomic_assertion")}
+            className={`rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              questionMode === "atomic_assertion"
+                ? "border-primary bg-primary/5"
+                : "hover:bg-muted/60"
+            }`}
+          >
+            <span className="block text-sm font-medium">Atomic review</span>
+            <span className="mt-1 block text-xs text-muted-foreground">
+              Recommended. Runs exhaustive three-pass decision checks and
+              verifies each answer immediately.
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={questionMode === "legacy_field"}
+            onClick={() => setQuestionMode("legacy_field")}
+            className={`rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              questionMode === "legacy_field"
+                ? "border-primary bg-primary/5"
+                : "hover:bg-muted/60"
+            }`}
+          >
+            <span className="block text-sm font-medium">Field review</span>
+            <span className="mt-1 block text-xs text-muted-foreground">
+              Lower cost. Reviews broad rubric fields and batches up to five
+              answers per checkpoint.
+            </span>
+          </button>
         </CardContent>
       </Card>
 

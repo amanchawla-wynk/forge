@@ -1,0 +1,61 @@
+{
+  "artifact_type": "forge.atomic_production_exercise.v1",
+  "authority": "owner_approved_synthetic",
+  "calibration_eligible": false,
+  "score_effect": "none",
+  "provider_calls": 0,
+  "token_usage": {
+    "available": false,
+    "reason": "Deterministic exercise reused frozen verified evaluations and performed no provider inference."
+  },
+  "cases": [
+    {
+      "case_id": "micro_dramas",
+      "source": "sampleDoc/Micro Dramas.docx",
+      "review_session_id": "rvw_fea3e57c2bcbc76577ddd403cf275311087d2a5af7c058dbb550611b185e197b",
+      "workflow_state": "complete",
+      "initial_band": "not_a_prd",
+      "final_band": "ready_to_build",
+      "questions": 64,
+      "atomic_questions": 41,
+      "legacy_fallback_questions": 23,
+      "legacy_fallback_rate": 0.3594,
+      "credited_answers": 64,
+      "uncredited_answers": 0,
+      "answer_closure_rate": 1.0,
+      "attempted_issue_ids": 41,
+      "resolved_issue_ids": 41,
+      "issue_closure_rate": 1.0,
+      "transport_retries": 65,
+      "delta_extractions": 45,
+      "delta_input_characters": 268991,
+      "verified_answers": 64,
+      "output": "sampleDoc/.forge/production-exercise-release-v2/micro_dramas-atomic-revised.docx",
+      "elapsed_ms": 77026.63
+    },
+    {
+      "case_id": "rush_playback_quality_selection_guide",
+      "source": "sampleDoc/Rush_Playback_Quality_Selection_Guide.docx",
+      "review_session_id": "rvw_93241295bb993c5881d3d63f7c3dc39ee3bb9b75fe7b3f4e1a2563d63f51baaf",
+      "workflow_state": "complete",
+      "initial_band": "not_a_prd",
+      "final_band": "ready_to_build",
+      "questions": 65,
+      "atomic_questions": 42,
+      "legacy_fallback_questions": 23,
+      "legacy_fallback_rate": 0.3538,
+      "credited_answers": 65,
+      "uncredited_answers": 0,
+      "answer_closure_rate": 1.0,
+      "attempted_issue_ids": 42,
+      "resolved_issue_ids": 42,
+      "issue_closure_rate": 1.0,
+      "transport_retries": 66,
+      "delta_extractions": 45,
+      "delta_input_characters": 273656,
+      "verified_answers": 65,
+      "output": "sampleDoc/.forge/production-exercise-release-v2/rush_playback_quality_selection_guide-atomic-revised.docx",
+      "elapsed_ms": 44378.82
+    }
+  ]
+}

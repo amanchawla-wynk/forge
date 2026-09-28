@@ -50,6 +50,7 @@ class UploadResponse(BaseModel):
 class AssessRequest(BaseModel):
     document_id: str
     llm: LLMConfig
+    operation_id: str | None = Field(default=None, min_length=1)
     rubric_name: str = "prd"
     supplemental_answers: list[SupplementalAnswer] = Field(default_factory=list)
     product_context: list[ProductContextTerm] = Field(default_factory=list)
@@ -57,6 +58,7 @@ class AssessRequest(BaseModel):
     # resubmitted on every remediation turn so question phrasing cannot drift.
     framing: str | None = None
     edge_case_coverage: EdgeCaseCoverageLedger | None = None
+    question_mode: Literal["legacy_field", "atomic_assertion"] = "legacy_field"
     start_new: bool = False
 
 
@@ -69,6 +71,7 @@ class DashboardAssessmentResponse(AssessmentResponse):
     session_version: int | None = None
     workflow_state: WorkflowState | None = None
     next_action: NextAction | None = None
+    question_mode: Literal["legacy_field", "atomic_assertion"] = "legacy_field"
 
 
 class RecordAnswerRequest(BaseModel):
@@ -76,6 +79,8 @@ class RecordAnswerRequest(BaseModel):
     operation_id: str = Field(min_length=1)
     answer: str = Field(min_length=1)
     force_checkpoint: bool = False
+    question_id: str | None = None
+    evaluation_revision: int | None = Field(default=None, ge=0)
 
 
 class DashboardRemediationTurn(BaseModel):

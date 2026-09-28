@@ -252,6 +252,13 @@ class ReviewSessionRepository:
                     FOREIGN KEY (review_session_id) REFERENCES review_sessions(review_session_id)
                       ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS review_creation_operations (
+                    review_session_id TEXT PRIMARY KEY,
+                    request_digest TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS review_events (
                     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     review_session_id TEXT NOT NULL,
@@ -505,6 +512,98 @@ class ReviewSessionRepository:
             )
         return str(row["result_json"])
 
+    def reserve_creation(
+        self, review_session_id: str, request_digest: str
+    ) -> str:
+        now = time.time()
+        with self._lock, closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT request_digest, status, updated_at "
+                    "FROM review_creation_operations WHERE review_session_id = ?",
+                    (review_session_id,),
+                ).fetchone()
+                if row is not None:
+                    if row["request_digest"] != request_digest:
+                        raise ValueError(
+                            "creation operation was already used with a different request payload"
+                        )
+                    session_exists = connection.execute(
+                        "SELECT 1 FROM review_sessions WHERE review_session_id = ?",
+                        (review_session_id,),
+                    ).fetchone()
+                    if row["status"] == "completed" or session_exists is not None:
+                        connection.execute(
+                            "UPDATE review_creation_operations SET status = 'completed', "
+                            "updated_at = ? WHERE review_session_id = ?",
+                            (now, review_session_id),
+                        )
+                        connection.commit()
+                        return "completed"
+                    if row["updated_at"] >= now - 900:
+                        raise ValueError(
+                            "review creation is already in progress; retry later "
+                            "with the same operation_id"
+                        )
+                    connection.execute(
+                        "UPDATE review_creation_operations SET updated_at = ? "
+                        "WHERE review_session_id = ?",
+                        (now, review_session_id),
+                    )
+                    connection.commit()
+                    return "reserved"
+                connection.execute(
+                    "INSERT INTO review_creation_operations "
+                    "(review_session_id, request_digest, status, created_at, updated_at) "
+                    "VALUES (?, ?, 'pending', ?, ?)",
+                    (review_session_id, request_digest, now, now),
+                )
+                connection.commit()
+                return "reserved"
+            except BaseException:
+                connection.rollback()
+                raise
+
+    def complete_creation(
+        self, review_session_id: str, request_digest: str
+    ) -> None:
+        with self._lock, closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT request_digest FROM review_creation_operations "
+                    "WHERE review_session_id = ?",
+                    (review_session_id,),
+                ).fetchone()
+                if row is None or row["request_digest"] != request_digest:
+                    raise ValueError("creation operation identity does not match")
+                if connection.execute(
+                    "SELECT 1 FROM review_sessions WHERE review_session_id = ?",
+                    (review_session_id,),
+                ).fetchone() is None:
+                    raise ValueError("creation operation has no persisted review")
+                connection.execute(
+                    "UPDATE review_creation_operations SET status = 'completed', "
+                    "updated_at = ? WHERE review_session_id = ?",
+                    (time.time(), review_session_id),
+                )
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+
+    def cancel_creation(
+        self, review_session_id: str, request_digest: str
+    ) -> None:
+        with self._lock, closing(self._connect()) as connection:
+            connection.execute(
+                "DELETE FROM review_creation_operations "
+                "WHERE review_session_id = ? AND request_digest = ? "
+                "AND status = 'pending'",
+                (review_session_id, request_digest),
+            )
+
     def operation_record(
         self,
         review_session_id: str,
@@ -692,6 +791,21 @@ class ReviewSessionRepository:
                     or row["normalized_hash"] != state.normalized_hash
                 ):
                     raise ValueError("review session snapshot identity is immutable")
+                stored_state = json.loads(row["state_json"])
+                stored_question_mode = stored_state.get(
+                    "question_mode", "legacy_field"
+                )
+                if stored_question_mode != state.question_mode:
+                    raise ValueError("review session question mode is immutable")
+                if state.state_schema_version < 4:
+                    state = state.model_copy(
+                        update={
+                            "state_schema_version": 4,
+                            "question_mode": "legacy_field",
+                            "atomic_resolutions": [],
+                        },
+                        deep=True,
+                    )
                 pending = connection.execute(
                     "SELECT operation_id FROM review_operations "
                     "WHERE review_session_id = ? AND status = 'pending' "

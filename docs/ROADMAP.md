@@ -344,15 +344,31 @@
   passes: 100% consensus coverage, 92% relevance, 92% answerability, 96%
   smallest-scope, 100% assumption safety, zero unsupported output, zero
   duplicates, and stable repeated preparation. This is not human validation or
-  calibration, so live integration remains blocked.
+  calibration. The owner accepted it as the production engineering authority in
+  D-072 while retaining expert-baseline provenance.
+- Promoted deterministic atomic questions into an explicit production review
+  mode (D-072). State schema v4 persists immutable mode and atomic resolution
+  history; questions and pending answers retain exact plan/assertion/issue and
+  evaluation-revision bindings; verified checkpoints close all bound issue ids;
+  migrated and omitted-mode reviews remain legacy.
+- Extended atomic production reviews to the optional dashboard (D-073). The
+  runner performs one model call per run, batch, and criterion, parses every
+  strict submission, verifies the complete batch, persists consolidated native
+  evaluations, and binds browser answers to question/revision identity. The UI
+  exposes atomic review as the recommended explicit depth and retains field
+  review as the lower-cost compatibility option.
+- Completed the two-internal-PRD atomic production exercise (D-073). Both reviews
+  reached durable completion after integrated DOCX materialization and final
+  no-supplemental reassessment. Across 129 questions, 129 answers and 83 atomic
+  issue ids closed; 131 operation replays were idempotent; legacy fallback was
+  35.66%. Provider token/model-latency metrics were unavailable because the
+  deterministic harness made no provider calls. Exact results and limitations
+  are in `reports/atomic production exercise 2026-09-28.md`.
 
 ## Current Build
 
-- Run a blinded human review against the frozen 0.9.1 question set without
-  changing thresholds or wording based on those labels.
-- Define durable `question_id`/`issue_id` answer binding, same-answer multi-gap
-  closure, evaluation-revision behavior, and state migration before considering
-  any replacement of legacy field questions.
+- Accept future human review only as optional calibration evidence; it is not a
+  production gate or roadmap blocker.
 - Compare legacy-parser and Docling shadow evaluations on the same snapshot
   fixtures after the bounded Docling adapter exists, using evidence ids and
   canonical spans rather than raw output text as the comparison unit.
@@ -375,9 +391,6 @@
   background execution, or multi-party approvals become real requirements; both
   frameworks were measured and deferred in D-050.
 - Grow the regression corpus with a multi-batch document.
-- Run the checkpointed one-question remediation loop on both internal PRDs,
-  materialize approved answers into new copies, and measure score,
-  extraction-agreement, token, and latency movement.
 - Resolve the documented Rush quality contradictions: Data Saver precedence,
   flag-off behavior, and the 360p fallback algorithm.
 - Evaluate local OCR output as separately provenanced, quote-verifiable evidence.

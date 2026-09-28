@@ -145,6 +145,9 @@ export interface Assessment {
 }
 
 export interface Question {
+  question_id: string | null;
+  question_kind: "legacy_field" | "atomic_assertion";
+  plan_id: string | null;
   criterion_id: string;
   criterion_name: string;
   target_field: string | null;
@@ -162,6 +165,12 @@ export interface Question {
   requirement_quote: string | null;
   edge_case_id: string | null;
   taxonomy_version: string | null;
+  assertion_id: string | null;
+  status: "gap" | "contradictory" | "ambiguous" | null;
+  issue_ids: string[];
+  evidence_ids: string[];
+  generation_mode: "deterministic_template" | null;
+  score_effect: "none" | null;
   evaluation_revision: number;
 }
 
@@ -324,6 +333,7 @@ export interface AssessmentResponse {
   session_version?: number | null;
   workflow_state?: WorkflowState | null;
   next_action?: NextAction | null;
+  question_mode: "legacy_field" | "atomic_assertion";
 }
 
 export type WorkflowState =

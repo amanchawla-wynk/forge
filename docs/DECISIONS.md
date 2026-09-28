@@ -1524,3 +1524,67 @@ supersedes the old one.
   to remediation sessions yet. First complete blinded human review and specify
   durable question identity, answer binding, evaluation revision, same-answer
   multi-gap closure, and state migration.
+
+## D-072: Promote Deterministic Atomic Questions Under Owner Authority
+
+- Status: implemented for domain and MCP production reviews; scoring unchanged
+- Decision: Treat the frozen owner-approved synthetic 0.9.1 gate as the
+  production engineering authority for deterministic atomic questions. Human
+  review is not and will not become a production prerequisite. Preserve the
+  provenance as synthetic/owner-approved and the calibration status as
+  `expert_baseline`; do not describe the rubric or questions as human-calibrated.
+  Add immutable per-review `legacy_field` or `atomic_assertion` mode. Atomic mode
+  requires Forge to reverify an exhaustive native evaluation batch, persist the
+  consolidated artifacts, render deterministic templates only, bind each answer
+  to the queue-head question/plan/assertion/issue set and evaluation revision,
+  and checkpoint immediately. A resolution is recorded only when the existing
+  delta verifier credits the answer. All issue ids bound to that atomic question
+  close together; unrelated issues do not. Omitted mode and pre-v4 sessions stay
+  legacy, and legacy questions remain the fallback when no eligible atomic target
+  exists.
+- Reason: The frozen gate passed every predeclared mechanical and semantic
+  threshold, and the product owner explicitly designated AI agents plus the owner
+  as the review authority. Waiting for an unavailable external reviewer would be
+  policy theater rather than an engineering safeguard. Durable identity,
+  revision, closure, migration, and retry boundaries provide the actual runtime
+  safety needed for production use.
+- Consequence: Native evaluations remain score-neutral and cannot change fields,
+  weights, gates, bands, or consumer readiness. `Question`, pending-answer, and
+  remediation state gain additive atomic identity; state schema advances to 4;
+  SQLite rejects question-mode mutation and continues storing evaluations in its
+  content-addressed artifact tables. MCP `start_prd_review` accepts explicit
+  atomic mode plus the evaluation batch, and `record_prd_answer` accepts the
+  required question/revision binding. The optional dashboard remains legacy until
+  its runner can produce and verify the same exhaustive batch. Future human data
+  may calibrate the expert baseline but cannot revoke owner-approved production
+  availability by absence.
+
+## D-073: Complete Dashboard Parity And Measure The Production Lifecycle
+
+- Status: implemented and measured; scoring unchanged
+- Decision: Extend explicit `atomic_assertion` creation to the optional dashboard
+  only through the same exhaustive native verification boundary used by MCP. The
+  dashboard performs independent model calls for every run, batch, and criterion,
+  parses strict submissions, assembles a complete `CriterionEvaluationBatch`, and
+  calls `verify_evaluation_batch`; only consolidated verified evaluations enter
+  remediation. The browser sends the displayed question id and evaluation
+  revision, never issue or assertion authority. Add operation-bound deterministic
+  review identity to MCP and dashboard creation so exact retries return the
+  existing review. Measure the production lifecycle with a reproducible,
+  no-provider harness over both internal DOCX PRDs.
+- Reason: D-072 made the domain and MCP path production-capable but left the
+  optional dashboard on legacy questions and left closure/retry/fallback costs
+  unmeasured. Adapter parity requires identical verification rather than trusting
+  dashboard model output. A deterministic exercise isolates lifecycle integrity
+  from provider variance and makes unavailable token metrics explicit.
+- Consequence: The dashboard now offers atomic review as the recommended explicit
+  depth and legacy field review as the lower-cost compatibility option. Exact
+  target-field credit is required before atomic closure; resolution identity is
+  criterion-scoped; pre-v4 state upcasts on write. The two-document exercise
+  completed 129 questions with 100% answer closure, 83/83 issue-id closure, 131
+  idempotent operation replays, and a 35.66% legacy fallback rate. Generated DOCX
+  copies remain ignored local artifacts. The result does not establish human
+  calibration or real-world score uplift because answers and extraction were
+  synthetic. Provider tokens and model latency remain unmeasured because the
+  harness deliberately made zero provider calls. See
+  `reports/atomic production exercise 2026-09-28.md` and its JSON companion.

@@ -101,7 +101,7 @@ evaluation origin that can be translated back into score inputs. Native
 semantic evaluations are shadow audit records and cannot affect verdicts,
 weights, gates, bands, consumer readiness, or remediation priority. New review
 sessions transactionally persist their per-run artifacts in content-addressed
-SQLite rows linked to the review; state schema version `3` reloads those records
+  SQLite rows linked to the review; state schema version `4` reloads those records
 without embedding them in mutable `state_json`.
 
 `forge.evaluate.diagnostics` is an offline-only measurement boundary. Its suites
@@ -127,8 +127,8 @@ allows Phase 3 question generation only for strict-majority native assertion
 outcomes with verified evidence ids, bounded validation, deterministic fallback,
 and no score effect.
 
-`forge.questions` implements the first Phase 3 vertical slice without entering
-the live remediation path. `prepare_question_generation` ranks eligible native
+`forge.questions` implements the Phase 3 planning and rendering boundary.
+`prepare_question_generation` ranks eligible native
 assertion outcomes deterministically and packages only verified issue/evidence
 ids, exact evidence spans, the assertion description, and its rubric-owned
 answer contract. The host may return one strict object containing the plan id,
@@ -138,8 +138,10 @@ the verified context, and contains no quoted phrase absent from exact evidence;
 otherwise it emits the answer contract as a fallback. `apply_prd_evaluation`
 exposes the preparation, while `apply_prd_question_generation` re-verifies the
 entire submitted evaluation batch before applying the completion. The resulting
-artifact is marked shadow and `score_effect: none`; `Question`, remediation
-queues, sessions, dashboards, and scoring do not consume it.
+artifact remains marked shadow and `score_effect: none` for compatibility.
+Explicit atomic review mode adapts its deterministic-template form into the live
+`Question` envelope; generated wording is not consumed. Scoring still does not
+read native evaluation artifacts.
 
 `forge.questions.diagnostics` replays frozen completions through the production
 apply boundary and measures accepted generation, fallback, unsupported-text
@@ -239,7 +241,8 @@ sensitive data. Acceptance subject, open-question identity, alternative
 disposition, and assumption identity are explicit prerequisite evidence sources.
 Only declared prerequisites may contextualize a gap; an arbitrary same-field
 sibling cannot. These additions remain reversible through the untouched legacy
-extraction adapter and are not persisted into remediation state.
+extraction adapter. Verified consolidated evaluations are persisted through the
+existing content-addressed review artifact tables when atomic mode is selected.
 
 The implemented deterministic path retains every verified field claim before
 batch consolidation, records quote-local source offsets, and supplements model
@@ -346,6 +349,9 @@ The target public surface is:
   evaluation prompts for optional shadow review.
 - `apply_prd_evaluation`: verify and conservatively consolidate those shadow
   evaluations without changing readiness scoring.
+- `start_prd_review`: may select immutable `atomic_assertion` mode and submit the
+  exhaustive evaluation batch for re-verification; omitted mode remains
+  `legacy_field` for existing clients and migrated sessions.
 - `write_prd_revision`: materialize approved supplemental answers into a new
   editable PRD copy without overwriting the source.
 - `complete_prd_review`: verify extraction from the exact generated revision,
@@ -371,17 +377,37 @@ The target public surface is:
 Assessment responses return one highest-impact remediation question. The
 checkpoint workflow keeps a `RemediationState` containing the source/rubric identity,
 immutable verified baseline extraction, last assessment, framing, queued
-questions, accepted answers, pending answers, and any edge-case ledger. MCP and
+questions, accepted answers, pending answers, immutable question mode, atomic
+resolution history, and any edge-case ledger. MCP and
 dashboard adapters persist that state in local SQLite behind a Forge-owned opaque
 review id; the domain workflow remains independent of transport and model provider.
 
-Submitting an answer records the user's exact text and returns the next queued
+Submitting a legacy answer records the user's exact text and returns the next queued
 question without invoking extraction or scoring. By default, a checkpoint runs
 after five answers, after collecting the remaining fields of a failed gate, or
 when the user requests a rescore. The checkpoint sends only pending answer
 blocks and affected criterion schemas to the connected model. It verifies and
 merges criterion-local patches, deterministically rescores, and replaces the
 question queue. The unchanged source PRD is not re-extracted.
+
+Submitting an atomic answer additionally requires the queue-head `question_id`
+and `evaluation_revision`. Forge copies server-selected plan, assertion, issue,
+and evidence identity into the pending answer; caller-supplied target identity is
+never authoritative. Atomic answers force a checkpoint. If the delta verifier
+credits the answer, Forge appends an immutable issue-resolution record and filters
+the resolved assertion when rebuilding deterministic targets. Uncredited answers
+close nothing. Repository updates reject attempts to change question mode.
+
+The optional dashboard reaches the same boundary without MCP sampling. For an
+explicit atomic review, its LiteLLM runner prepares a separate bounded prompt for
+every run, source batch, and rubric criterion; parses every strict criterion
+submission; assembles complete fragments and runs; and calls
+`verify_evaluation_batch` before passing only consolidated native evaluations to
+remediation. The browser never supplies assertion or issue authority. It submits
+only the displayed question id and evaluation revision, and the server copies the
+remaining identity from the durable queue head. Dashboard and MCP creation calls
+also support operation-bound deterministic review identity so exact retries return
+the original session rather than creating a parallel review.
 
 Every scored projection carries one `evaluation_revision`. Applying a
 checkpoint increments it and rebuilds the assessment, narrative report,

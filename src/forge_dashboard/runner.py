@@ -11,7 +11,17 @@ resolvers do for an MCP client.
 from __future__ import annotations
 
 import asyncio
+from typing import Literal
 
+from forge.evaluate.batch import (
+    CriterionEvaluationBatch,
+    CriterionEvaluationFragment,
+    CriterionEvaluationRun,
+    VerifiedCriterionEvaluations,
+    prepare_evaluation_item,
+    verify_evaluation_batch,
+)
+from forge.evaluate.prompt import parse_criterion_evaluation
 from forge.extract.batch import ExtractionBatch, ExtractionFragment, ExtractionRun
 from forge.extract.parse import parse_extraction
 from forge.extract.prompt import build_extraction_prompt
@@ -57,6 +67,7 @@ async def run_assessment(
     framing: str | None = None,
     display_name: str | None = None,
     edge_case_coverage: EdgeCaseCoverageLedger | None = None,
+    question_mode: Literal["legacy_field", "atomic_assertion"] = "legacy_field",
 ) -> AssessmentResponse:
     response, _ = await run_assessment_with_remediation(
         source_path,
@@ -67,6 +78,7 @@ async def run_assessment(
         framing=framing,
         display_name=display_name,
         edge_case_coverage=edge_case_coverage,
+        question_mode=question_mode,
     )
     return response
 
@@ -81,8 +93,14 @@ async def run_assessment_with_remediation(
     framing: str | None = None,
     display_name: str | None = None,
     edge_case_coverage: EdgeCaseCoverageLedger | None = None,
+    question_mode: Literal["legacy_field", "atomic_assertion"] = "legacy_field",
 ) -> tuple[AssessmentResponse, RemediationState | None]:
     answers = supplemental_answers or []
+    if question_mode == "atomic_assertion" and answers:
+        raise ValueError(
+            "atomic dashboard reviews cannot start with supplemental answers; "
+            "start or resume a durable review instead"
+        )
     context = product_context or []
     prepared = prepare_assessment(
         source_path, rubric_name, answers, context
@@ -139,6 +157,11 @@ async def run_assessment_with_remediation(
         # answer collection and checkpoint deltas instead.
         return response, None
     extraction_json = batch.model_dump_json()
+    verified_evaluations = (
+        await _run_criterion_evaluations(prepared, llm)
+        if question_mode == "atomic_assertion"
+        else None
+    )
     turn = begin_remediation_prepared(
         prepared,
         extraction_json,
@@ -146,8 +169,75 @@ async def run_assessment_with_remediation(
         edge_case_coverage=coverage,
         client_models=models,
         display_name=display_name,
+        question_mode=question_mode,
+        criterion_evaluations=(
+            verified_evaluations.consolidated
+            if verified_evaluations is not None
+            else None
+        ),
+    )
+    response = response.model_copy(
+        update={
+            "assessment": turn.state.assessment,
+            "report": turn.state.report,
+            "deep_review": turn.state.deep_review,
+            "next_question": turn.next_question,
+            "framing": turn.state.framing,
+            "edge_case_coverage": turn.state.edge_case_coverage,
+            "criterion_evaluations": turn.state.criterion_evaluations,
+        },
+        deep=True,
     )
     return response, turn.state
+
+
+async def _run_criterion_evaluations(
+    prepared, llm: LLMConfig
+) -> VerifiedCriterionEvaluations:
+    coordinates: list[tuple[int, str, str]] = []
+    prompts: list[str] = []
+    for run_index in range(1, prepared.rubric.extraction_runs + 1):
+        for batch in prepared.batches:
+            for criterion in prepared.rubric.criteria:
+                item = prepare_evaluation_item(
+                    prepared,
+                    criterion.id,
+                    batch.id,
+                    run_index=run_index,
+                )
+                coordinates.append((run_index, batch.id, criterion.id))
+                prompts.append(item.prompt)
+    completions = await _gather_completions(llm, prompts)
+    submissions: dict[tuple[int, str], list] = {}
+    for coordinate, completion in zip(coordinates, completions, strict=True):
+        run_index, batch_id, criterion_id = coordinate
+        try:
+            parsed = parse_criterion_evaluation(completion.text)
+        except ValueError as error:
+            raise ExtractionFailed(str(error)) from error
+        if parsed.criterion_id != criterion_id:
+            raise ExtractionFailed(
+                "criterion evaluation returned criterion_id "
+                f"{parsed.criterion_id!r}; expected {criterion_id!r}"
+            )
+        submissions.setdefault((run_index, batch_id), []).append(parsed)
+    submitted = CriterionEvaluationBatch(
+        runs=[
+            CriterionEvaluationRun(
+                run_index=run_index,
+                fragments=[
+                    CriterionEvaluationFragment(
+                        batch_id=batch.id,
+                        plan_fingerprint=prepared.plan_fingerprint,
+                        criteria=submissions[(run_index, batch.id)],
+                    )
+                    for batch in prepared.batches
+                ],
+            )
+            for run_index in range(1, prepared.rubric.extraction_runs + 1)
+        ]
+    )
+    return verify_evaluation_batch(prepared, submitted)
 
 
 async def _detect_framing(

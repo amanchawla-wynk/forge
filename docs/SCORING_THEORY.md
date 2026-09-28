@@ -56,21 +56,22 @@ extractions into the new representation and back produces identical verdicts,
 gates, bands, confidence, and consumer views. Changing score semantics requires
 a later documented decision and validation against independent labels.
 
-Phase 3 may derive one shadow question target from native evaluations only when
+Phase 3 may derive atomic question targets from native evaluations only when
 the assertion has complete source coverage, at least three independent runs, a
 strict-majority `gap`, `ambiguous`, or `contradictory` outcome, and verified issue
 identities. Gate, criterion weight, consumer count, stable criterion id, issue
-status, and rubric assertion order determine the target without model input.
-The model returns only a plan id, one allowed issue id, and one question. Python
-rejects new substantive vocabulary and any quoted phrase not found verbatim in
-the target's verified evidence. Invalid output uses the assertion's rubric-owned
-answer contract. This artifact is a shadow diagnostic: it cannot replace the
-live remediation question, alter scoring, or become supplemental evidence.
-Offline diagnostics separately measure whether safe wording is useful. Synthetic
+status, and rubric assertion order determine targets without model input.
+Production atomic mode renders the rubric/evidence template deterministically;
+model-authored wording remains diagnostic only. Each live question carries its
+question, plan, assertion, issue, evidence, generation, and evaluation-revision
+identity. A verified answer may become supplemental evidence through the normal
+delta path, but the native evaluation itself cannot alter scoring. Offline
+diagnostics separately measure whether safe wording is useful. Synthetic
 proxy labels assess relevance, answerability, single-decision scope, and
 unsupported assumptions without affecting scores or establishing calibration.
-The first internal study passed lexical grounding but failed scope and assumption
-checks, so assertion-level shadow targets cannot yet replace field remediation.
+The frozen 0.9.1 owner-approved gate passed its predeclared engineering thresholds;
+this authorizes explicit production atomic mode while retaining
+`calibration_status: expert_baseline`.
 Gap descriptions are bounded audit content and do not participate in semantic
 identity or scoring. Repeated runs may retain different descriptions for the same
 gap id. The enriched internal rerun showed that this detail improves relevance
@@ -204,6 +205,13 @@ failed gate or an explicit user request also triggers one. At that point Forge
 processes the pending answers together, rescoring before it rebuilds the queue.
 This preserves a focused interaction without repeatedly sending an unchanged
 long PRD to a model.
+
+Atomic mode is stricter: one answer is accepted only for the current persisted
+`question_id` and `evaluation_revision`, and it forces an immediate checkpoint.
+Only a delta-credited answer closes its bound issue ids. The resolution record
+retains the question, plan, assertion, issue set, answer, source revision, and
+resolved revision. The review's question mode is immutable; state created before
+schema version 4 loads as `legacy_field`.
 
 Checkpoint processing is incremental. The initial verified extraction remains
 an immutable baseline bound to the source hash and rubric version. A delta

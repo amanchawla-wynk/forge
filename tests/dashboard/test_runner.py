@@ -13,6 +13,7 @@ from forge_dashboard.runner import (
     ExtractionFailed,
     _classify_edge_case_coverage,
     run_assessment,
+    run_assessment_with_remediation,
 )
 
 
@@ -41,6 +42,61 @@ def _empty_extraction() -> str:
             ]
         }
     )
+
+
+def _gap_evaluation(criterion_id: str) -> str:
+    criterion = load_rubric("prd").criterion(criterion_id)
+    return json.dumps(
+        {
+            "criterion_id": criterion.id,
+            "gaps": [
+                {
+                    "gap_ref": f"gap-{assertion.id}",
+                    "assertion_ids": [assertion.id],
+                    "kind": "missing_decision",
+                    "missing_decision": assertion.answer_contract,
+                }
+                for assertion in criterion.evaluation.assertions
+                if assertion.required
+            ],
+        }
+    )
+
+
+@pytest.mark.anyio
+async def test_atomic_dashboard_review_verifies_exhaustive_evaluations(tmp_path, monkeypatch):
+    path = tmp_path / "prd.md"
+    path.write_text("An incomplete product note.")
+    evaluation_prompts: list[str] = []
+
+    async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
+        if prompt.startswith("Evaluate one PRD criterion"):
+            evaluation_prompts.append(prompt)
+            criterion_id = prompt.split("CRITERION:\n", 1)[1].split(":", 1)[0]
+            return Completion(
+                text=_gap_evaluation(criterion_id), model="claude-evaluator"
+            )
+        if "OPTIONS:" in prompt:
+            return Completion(text='{"framing": 1}', model="claude-framing")
+        return Completion(text=_empty_extraction(), model="claude-extractor")
+
+    monkeypatch.setattr("forge_dashboard.runner.call_model", fake_call_model)
+
+    response, state = await run_assessment_with_remediation(
+        str(path),
+        _llm_config(),
+        question_mode="atomic_assertion",
+    )
+
+    rubric = load_rubric("prd")
+    assert len(evaluation_prompts) == rubric.extraction_runs * len(rubric.criteria)
+    assert state is not None
+    assert state.question_mode == "atomic_assertion"
+    assert len(state.criterion_evaluations) == len(rubric.criteria)
+    assert all(item.origin == "criterion_evaluation" for item in state.criterion_evaluations)
+    assert all(item.coverage_complete for item in state.criterion_evaluations)
+    assert state.question_queue[0].question_kind == "atomic_assertion"
+    assert response.next_question == state.question_queue[0]
 
 
 @pytest.mark.anyio
@@ -121,6 +177,36 @@ async def test_run_assessment_includes_accumulated_supplemental_answers(
         "Finance administrators cannot export invoices." in prompt
         for prompt in extraction_prompts
     )
+
+
+@pytest.mark.anyio
+async def test_atomic_dashboard_review_rejects_compatibility_supplemental_answers(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "prd.md"
+    path.write_text("A short product note.")
+
+    async def unexpected_call(*args, **kwargs):
+        raise AssertionError("invalid atomic request must fail before inference")
+
+    monkeypatch.setattr("forge_dashboard.runner.call_model", unexpected_call)
+    from forge.ingest.models import SupplementalAnswer
+
+    with pytest.raises(
+        ValueError,
+        match="atomic dashboard reviews cannot start with supplemental answers",
+    ):
+        await run_assessment(
+            str(path),
+            _llm_config(),
+            question_mode="atomic_assertion",
+            supplemental_answers=[
+                SupplementalAnswer(
+                    criterion_id="problem_statement",
+                    answer="Finance administrators cannot export invoices.",
+                )
+            ],
+        )
 
 
 @pytest.mark.anyio

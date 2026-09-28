@@ -138,6 +138,78 @@ def _assert_document_matches_session(stored: StoredDocument, session) -> None:
     assert_current_source(session.state, str(stored_path))
 
 
+def _assessment_from_session(
+    stored: StoredDocument, document_id: str, session
+) -> DashboardAssessmentResponse:
+    turn = turn_for_session(session)
+    disputed = [
+        item.criterion_id
+        for item in session.state.assessment.criteria
+        if item.agreement < 1.0
+    ]
+    warnings = [
+        "This assessment uses Forge's source-backed cross-industry expert "
+        "baseline. It is operational without company data, but has not been "
+        "validated against your organization's independent reviewer labels."
+    ]
+    snapshot = session.state.source_snapshot
+    if snapshot is not None and snapshot.document.visual_assets:
+        warnings.append(
+            f"Detected {len(snapshot.document.visual_assets)} visual asset(s). Text "
+            "found in the document may receive credit, but image and diagram "
+            "interpretation is advisory and is not yet included in scoring."
+        )
+    if session.state.run_count < session.state.expected_run_count:
+        warnings.append(
+            f"Only {session.state.run_count} extraction run(s) were supplied; "
+            f"the rubric expects {session.state.expected_run_count}. Confidence "
+            "does not measure test/retest stability."
+        )
+    if session.state.product_context:
+        warnings.append(
+            "Product terminology context was used only to disambiguate names; "
+            "it was excluded from evidence verification and scoring."
+        )
+    if session.state.edge_case_coverage is not None:
+        coverage = session.state.edge_case_coverage
+        covered = sum(
+            item.status.value in {"covered", "not_applicable"}
+            for item in coverage.items
+        )
+        warnings.append(
+            f"Edge-case taxonomy {coverage.taxonomy_version} covers {covered} of "
+            f"{len(coverage.items)} applicable/assessed pairs. Completeness is "
+            "relative to this declared taxonomy, not every imaginable edge case."
+        )
+    return DashboardAssessmentResponse(
+        source_path=stored.filename,
+        document_id=document_id,
+        report=session.state.report,
+        deep_review=session.state.deep_review,
+        assessment=session.state.assessment,
+        next_question=turn.next_question,
+        supplemental_answers=session.state.verified_answers,
+        run_count=session.state.run_count,
+        expected_run_count=session.state.expected_run_count,
+        disputed_criteria=disputed,
+        recommended_additional_runs=max(0, 5 - session.state.run_count)
+        if disputed
+        else 0,
+        client_models=session.state.client_models,
+        product_context=session.state.product_context,
+        framing=session.state.framing,
+        edge_case_coverage=session.state.edge_case_coverage,
+        warnings=warnings,
+        criterion_evaluations=session.state.criterion_evaluations,
+        extraction_errors=[],
+        review_session_id=session.review_session_id,
+        session_version=session.session_version,
+        workflow_state=session.workflow_state,
+        next_action=session.next_action,
+        question_mode=session.state.question_mode,
+    )
+
+
 def _generated_from_metadata(metadata: dict[str, object]) -> StoredDocument:
     try:
         return StoredDocument(
@@ -199,12 +271,57 @@ async def create_assessment(request: AssessRequest) -> DashboardAssessmentRespon
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
+    review_session_id = None
+    creation_digest = None
+    if request.operation_id is not None:
+        creation_digest = operation_digest(
+            "dashboard_start_review",
+            {
+                "source_sha256": hashlib.sha256(stored.path.read_bytes()).hexdigest(),
+                "rubric_name": request.rubric_name,
+                "provider": request.llm.provider,
+                "model": request.llm.model,
+                "supplemental_answers": [
+                    item.model_dump(mode="json")
+                    for item in request.supplemental_answers
+                ],
+                "product_context": [
+                    item.model_dump(mode="json") for item in request.product_context
+                ],
+                "framing": request.framing,
+                "edge_case_coverage": (
+                    request.edge_case_coverage.model_dump(mode="json")
+                    if request.edge_case_coverage is not None
+                    else None
+                ),
+                "question_mode": request.question_mode,
+            },
+        )
+        review_session_id = "rvw_" + hashlib.sha256(
+            f"{request.operation_id}\x00{creation_digest}".encode("utf-8")
+        ).hexdigest()
+        try:
+            existing = _reviews().get(review_session_id)
+        except KeyError:
+            pass
+        else:
+            _assert_document_matches_session(stored, existing)
+            return _assessment_from_session(stored, request.document_id, existing)
+        reservation = _reviews().reserve_creation(
+            review_session_id, creation_digest
+        )
+        if reservation == "completed":
+            existing = _reviews().get(review_session_id)
+            return _assessment_from_session(stored, request.document_id, existing)
+
     matches = _reviews().find(
         str(stored.path),
         workspace_root=str(_store.root),
         rubric_name=request.rubric_name,
     )
     if any(match.compatible for match in matches) and not request.start_new:
+        if review_session_id is not None and creation_digest is not None:
+            _reviews().cancel_creation(review_session_id, creation_digest)
         raise HTTPException(
             status_code=409,
             detail=(
@@ -223,29 +340,53 @@ async def create_assessment(request: AssessRequest) -> DashboardAssessmentRespon
             framing=request.framing,
             edge_case_coverage=request.edge_case_coverage,
             display_name=Path(stored.filename).stem,
+            question_mode=request.question_mode,
         )
     except ExtractionFailed as error:
+        if review_session_id is not None and creation_digest is not None:
+            _reviews().cancel_creation(review_session_id, creation_digest)
         raise HTTPException(status_code=502, detail=str(error)) from error
     except (ValueError, FileNotFoundError) as error:
+        if review_session_id is not None and creation_digest is not None:
+            _reviews().cancel_creation(review_session_id, creation_digest)
         raise HTTPException(status_code=400, detail=str(error)) from error
 
     # Never return the server's local filesystem path to the browser.
     payload = result.model_dump()
     payload["source_path"] = stored.filename
     payload["document_id"] = stored.document_id
-    session = (
-        _reviews().create(
-            remediation_state,
-            workspace_root=str(_store.root),
-            client_binding=ClientBinding(client_name="dashboard"),
+    try:
+        session = (
+            _reviews().create(
+                remediation_state,
+                review_session_id=review_session_id,
+                workspace_root=str(_store.root),
+                client_binding=ClientBinding(client_name="dashboard"),
+            )
+            if remediation_state is not None
+            else None
         )
-        if remediation_state is not None
-        else None
-    )
+        if (
+            session is not None
+            and review_session_id is not None
+            and creation_digest is not None
+        ):
+            _reviews().complete_creation(review_session_id, creation_digest)
+        elif review_session_id is not None and creation_digest is not None:
+            _reviews().cancel_creation(review_session_id, creation_digest)
+    except BaseException:
+        if review_session_id is not None and creation_digest is not None:
+            _reviews().cancel_creation(review_session_id, creation_digest)
+        raise
+    if session is not None:
+        return _assessment_from_session(stored, stored.document_id, session)
     payload["review_session_id"] = session.review_session_id if session else None
     payload["session_version"] = session.session_version if session else None
     payload["workflow_state"] = session.workflow_state if session else None
     payload["next_action"] = session.next_action if session else None
+    payload["question_mode"] = (
+        session.state.question_mode if session else request.question_mode
+    )
     return DashboardAssessmentResponse.model_validate(payload)
 
 
@@ -309,37 +450,7 @@ def resume_document_review(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except (ValueError, FileNotFoundError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    turn = turn_for_session(session)
-    disputed = [
-        item.criterion_id
-        for item in session.state.assessment.criteria
-        if item.agreement < 1.0
-    ]
-    return DashboardAssessmentResponse(
-        source_path=stored.filename,
-        document_id=document_id,
-        report=session.state.report,
-        deep_review=session.state.deep_review,
-        assessment=session.state.assessment,
-        next_question=turn.next_question,
-        supplemental_answers=session.state.verified_answers,
-        run_count=session.state.run_count,
-        expected_run_count=session.state.expected_run_count,
-        disputed_criteria=disputed,
-        recommended_additional_runs=max(0, 5 - session.state.run_count)
-        if disputed
-        else 0,
-        client_models=session.state.client_models,
-        product_context=session.state.product_context,
-        framing=session.state.framing,
-        edge_case_coverage=session.state.edge_case_coverage,
-        warnings=[],
-        extraction_errors=[],
-        review_session_id=session.review_session_id,
-        session_version=session.session_version,
-        workflow_state=session.workflow_state,
-        next_action=session.next_action,
-    )
+    return _assessment_from_session(stored, document_id, session)
 
 
 @app.post(
@@ -355,6 +466,8 @@ def record_remediation_answer(
             {
                 "answer": request.answer,
                 "force_checkpoint": request.force_checkpoint,
+                "question_id": request.question_id,
+                "evaluation_revision": request.evaluation_revision,
             },
         )
         cached = _reviews().operation_result(
@@ -364,16 +477,20 @@ def record_remediation_answer(
             request_digest=request_digest,
         )
         if cached is not None:
-            session = _reviews().get(session_id)
-            return DashboardRemediationTurn(
-                review_session_id=session_id,
-                session_version=session.session_version,
-                workflow_state=session.workflow_state,
-                next_action=session.next_action,
-                turn=DashboardTurnData.model_validate(
-                    turn_for_session(session).model_dump(exclude={"state"})
-                ),
-            )
+            try:
+                return DashboardRemediationTurn.model_validate_json(cached)
+            except ValueError:
+                # Compatibility with operation rows written before D-073.
+                session = _reviews().get(session_id)
+                return DashboardRemediationTurn(
+                    review_session_id=session_id,
+                    session_version=session.session_version,
+                    workflow_state=session.workflow_state,
+                    next_action=session.next_action,
+                    turn=DashboardTurnData.model_validate(
+                        turn_for_session(session).model_dump(exclude={"state"})
+                    ),
+                )
         session = _reviews().get(session_id)
         _require_workflow(
             session.workflow_state,
@@ -384,15 +501,27 @@ def record_remediation_answer(
             session.state,
             request.answer,
             force_checkpoint=request.force_checkpoint,
+            question_id=request.question_id,
+            evaluation_revision=request.evaluation_revision,
+        )
+        workflow_state = workflow_for_turn(turn)
+        operation_response = DashboardRemediationTurn(
+            review_session_id=session_id,
+            session_version=request.session_version + 1,
+            workflow_state=workflow_state,
+            next_action=next_action_for(workflow_state),
+            turn=DashboardTurnData.model_validate(
+                turn.model_dump(exclude={"state"})
+            ),
         )
         session = _reviews().update(
             session_id,
             expected_version=request.session_version,
             operation_id=request.operation_id,
             state=turn.state,
-            workflow_state=workflow_for_turn(turn),
+            workflow_state=workflow_state,
             event_type="answer_recorded",
-            result_json=turn.model_dump_json(),
+            result_json=operation_response.model_dump_json(),
             event_payload={"checkpoint_due": turn.checkpoint_due},
             operation_type="record_answer",
             request_digest=request_digest,
@@ -401,15 +530,17 @@ def record_remediation_answer(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except (ValueError, FileNotFoundError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    return DashboardRemediationTurn(
-        review_session_id=session_id,
-        session_version=session.session_version,
-        workflow_state=session.workflow_state,
-        next_action=session.next_action,
-        turn=DashboardTurnData.model_validate(
-            turn_for_session(session).model_dump(exclude={"state"})
-        ),
+    persisted = _reviews().operation_result(
+        session_id,
+        request.operation_id,
+        operation_type="record_answer",
+        request_digest=request_digest,
     )
+    if persisted is None:
+        raise HTTPException(
+            status_code=500, detail="recorded answer operation was not persisted"
+        )
+    return DashboardRemediationTurn.model_validate_json(persisted)
 
 
 @app.post(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 
@@ -65,7 +66,7 @@ from forge.remediation import (
     RemediationTurn,
     apply_checkpoint,
     assert_current_source,
-    begin_remediation,
+    begin_remediation_prepared,
     current_turn,
     prepare_checkpoint,
     record_answer,
@@ -149,7 +150,10 @@ mcp = MCPServer(
         "complete every returned batch yourself, and submit the fragments to "
         "score_prd_extraction. Call prepare_prd_evaluation and "
         "apply_prd_evaluation only when a score-neutral "
-        "Phase 2 semantic audit is requested; its output never changes scoring. "
+        "Phase 2 semantic audit or atomic production review is requested; its "
+        "output never changes scoring. For an atomic review, submit the same "
+        "complete evaluation_json to start_prd_review with "
+        "question_mode='atomic_assertion'. "
         "If that result includes question_generation, complete its bounded prompt "
         "and pass the same evaluation_json plus the completion to "
         "apply_prd_question_generation. The result is a shadow diagnostic, not "
@@ -1241,33 +1245,120 @@ def _start_review(
     client_version: str | None = None,
     host_conversation_id: str | None = None,
     start_new: bool = False,
+    question_mode: Literal["legacy_field", "atomic_assertion"] = "legacy_field",
+    evaluation_json: str | dict[str, Any] | None = None,
+    operation_id: str | None = None,
 ) -> RemediationSessionResponse:
-    matches = _reviews_store().find(
-        source_path, workspace_root=workspace_root, rubric_name=rubric_name
-    )
-    if any(match.compatible for match in matches) and not start_new:
-        raise ValueError(
-            "matching reviews exist; ask the user to resume one, start a new "
-            "review, or cancel. Set start_new=true only after that explicit choice."
+    review_session_id = None
+    creation_digest = None
+    if operation_id is not None:
+        if not operation_id.strip():
+            raise ValueError("operation_id must not be blank")
+        evaluation_identity = (
+            json.dumps(evaluation_json, sort_keys=True, separators=(",", ":"))
+            if isinstance(evaluation_json, dict)
+            else evaluation_json
         )
-    turn = begin_remediation(
-        source_path,
-        extraction_json,
-        rubric_name=rubric_name,
-        product_context=product_context,
-        framing=framing,
-        edge_case_coverage=edge_case_coverage,
-        checkpoint_policy=CheckpointPolicy(max_pending_answers=checkpoint_size),
-    )
-    session = _reviews_store().create(
-        turn.state,
-        workspace_root=workspace_root,
-        client_binding=ClientBinding(
-            client_name=client_name,
-            client_version=client_version,
-            host_conversation_id=host_conversation_id,
-        ),
-    )
+        creation_digest = operation_digest(
+            "start_review",
+            {
+                "source_sha256": hashlib.sha256(
+                    Path(source_path).expanduser().resolve().read_bytes()
+                ).hexdigest(),
+                "extraction_sha256": hashlib.sha256(
+                    extraction_json.encode("utf-8")
+                ).hexdigest(),
+                "evaluation_sha256": hashlib.sha256(
+                    (evaluation_identity or "").encode("utf-8")
+                ).hexdigest(),
+                "rubric_name": rubric_name,
+                "product_context": [
+                    item.model_dump(mode="json") for item in product_context or []
+                ],
+                "framing": framing,
+                "edge_case_coverage": (
+                    edge_case_coverage.model_dump(mode="json")
+                    if edge_case_coverage is not None
+                    else None
+                ),
+                "checkpoint_size": checkpoint_size,
+                "workspace_root": workspace_root,
+                "client_name": client_name,
+                "client_version": client_version,
+                "host_conversation_id": host_conversation_id,
+                "question_mode": question_mode,
+            },
+        )
+        review_session_id = "rvw_" + hashlib.sha256(
+            f"{operation_id}\x00{creation_digest}".encode("utf-8")
+        ).hexdigest()
+        try:
+            existing = _reviews_store().get(review_session_id)
+        except KeyError:
+            pass
+        else:
+            assert_current_source(existing.state, source_path)
+            return _session_response(existing)
+        reservation = _reviews_store().reserve_creation(
+            review_session_id, creation_digest
+        )
+        if reservation == "completed":
+            return _session_response(_reviews_store().get(review_session_id))
+    try:
+        matches = _reviews_store().find(
+            source_path, workspace_root=workspace_root, rubric_name=rubric_name
+        )
+        if any(match.compatible for match in matches) and not start_new:
+            raise ValueError(
+                "matching reviews exist; ask the user to resume one, start a new "
+                "review, or cancel. Set start_new=true only after that explicit choice."
+            )
+        prepared = prepare_assessment(
+            source_path,
+            rubric_name,
+            [],
+            product_context,
+        )
+        criterion_evaluations = None
+        if question_mode == "atomic_assertion":
+            if evaluation_json is None:
+                raise ValueError(
+                    "atomic_assertion question mode requires evaluation_json"
+                )
+            evaluation_payload: object = evaluation_json
+            if isinstance(evaluation_payload, str):
+                evaluation_payload = json.loads(evaluation_payload)
+                if isinstance(evaluation_payload, str):
+                    evaluation_payload = json.loads(evaluation_payload)
+            submitted = CriterionEvaluationBatch.model_validate(evaluation_payload)
+            criterion_evaluations = verify_evaluation_batch(
+                prepared, submitted
+            ).consolidated
+        turn = begin_remediation_prepared(
+            prepared,
+            extraction_json,
+            framing=framing,
+            edge_case_coverage=edge_case_coverage,
+            checkpoint_policy=CheckpointPolicy(max_pending_answers=checkpoint_size),
+            question_mode=question_mode,
+            criterion_evaluations=criterion_evaluations,
+        )
+        session = _reviews_store().create(
+            turn.state,
+            review_session_id=review_session_id,
+            workspace_root=workspace_root,
+            client_binding=ClientBinding(
+                client_name=client_name,
+                client_version=client_version,
+                host_conversation_id=host_conversation_id,
+            ),
+        )
+        if review_session_id is not None and creation_digest is not None:
+            _reviews_store().complete_creation(review_session_id, creation_digest)
+    except BaseException:
+        if review_session_id is not None and creation_digest is not None:
+            _reviews_store().cancel_creation(review_session_id, creation_digest)
+        raise
     return _session_response(session)
 
 
@@ -1286,11 +1377,16 @@ def start_prd_review(
     client_version: str | None = None,
     host_conversation_id: str | None = None,
     start_new: bool = False,
+    question_mode: Literal["legacy_field", "atomic_assertion"] = "legacy_field",
+    evaluation_json: str | dict[str, Any] | None = None,
+    operation_id: str | None = None,
 ) -> RemediationSessionResponse:
     """Start a review after discovery and an explicit user choice.
 
-    If an exact review already exists, `start_new` must be true. This ensures a
-    new conversation cannot silently create or attach to a parallel review.
+    If an exact review already exists, `start_new` must be true. Atomic mode also
+    requires an exhaustive evaluation batch, which Forge reverifies before use.
+    This ensures a new conversation cannot silently create or attach to a
+    parallel review.
     """
     return _start_review(
         source_path,
@@ -1305,6 +1401,9 @@ def start_prd_review(
         client_version,
         host_conversation_id,
         start_new,
+        question_mode,
+        evaluation_json,
+        operation_id,
     )
 
 
@@ -1323,6 +1422,9 @@ def begin_prd_remediation(
     client_version: str | None = None,
     host_conversation_id: str | None = None,
     start_new: bool = False,
+    question_mode: Literal["legacy_field", "atomic_assertion"] = "legacy_field",
+    evaluation_json: str | dict[str, Any] | None = None,
+    operation_id: str | None = None,
 ) -> RemediationSessionResponse:
     """Compatibility name for `start_prd_review`; use the explicit tool name."""
     return _start_review(
@@ -1338,6 +1440,9 @@ def begin_prd_remediation(
         client_version,
         host_conversation_id,
         start_new,
+        question_mode,
+        evaluation_json,
+        operation_id,
     )
 
 
@@ -1349,16 +1454,24 @@ def record_prd_answer(
     operation_id: str,
     answer: str,
     force_checkpoint: bool = False,
+    question_id: str | None = None,
+    evaluation_revision: int | None = None,
 ) -> RemediationSessionResponse:
     """Record one answer without invoking a model or rescoring the PRD.
 
     `session_version` must match the value from the previous response, and
     `operation_id` must be unique per answer so a retried call cannot record
-    the same answer twice.
+    the same answer twice. Atomic questions also require the exact `question_id`
+    and `evaluation_revision` returned with the current next question.
     """
     request_digest = operation_digest(
         "record_answer",
-        {"answer": answer, "force_checkpoint": force_checkpoint},
+        {
+            "answer": answer,
+            "force_checkpoint": force_checkpoint,
+            "question_id": question_id,
+            "evaluation_revision": evaluation_revision,
+        },
     )
     cached = _reviews_store().operation_result(
         review_session_id,
@@ -1367,23 +1480,49 @@ def record_prd_answer(
         request_digest=request_digest,
     )
     if cached is not None:
-        return _session_response(_reviews_store().get(review_session_id))
+        try:
+            return RemediationSessionResponse.model_validate_json(cached)
+        except ValueError:
+            # Compatibility with operation rows written before D-073.
+            return _session_response(_reviews_store().get(review_session_id))
     session = _reviews_store().get(review_session_id)
     _require_state(session, "record_prd_answer")
-    turn = record_answer(session.state, answer, force_checkpoint=force_checkpoint)
+    turn = record_answer(
+        session.state,
+        answer,
+        force_checkpoint=force_checkpoint,
+        question_id=question_id,
+        evaluation_revision=evaluation_revision,
+    )
+    workflow_state = workflow_for_turn(turn)
+    operation_response = RemediationSessionResponse(
+        review_session_id=review_session_id,
+        session_version=session_version + 1,
+        workflow_state=workflow_state,
+        next_action=next_action_for(workflow_state),
+        turn=turn,
+    )
     updated = _reviews_store().update(
         review_session_id,
         expected_version=session_version,
         operation_id=operation_id,
         state=turn.state,
-        workflow_state=workflow_for_turn(turn),
+        workflow_state=workflow_state,
         event_type="answer_recorded",
-        result_json=turn.model_dump_json(),
+        result_json=operation_response.model_dump_json(),
         event_payload={"checkpoint_due": turn.checkpoint_due},
         operation_type="record_answer",
         request_digest=request_digest,
     )
-    return _session_response(updated)
+    persisted = _reviews_store().operation_result(
+        review_session_id,
+        operation_id,
+        operation_type="record_answer",
+        request_digest=request_digest,
+    )
+    if persisted is None:
+        raise RuntimeError("recorded answer operation was not persisted")
+    return RemediationSessionResponse.model_validate_json(persisted)
 
 
 @mcp.tool(structured_output=True)

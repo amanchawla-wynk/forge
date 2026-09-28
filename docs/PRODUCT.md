@@ -48,13 +48,13 @@ judge of whether the product bet itself is strategically correct.
   implementation impact, and names the decision required from the author.
   Findings remain advisory until their evidence and evaluation model have been
   validated; the claim graph never assigns readiness points.
-- A conversational question loop that shows exactly one highest-impact missing
-  field at a time while collecting several answers before a checkpoint. At a
-  checkpoint, Forge processes only the pending answers and affected criteria,
-  verifies them as supplemental evidence, and rescores without re-extracting
-  the unchanged PRD. Question wording adapts to whether the document describes
-  a problem fix, opportunity bet, compliance mandate, or migration; the framing
-  changes phrasing only and cannot affect the score.
+- A conversational question loop with an immutable per-review mode. Legacy
+  reviews ask one missing field at a time. Atomic reviews use deterministic
+  questions derived from exhaustive, three-run, verified criterion evaluations
+  and fall back to legacy field questions where no eligible atomic issue exists.
+  Atomic answers are bound to the exact question, plan, issue set, and evaluation
+  revision, then checkpointed immediately. Both modes verify answers as
+  supplemental evidence and use the unchanged deterministic scoring path.
 - Evidence-anchored edge-case discovery that can turn a broad missing-state
   category into one concrete question about a verified requirement, without
   allowing the model to write the question or alter scoring.
@@ -65,7 +65,9 @@ judge of whether the product bet itself is strategically correct.
 - An optional local dashboard (FastAPI + Next.js) exposing the same
   assessment and remediation loop for users without an MCP client. It is a
   documented exception to "no API key": see `docs/DECISIONS.md` D-033. It is
-  not installed by default and is not a hosted service.
+  not installed by default and is not a hosted service. New dashboard reviews
+  explicitly choose atomic depth (recommended, exhaustive, higher cost) or the
+  lower-cost legacy field loop.
 
 ## Non-goals For V1
 
@@ -95,8 +97,11 @@ judge of whether the product bet itself is strategically correct.
    downstream consequence, and states the resolution needed. The deterministic
    readiness band, consumer breakdown, failed gates, confidence, and audit
    follow as supporting information.
-7. Forge records the exact answer as pending supplemental evidence and asks the
-   next queued question without re-extracting the unchanged PRD.
+7. Forge records the exact answer as pending supplemental evidence. For an
+   atomic question it also verifies the current question id and evaluation
+   revision, suppresses same-criterion siblings, and requires a checkpoint;
+   legacy questions may continue through the bounded queue without re-extracting
+   the unchanged PRD.
 8. After a bounded checkpoint (default five answers, completion of a failed
    gate, or an explicit user request), Forge extracts only the pending answers
    against their named criteria, verifies their quotes, merges the resulting
@@ -145,12 +150,12 @@ When available, the caller may supply product terminology derived from an
 implementation repository or other background. It helps the extractor resolve
 names and aliases but is never treated as PRD evidence or credited by scoring.
 
-An optional shadow semantic audit may evaluate each criterion against all source
+An optional score-neutral semantic audit may evaluate each criterion against all source
 batches and retain multiple supporting, conflicting, ambiguous, or missing
 evidence sets. Forge verifies every cited block and span and reports conservative
-run agreement. This audit is deliberately separate from readiness scoring while
-its evidence alignment and hard-negative behavior are being validated; it cannot
-raise or lower a band or trigger a gate.
+run agreement. A review may explicitly use strict-majority atomic issues from
+that verified audit as its production question source. The audit remains separate
+from readiness scoring and cannot raise or lower a band or trigger a gate.
 
 ## Review Coverage
 
@@ -186,7 +191,7 @@ tune the expert baseline for organization-specific policy and language:
 - Several real PRDs spanning strong, average, and weak quality.
 - Human labels and reviewer rationale, ideally from multiple roles.
 
-When reviewers are temporarily unavailable, public first-party guidance and
-source-verified AI proxy labels may improve the expert baseline's content
-coverage. They do not satisfy any input above and must remain visibly separate
-from internal human labels.
+Public first-party guidance, source-verified AI proxy labels, and owner-approved
+synthetic gates may improve the expert baseline's content coverage. They remain
+visibly separate from human labels and do not make the rubric calibrated. Human
+labels are optional calibration inputs, not a prerequisite for production use.

@@ -15,6 +15,12 @@ class PendingDeltaAnswer(BaseModel):
     answer_id: str
     target_field: str | None = None
     answer: SupplementalAnswer
+    question_id: str | None = None
+    question_mode: str = "legacy_field"
+    plan_id: str | None = None
+    assertion_id: str | None = None
+    issue_ids: list[str] = Field(default_factory=list)
+    evaluation_revision: int | None = Field(default=None, ge=0)
 
 
 class DeltaExtractionPlan(BaseModel):
@@ -209,8 +215,11 @@ def verify_delta_extraction(
 def merge_criterion_patches(
     runs: list[list[CriterionExtraction]],
     patches: list[CriterionExtraction],
+    *,
+    append_fields: set[tuple[str, str]] | None = None,
 ) -> list[list[CriterionExtraction]]:
     patch_by_id = {patch.criterion_id: patch for patch in patches}
+    append_fields = append_fields or set()
     merged_runs: list[list[CriterionExtraction]] = []
     for run in runs:
         merged_run = [item.model_copy(deep=True) for item in run]
@@ -232,6 +241,34 @@ def merge_criterion_patches(
                     target_fields[patch_field.name] = replacement
                 else:
                     index = target.fields.index(existing)
+                    if (criterion_id, patch_field.name) in append_fields:
+                        existing_values = (
+                            existing.value
+                            if isinstance(existing.value, list)
+                            else [existing.value]
+                        )
+                        replacement_values = (
+                            replacement.value
+                            if isinstance(replacement.value, list)
+                            else [replacement.value]
+                        )
+                        replacement.value = [
+                            value
+                            for value in [*existing_values, *replacement_values]
+                            if value is not None
+                        ]
+                        existing_evidence = existing.item_evidence or (
+                            [existing.evidence] if existing.evidence is not None else []
+                        )
+                        replacement_evidence = replacement.item_evidence or (
+                            [replacement.evidence]
+                            if replacement.evidence is not None
+                            else []
+                        )
+                        replacement.item_evidence = [
+                            *existing_evidence,
+                            *replacement_evidence,
+                        ]
                     target.fields[index] = replacement
                     target_fields[patch_field.name] = replacement
             if patch.not_applicable and patch.not_applicable_reason:

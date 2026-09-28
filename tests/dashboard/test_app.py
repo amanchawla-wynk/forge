@@ -32,6 +32,25 @@ def _empty_extraction() -> str:
     )
 
 
+def _gap_evaluation(criterion_id: str) -> str:
+    criterion = load_rubric("prd").criterion(criterion_id)
+    return json.dumps(
+        {
+            "criterion_id": criterion.id,
+            "gaps": [
+                {
+                    "gap_ref": f"gap-{assertion.id}",
+                    "assertion_ids": [assertion.id],
+                    "kind": "missing_decision",
+                    "missing_decision": assertion.answer_contract,
+                }
+                for assertion in criterion.evaluation.assertions
+                if assertion.required
+            ],
+        }
+    )
+
+
 def _client(monkeypatch) -> TestClient:
     async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
         return Completion(text=_empty_extraction(), model="claude-test")
@@ -112,6 +131,108 @@ def test_upload_and_assess_round_trip(monkeypatch) -> None:
     assert payload["client_models"] == ["claude-test", "claude-test", "claude-test"]
     # The API key must never be echoed back.
     assert "sk-test-not-real" not in assessment.text
+
+
+def test_atomic_dashboard_review_requires_bound_idempotent_answer(monkeypatch) -> None:
+    calls = 0
+
+    async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
+        nonlocal calls
+        calls += 1
+        if prompt.startswith("Evaluate one PRD criterion"):
+            criterion_id = prompt.split("CRITERION:\n", 1)[1].split(":", 1)[0]
+            return Completion(
+                text=_gap_evaluation(criterion_id), model="claude-evaluator"
+            )
+        if "OPTIONS:" in prompt:
+            return Completion(text='{"framing": 1}', model="claude-framing")
+        return Completion(text=_empty_extraction(), model="claude-extractor")
+
+    monkeypatch.setattr("forge_dashboard.runner.call_model", fake_call_model)
+    monkeypatch.setattr("forge_dashboard.app.call_model", fake_call_model)
+    client = TestClient(app)
+    uploaded = client.post(
+        "/api/documents",
+        files={"file": ("atomic.md", b"An incomplete product note.", "text/markdown")},
+    ).json()
+    assessment_request = {
+        "document_id": uploaded["document_id"],
+        "operation_id": "start-atomic-dashboard-review",
+        "question_mode": "atomic_assertion",
+        "llm": {
+            "provider": "anthropic",
+            "model": "claude-test",
+            "api_key": "sk-test",
+        },
+    }
+    assessment = client.post(
+        "/api/assessments",
+        json=assessment_request,
+    )
+
+    assert assessment.status_code == 200
+    payload = assessment.json()
+    question = payload["next_question"]
+    assert payload["question_mode"] == "atomic_assertion"
+    assert question["question_kind"] == "atomic_assertion"
+    calls_after_creation = calls
+    replayed_assessment = client.post(
+        "/api/assessments", json=assessment_request
+    )
+    assert replayed_assessment.status_code == 200
+    assert replayed_assessment.json() == payload
+    assert calls == calls_after_creation
+
+    missing = client.post(
+        f"/api/remediation/{payload['review_session_id']}/answers",
+        json={
+            "session_version": payload["session_version"],
+            "operation_id": "missing-binding",
+            "answer": "Viewers cannot discover short-form stories.",
+        },
+    )
+    assert missing.status_code == 400
+    assert "question_id" in missing.json()["detail"]
+
+    answer_request = {
+        "session_version": payload["session_version"],
+        "operation_id": "bound-answer",
+        "answer": "Viewers cannot discover short-form stories.",
+        "question_id": question["question_id"],
+        "evaluation_revision": question["evaluation_revision"],
+    }
+    recorded = client.post(
+        f"/api/remediation/{payload['review_session_id']}/answers",
+        json=answer_request,
+    )
+    replayed = client.post(
+        f"/api/remediation/{payload['review_session_id']}/answers",
+        json=answer_request,
+    )
+
+    assert recorded.status_code == 200
+    assert replayed.status_code == 200
+    assert recorded.json() == replayed.json()
+    assert recorded.json()["workflow_state"] == "checkpoint_required"
+
+    import forge_dashboard.app as dashboard
+
+    session = dashboard._reviews().get(payload["review_session_id"])
+    dashboard._reviews().update(
+        payload["review_session_id"],
+        expected_version=session.session_version,
+        operation_id="advance-after-answer",
+        state=session.state,
+        workflow_state=WorkflowState.AWAITING_DELTA_EXTRACTION,
+        event_type="test_advanced",
+        result_json="{}",
+    )
+    late_retry = client.post(
+        f"/api/remediation/{payload['review_session_id']}/answers",
+        json=answer_request,
+    )
+    assert late_retry.status_code == 200
+    assert late_retry.json() == recorded.json()
 
 
 def test_recording_answer_does_not_call_model_until_checkpoint(monkeypatch) -> None:

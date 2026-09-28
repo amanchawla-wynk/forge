@@ -140,6 +140,11 @@ export function ConversationPanel() {
         sessionVersion,
         crypto.randomUUID(),
         answer.trim(),
+        false,
+        question.question_kind === "atomic_assertion" ? question.question_id : null,
+        question.question_kind === "atomic_assertion"
+          ? question.evaluation_revision
+          : null,
       );
       appendHistory({ question, answer: answer.trim() });
       setAnswer("");
@@ -243,8 +248,9 @@ export function ConversationPanel() {
           Remediation loop
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          One question at a time. Answers are processed together at a checkpoint,
-          avoiding repeated full-document extraction.
+          {question?.question_kind === "atomic_assertion"
+            ? "One verified decision at a time. Each answer is checked at an immediate checkpoint."
+            : "One question at a time. Answers are processed together at a checkpoint, avoiding repeated full-document extraction."}
         </p>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-4">
@@ -271,6 +277,11 @@ export function ConversationPanel() {
                 <Badge variant="outline" className="text-[10px]">
                   {question.criterion_name}
                 </Badge>
+                {question.question_kind === "atomic_assertion" && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    Atomic {question.status ?? "decision"}
+                  </Badge>
+                )}
                 {question.is_gate && (
                   <Badge
                     variant="outline"

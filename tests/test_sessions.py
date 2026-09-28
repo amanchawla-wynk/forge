@@ -68,7 +68,7 @@ def test_session_survives_a_process_restart(prd, tmp_path, repo):
     assert loaded.state.source_sha256 == turn.state.source_sha256
     assert loaded.workflow_state is WorkflowState.AWAITING_ANSWER
     assert loaded.next_action.type == "ask_question"
-    assert loaded.state.state_schema_version == 3
+    assert loaded.state.state_schema_version == 4
     assert loaded.state.evaluation_revision == 0
     assert loaded.state.source_snapshot == turn.state.source_snapshot
     assert loaded.state.source_snapshot.document.snapshot_id == turn.state.snapshot_id
@@ -240,6 +240,97 @@ def test_loaded_v1_pending_answer_recovers_nested_identity_before_checkpoint(
     result = apply_checkpoint(loaded.state, json.dumps(delta))
     assert result.credited_answer_ids == [answer_id]
     assert result.state.verified_answers[0].answer_id == answer_id
+
+
+def test_atomic_question_identity_survives_restart(prd, tmp_path, repo):
+    turn = begin_remediation(str(prd), _empty_problem_extraction())
+    state = turn.state.model_copy(deep=True)
+    state.question_mode = "atomic_assertion"
+    state.question_queue[0] = state.question_queue[0].model_copy(
+        update={
+            "question_id": "1" * 64,
+            "question_kind": "atomic_assertion",
+            "plan_id": "2" * 64,
+            "assertion_id": "problem",
+            "status": "gap",
+            "issue_ids": ["3" * 64],
+            "evidence_ids": [],
+            "generation_mode": "deterministic_template",
+            "score_effect": "none",
+        }
+    )
+    created = repo.create(state)
+
+    loaded = ReviewSessionRepository(tmp_path / "reviews.sqlite3").get(
+        created.review_session_id
+    )
+
+    assert loaded.state.question_mode == "atomic_assertion"
+    question = loaded.state.question_queue[0]
+    assert question.question_id == "1" * 64
+    assert question.plan_id == "2" * 64
+    assert question.issue_ids == ["3" * 64]
+
+
+def test_repository_rejects_question_mode_change(prd, repo):
+    created = repo.create(
+        begin_remediation(str(prd), _empty_problem_extraction()).state
+    )
+    changed = created.state.model_copy(
+        update={"question_mode": "atomic_assertion"}, deep=True
+    )
+
+    with pytest.raises(ValueError, match="question mode is immutable"):
+        repo.update(
+            created.review_session_id,
+            expected_version=created.session_version,
+            operation_id="change-question-mode",
+            state=changed,
+            workflow_state=created.workflow_state,
+            event_type="invalid_mode_change",
+            result_json="{}",
+        )
+
+
+def test_v3_session_without_question_mode_migrates_to_legacy(prd, repo):
+    turn = begin_remediation(str(prd), _empty_problem_extraction())
+    created = repo.create(turn.state)
+    state = json.loads(turn.state.model_dump_json())
+    state.pop("question_mode")
+    state.pop("atomic_resolutions")
+    state.pop("state_schema_version")
+    with sqlite3.connect(repo.path) as connection:
+        connection.execute(
+            "UPDATE review_sessions SET state_schema_version = 3, state_json = ? "
+            "WHERE review_session_id = ?",
+            (json.dumps(state), created.review_session_id),
+        )
+
+    loaded = repo.get(created.review_session_id)
+
+    assert loaded.state.state_schema_version == 3
+    assert loaded.state.question_mode == "legacy_field"
+    assert loaded.state.atomic_resolutions == []
+
+    updated = repo.update(
+        loaded.review_session_id,
+        expected_version=loaded.session_version,
+        operation_id="migrate-v3-on-write",
+        state=loaded.state,
+        workflow_state=loaded.workflow_state,
+        event_type="legacy_session_updated",
+        result_json="{}",
+    )
+
+    assert updated.state.state_schema_version == 4
+    with sqlite3.connect(repo.path) as connection:
+        row = connection.execute(
+            "SELECT state_schema_version, state_json FROM review_sessions "
+            "WHERE review_session_id = ?",
+            (loaded.review_session_id,),
+        ).fetchone()
+    assert row[0] == 4
+    assert json.loads(row[1])["state_schema_version"] == 4
 
 
 @pytest.mark.parametrize(
@@ -584,6 +675,27 @@ def test_pending_operation_blocks_duplicate_external_work(prd, repo):
             operation_type="dashboard_checkpoint",
             request_digest="different",
         )
+
+
+def test_creation_reservation_blocks_duplicate_work_and_replays_completed_session(
+    prd, repo
+):
+    review_id = "rvw_" + "a" * 64
+    digest = "creation-digest"
+
+    assert repo.reserve_creation(review_id, digest) == "reserved"
+    with pytest.raises(ValueError, match="creation is already in progress"):
+        repo.reserve_creation(review_id, digest)
+
+    repo.create(
+        begin_remediation(str(prd), _empty_problem_extraction()).state,
+        review_session_id=review_id,
+    )
+    repo.complete_creation(review_id, digest)
+
+    assert repo.reserve_creation(review_id, digest) == "completed"
+    with pytest.raises(ValueError, match="different request payload"):
+        repo.reserve_creation(review_id, "other-digest")
 
 
 def test_delete_unlinks_only_the_exact_pending_revision_temp(prd, tmp_path, repo):
