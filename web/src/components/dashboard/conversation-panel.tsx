@@ -73,6 +73,7 @@ export function ConversationPanel() {
       ...current,
       assessment: state.assessment,
       report: state.report,
+      deep_review: state.deep_review,
       next_question: checkpoint.result.next_question,
       supplemental_answers: state.verified_answers,
       framing: state.framing,
@@ -177,7 +178,6 @@ export function ConversationPanel() {
         assessment.review_session_id,
         assessment.session_version,
         crypto.randomUUID(),
-        assessment.supplemental_answers,
       );
       setRevisionPreview(preview);
       setAssessment({

@@ -59,7 +59,7 @@ def test_proxy_artifact_cannot_be_retyped_as_internal_or_human_labels():
 def test_proxy_rubric_delta_changes_fields_but_not_weights_or_gates():
     rubric = load_rubric("prd")
 
-    assert rubric.version == "0.6.0-expert-baseline"
+    assert rubric.version == "0.9.1-applicability-contracts-shadow"
     assert [field.name for field in rubric.criterion("functional_requirements").fields][
         -1
     ] == "decision_rules_and_precedence"

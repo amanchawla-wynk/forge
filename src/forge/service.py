@@ -1,26 +1,36 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
+from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from forge.evaluate.consolidate import (
+    consolidate_evaluation_runs,
+    evaluations_from_legacy_extraction_run,
+)
+from forge.evaluate.models import CriterionEvaluation
 from forge.deep_review import (
     DeepReviewReport,
     build_deep_review,
     mechanical_claim_occurrences,
 )
 from forge.extract.batch import ExtractionBatch, verify_extraction_batch_with_claims
-from forge.ingest.batching import batch_document
+from forge.extract.models import CriterionExtraction
+from forge.ingest.adapters import LocalFileSourceAdapter, SourceRef
+from forge.ingest.batching import DocumentBatch, batch_document, plan_fingerprint
 from forge.ingest.document import (
     add_product_context,
     add_supplemental_answers,
-    ingest_document,
+    ingest_snapshot,
 )
 from forge.ingest.models import (
     NormalizedDocument,
     ProductContextTerm,
     SupplementalAnswer,
 )
+from forge.ingest.snapshot import DocumentSnapshot, SnapshotRepository
 from forge.rubric.loader import load_rubric
 from forge.rubric.models import Rubric
 from forge.score.engine import Assessment, score
@@ -58,6 +68,19 @@ class AssessmentResponse(BaseModel):
     edge_case_coverage: EdgeCaseCoverageLedger | None
     consistency_ledger: ConsistencyLedger | None = None
     warnings: list[str]
+    criterion_evaluations: list[CriterionEvaluation] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PreparedAssessmentInput:
+    snapshot: DocumentSnapshot
+    rubric: Rubric
+    rubric_name: str
+    document: NormalizedDocument
+    batches: tuple[DocumentBatch, ...]
+    plan_fingerprint: str
+    supplemental_answers: tuple[SupplementalAnswer, ...]
+    product_context: tuple[ProductContextTerm, ...]
 
 
 def assess_extractions(
@@ -73,15 +96,41 @@ def assess_extractions(
     edge_case_coverage: EdgeCaseCoverageLedger | None = None,
     consistency_ledger: ConsistencyLedger | None = None,
 ) -> AssessmentResponse:
-    answers = supplemental_answers or []
-    terms = product_context or []
-    document, rubric = prepare_assessment_input(
-        source_path, rubric_name, answers, terms
+    prepared = prepare_assessment(
+        source_path,
+        rubric_name,
+        supplemental_answers,
+        product_context,
     )
-    document_batches = batch_document(document)
+    return assess_prepared_extractions(
+        prepared,
+        batch,
+        client_models=client_models,
+        framing=framing,
+        display_name=display_name,
+        edge_case_coverage=edge_case_coverage,
+        consistency_ledger=consistency_ledger,
+    )
+
+
+def assess_prepared_extractions(
+    prepared: PreparedAssessmentInput,
+    batch: ExtractionBatch,
+    *,
+    client_models: list[str] | None = None,
+    framing: str | None = None,
+    display_name: str | None = None,
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None,
+    consistency_ledger: ConsistencyLedger | None = None,
+) -> AssessmentResponse:
+    document = prepared.document
+    rubric = prepared.rubric
+    answers = list(prepared.supplemental_answers)
+    terms = list(prepared.product_context)
     runs, claims = verify_extraction_batch_with_claims(
-        document_batches, batch, rubric
+        list(prepared.batches), batch, rubric
     )
+    _, criterion_evaluations = build_legacy_criterion_evaluations(prepared, runs)
     verified_coverage = (
         verify_coverage_ledger(
             document, apply_coverage_answers(edge_case_coverage, answers)
@@ -210,7 +259,39 @@ def assess_extractions(
         edge_case_coverage=verified_coverage,
         consistency_ledger=verified_consistency,
         warnings=warnings,
+        criterion_evaluations=criterion_evaluations,
     )
+
+
+def build_legacy_criterion_evaluations(
+    prepared: PreparedAssessmentInput,
+    runs: list[list[CriterionExtraction]],
+) -> tuple[list[CriterionEvaluation], list[CriterionEvaluation]]:
+    """Build score-neutral Phase 2 records from verified legacy runs."""
+    per_run = [
+        evaluations_from_legacy_extraction_run(
+            prepared.rubric,
+            run,
+            snapshot_id=prepared.snapshot.snapshot_id,
+            plan_fingerprint=prepared.plan_fingerprint,
+            run_index=index,
+        )
+        for index, run in enumerate(runs, start=1)
+    ]
+    artifacts = [evaluation for run in per_run for evaluation in run]
+    consolidated = [
+        consolidate_evaluation_runs(
+            [
+                evaluation
+                for run in per_run
+                for evaluation in run
+                if evaluation.criterion_id == criterion.id
+            ],
+            expected_run_count=prepared.rubric.extraction_runs,
+        )
+        for criterion in prepared.rubric.criteria
+    ]
+    return artifacts, consolidated
 
 
 def assess_extraction_json(
@@ -224,15 +305,35 @@ def assess_extraction_json(
     edge_case_coverage: EdgeCaseCoverageLedger | None = None,
     consistency_ledger: ConsistencyLedger | None = None,
 ) -> AssessmentResponse:
+    prepared = prepare_assessment(
+        source_path,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+    )
+    return assess_prepared_extraction_json(
+        prepared,
+        extraction_json,
+        framing=framing,
+        edge_case_coverage=edge_case_coverage,
+        consistency_ledger=consistency_ledger,
+    )
+
+
+def assess_prepared_extraction_json(
+    prepared: PreparedAssessmentInput,
+    extraction_json: str,
+    *,
+    framing: str | None = None,
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None,
+    consistency_ledger: ConsistencyLedger | None = None,
+) -> AssessmentResponse:
     payload = json.loads(extraction_json)
     if "runs" not in payload:
         payload = {"runs": [payload]}
-    return assess_extractions(
-        source_path,
+    return assess_prepared_extractions(
+        prepared,
         ExtractionBatch.model_validate(payload),
-        rubric_name=rubric_name,
-        supplemental_answers=supplemental_answers,
-        product_context=product_context,
         framing=framing,
         edge_case_coverage=edge_case_coverage,
         consistency_ledger=consistency_ledger,
@@ -244,9 +345,30 @@ def prepare_assessment_input(
     rubric_name: str = "prd",
     supplemental_answers: list[SupplementalAnswer] | None = None,
     product_context: list[ProductContextTerm] | None = None,
+    snapshot: DocumentSnapshot | None = None,
 ) -> tuple[NormalizedDocument, Rubric]:
+    prepared = prepare_assessment(
+        source_path,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+        snapshot=snapshot,
+    )
+    return prepared.document, prepared.rubric
+
+
+def prepare_assessment(
+    source_path: str,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+    snapshot_repository: SnapshotRepository | None = None,
+    *,
+    snapshot: DocumentSnapshot | None = None,
+) -> PreparedAssessmentInput:
     rubric = load_rubric(rubric_name)
-    answers = supplemental_answers or []
+    answers = tuple(supplemental_answers or [])
+    terms = tuple(product_context or [])
     known_criteria = {criterion.id for criterion in rubric.criteria}
     unknown = sorted(
         {answer.criterion_id for answer in answers} - known_criteria
@@ -255,5 +377,40 @@ def prepare_assessment_input(
         raise ValueError(
             "supplemental answers reference unknown criteria: " + ", ".join(unknown)
         )
-    document = add_supplemental_answers(ingest_document(source_path), answers)
-    return add_product_context(document, product_context or []), rubric
+    if snapshot is not None and snapshot_repository is not None:
+        raise ValueError("supply either snapshot or snapshot_repository, not both")
+    if snapshot is None:
+        snapshot = ingest_snapshot(source_path, snapshot_repository)
+    else:
+        _verify_live_snapshot_source(source_path, snapshot)
+    resolved_source_path = str(Path(source_path).expanduser().resolve())
+    snapshot_document = snapshot.document.model_copy(
+        update={"source_path": resolved_source_path}, deep=True
+    )
+    document = add_product_context(
+        add_supplemental_answers(snapshot_document, list(answers)),
+        list(terms),
+    )
+    batches = tuple(batch_document(document))
+    return PreparedAssessmentInput(
+        snapshot=snapshot,
+        rubric=rubric,
+        rubric_name=rubric_name,
+        document=document,
+        batches=batches,
+        plan_fingerprint=plan_fingerprint(
+            list(batches), rubric.id, rubric.version
+        ),
+        supplemental_answers=answers,
+        product_context=terms,
+    )
+
+
+def _verify_live_snapshot_source(
+    source_path: str, snapshot: DocumentSnapshot
+) -> None:
+    artifact = LocalFileSourceAdapter().acquire(SourceRef.local_file(source_path))
+    if artifact.sha256 != snapshot.source.sha256:
+        raise ValueError("supplied snapshot does not match the live source bytes")
+    if artifact.source_type != snapshot.source.source_type:
+        raise ValueError("supplied snapshot does not match the live source type")

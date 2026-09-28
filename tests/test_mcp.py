@@ -9,8 +9,14 @@ import pytest
 from mcp import Client
 from mcp.types import CreateMessageResult, TextContent
 
+import forge.ingest.document as ingest_document_module
+from forge.ingest.models import SupplementalAnswer
+from forge.ingest.parsers import LegacyDocumentParser
+from forge.ingest.snapshot import SnapshotCache
 from forge.mcp.server import mcp
+from forge.remediation import begin_remediation
 from forge.rubric.loader import load_rubric
+from forge.sessions import ReviewSessionRepository, operation_digest
 
 
 @pytest.fixture
@@ -18,10 +24,47 @@ def anyio_backend():
     return "asyncio"
 
 
+def _complete_null_extraction(
+    overlays: dict[tuple[str, str], tuple[object, str]] | None = None,
+) -> dict[str, object]:
+    overlays = overlays or {}
+    criteria = []
+    for criterion in load_rubric("prd").criteria:
+        fields = []
+        for field in criterion.fields:
+            value, quote = overlays.get((criterion.id, field.name), (None, None))
+            evidence = None
+            if quote is not None:
+                evidence = {
+                    "quote": quote,
+                    "section": None,
+                    "page": None,
+                    "provenance": "document",
+                    "source_block_id": None,
+                    "source_parent_block_id": None,
+                    "source_start_char": None,
+                    "source_end_char": None,
+                    "quote_start_char": None,
+                    "quote_end_char": None,
+                }
+            fields.append({"name": field.name, "value": value, "evidence": evidence})
+        criteria.append(
+            {
+                "criterion_id": criterion.id,
+                "fields": fields,
+                "not_applicable": False,
+                "not_applicable_reason": None,
+            }
+        )
+    return {"criteria": criteria}
+
+
 def test_mcp_exposes_sampling_and_fallback_tools():
     tools = anyio.run(mcp.list_tools)
     names = {tool.name for tool in tools}
 
+    assert "complete_prd_review" in mcp.instructions
+    assert "Do not submit it only to score_prd_extraction" in mcp.instructions
     assert names == {
         "assess_prd",
         "assess_prd_batch",
@@ -29,6 +72,9 @@ def test_mcp_exposes_sampling_and_fallback_tools():
         "list_prd_visuals",
         "observe_prd_visual",
         "prepare_prd_assessment",
+        "prepare_prd_evaluation",
+        "apply_prd_evaluation",
+        "apply_prd_question_generation",
         "prepare_prd_advisory",
         "apply_prd_advisory",
         "score_prd_extraction",
@@ -49,6 +95,7 @@ def test_mcp_exposes_sampling_and_fallback_tools():
         "get_prd_review_status",
         "preview_prd_revision",
         "write_integrated_prd_revision",
+        "complete_prd_review",
     }
     observe = next(tool for tool in tools if tool.name == "observe_prd_visual")
     assert set(observe.input_schema["properties"]) == {
@@ -82,11 +129,58 @@ def test_mcp_exposes_sampling_and_fallback_tools():
     assert "product_context" in score.input_schema["properties"]
     assert "framing" in score.input_schema["properties"]
     assert "edge_case_coverage" in score.input_schema["properties"]
+    evaluation = next(tool for tool in tools if tool.name == "prepare_prd_evaluation")
+    assert set(evaluation.input_schema["properties"]) == {
+        "source_path",
+        "criterion_id",
+        "batch_id",
+        "run_index",
+        "rubric_name",
+        "supplemental_answers",
+        "product_context",
+    }
+    question_generation = next(
+        tool for tool in tools if tool.name == "apply_prd_question_generation"
+    )
+    assert set(question_generation.input_schema["properties"]) == {
+        "source_path",
+        "evaluation_json",
+        "completion",
+        "rubric_name",
+        "supplemental_answers",
+        "product_context",
+    }
     revision = next(tool for tool in tools if tool.name == "write_prd_revision")
     assert set(revision.input_schema["properties"]) == {
-        "source_path",
+        "review_session_id",
+        "session_version",
+        "operation_id",
         "output_path",
-        "supplemental_answers",
+    }
+    preview = next(tool for tool in tools if tool.name == "preview_prd_revision")
+    assert set(preview.input_schema["properties"]) == {
+        "review_session_id",
+        "session_version",
+        "operation_id",
+        "section_overrides",
+    }
+    integrated = next(
+        tool for tool in tools if tool.name == "write_integrated_prd_revision"
+    )
+    assert set(integrated.input_schema["properties"]) == {
+        "review_session_id",
+        "session_version",
+        "operation_id",
+        "output_path",
+        "plan",
+        "actions",
+    }
+    complete = next(tool for tool in tools if tool.name == "complete_prd_review")
+    assert set(complete.input_schema["properties"]) == {
+        "review_session_id",
+        "session_version",
+        "operation_id",
+        "extraction_json",
     }
     record = next(tool for tool in tools if tool.name == "record_prd_answer")
     assert set(record.input_schema["properties"]) == {
@@ -112,7 +206,7 @@ async def test_assess_prd_borrows_client_model_three_times(tmp_path):
         assert "provenance=supplemental_answer" in params.messages[0].content.text
         return CreateMessageResult(
             role="assistant",
-            content=TextContent(text='{"criteria": []}'),
+            content=TextContent(text=json.dumps(_complete_null_extraction())),
             model="test-client-model",
             stopReason="endTurn",
         )
@@ -153,6 +247,7 @@ async def test_assess_prd_borrows_client_model_three_times(tmp_path):
     assert result.structured_content["next_question"] is not None
     assert result.structured_content["supplemental_answers"] == [
         {
+            "answer_id": None,
             "criterion_id": "problem_statement",
             "answer": "Finance administrators are affected.",
             "requirement_quote": None,
@@ -186,6 +281,10 @@ async def test_prepare_prd_assessment_returns_every_long_document_batch(tmp_path
         "one exhaustive document batch" in batch["extraction_prompt"]
         for batch in batches
     )
+    assert "complete_prd_review" in result.structured_content["instructions"]
+    assert "not only to score_prd_extraction" in result.structured_content[
+        "instructions"
+    ]
     assert all(
         batch["plan_fingerprint"] == result.structured_content["plan_fingerprint"]
         for batch in batches
@@ -196,21 +295,8 @@ async def test_prepare_prd_assessment_returns_every_long_document_batch(tmp_path
 async def test_remediation_collects_answers_before_one_delta_checkpoint(tmp_path):
     path = tmp_path / "prd.md"
     path.write_text("An incomplete product note.")
-    rubric = load_rubric("prd")
-    problem = rubric.criterion("problem_statement")
-    extraction = json.dumps(
-        {
-            "criteria": [
-                {
-                    "criterion_id": problem.id,
-                    "fields": [
-                        {"name": field.name, "value": None, "evidence": None}
-                        for field in problem.fields
-                    ],
-                }
-            ]
-        }
-    )
+    problem = load_rubric("prd").criterion("problem_statement")
+    extraction = json.dumps(_complete_null_extraction())
 
     async with Client(mcp, raise_exceptions=True) as client:
         # A new chat must be able to see that no review exists yet.
@@ -324,32 +410,15 @@ async def test_native_sampling_assesses_a_long_document_batch_by_batch(tmp_path)
     problem_quote = "Finance administrators cannot export invoices."
     path = tmp_path / "long-prd.md"
     path.write_text(problem_quote + (" Neutral context." * 9_000))
-    rubric = load_rubric("prd")
     sampled_batches: list[str] = []
 
     def _criteria(prompt: str) -> list[dict[str, object]]:
-        return [
-            {
-                "criterion_id": criterion.id,
-                "fields": [
-                    {
-                        "name": field.name,
-                        "value": problem_quote
-                        if criterion.id == "problem_statement"
-                        and field.name == "problem"
-                        and problem_quote in prompt
-                        else None,
-                        "evidence": {"quote": problem_quote}
-                        if criterion.id == "problem_statement"
-                        and field.name == "problem"
-                        and problem_quote in prompt
-                        else None,
-                    }
-                    for field in criterion.fields
-                ],
-            }
-            for criterion in rubric.criteria
-        ]
+        overlays = (
+            {("problem_statement", "problem"): (problem_quote, problem_quote)}
+            if problem_quote in prompt
+            else None
+        )
+        return _complete_null_extraction(overlays)["criteria"]
 
     async def sample(context, params):
         prompt = params.messages[0].content.text
@@ -407,7 +476,7 @@ async def test_anticipated_failures_reach_the_agent(tmp_path):
     async def sample(context, params):
         return CreateMessageResult(
             role="assistant",
-            content=TextContent(text='{"criteria": []}'),
+            content=TextContent(text=json.dumps(_complete_null_extraction())),
             model="test-client-model",
             stopReason="endTurn",
         )
@@ -493,7 +562,9 @@ async def test_detect_prd_framing_without_sampling_gives_an_actionable_no_fallba
             "detect_prd_framing",
             {
                 "source_path": str(path),
-                "extraction_json": json.dumps({"runs": [{"criteria": []}]}),
+                "extraction_json": json.dumps(
+                    {"runs": [_complete_null_extraction()]}
+                ),
             },
         )
 
@@ -515,23 +586,14 @@ async def test_assess_edge_case_coverage_without_sampling_gives_an_actionable_er
     extraction = json.dumps(
         {
             "runs": [
-                {
-                    "criteria": [
-                        {
-                            "criterion_id": "functional_requirements",
-                            "fields": [
-                                {"name": "primary_flow", "value": None},
-                                {"name": "preconditions", "value": None},
-                                {
-                                    "name": "requirements",
-                                    "value": [requirement],
-                                    "evidence": {"quote": requirement},
-                                },
-                                {"name": "prioritisation", "value": None},
-                            ],
-                        }
-                    ]
-                }
+                _complete_null_extraction(
+                    {
+                        ("functional_requirements", "requirements"): (
+                            [requirement],
+                            requirement,
+                        )
+                    }
+                )
             ]
         }
     )
@@ -604,52 +666,22 @@ _CONTEXTUALIZE_DOC = (
 _CONTEXTUALIZE_EXTRACTION = json.dumps(
     {
         "runs": [
-            {
-                "criteria": [
-                    {
-                        "criterion_id": "problem_statement",
-                        "fields": [
-                            {
-                                "name": "problem",
-                                "value": "Users cannot export invoices",
-                                "evidence": {
-                                    "quote": "Users cannot export invoices."
-                                },
-                            },
-                            {
-                                "name": "affected_users",
-                                "value": "Finance administrators",
-                                "evidence": {
-                                    "quote": "Finance administrators are affected."
-                                },
-                            },
-                            {
-                                "name": "evidence",
-                                "value": "42 support tickets",
-                                "evidence": {"quote": "42 support tickets"},
-                            },
-                            {
-                                "name": "cost_of_inaction",
-                                "value": None,
-                                "evidence": None,
-                            },
-                        ],
-                    },
-                    {
-                        "criterion_id": "success_metrics",
-                        "fields": [
-                            {"name": name, "value": None, "evidence": None}
-                            for name in [
-                                "primary_metric",
-                                "baseline",
-                                "target",
-                                "measurement_window",
-                                "guardrail_metric",
-                            ]
-                        ],
-                    },
-                ]
-            }
+            _complete_null_extraction(
+                {
+                    ("problem_statement", "problem"): (
+                        "Users cannot export invoices",
+                        "Users cannot export invoices.",
+                    ),
+                    ("problem_statement", "affected_users"): (
+                        "Finance administrators",
+                        "Finance administrators are affected.",
+                    ),
+                    ("problem_statement", "evidence"): (
+                        "42 support tickets",
+                        "42 support tickets",
+                    ),
+                }
+            )
         ]
     }
 )
@@ -676,7 +708,9 @@ async def test_detect_prd_framing_selects_rubric_authored_question(tmp_path):
             "detect_prd_framing",
             {
                 "source_path": str(path),
-                "extraction_json": '{"runs": [{"criteria": []}]}',
+                "extraction_json": json.dumps(
+                    {"runs": [_complete_null_extraction()]}
+                ),
             },
         )
 
@@ -684,7 +718,7 @@ async def test_detect_prd_framing_selects_rubric_authored_question(tmp_path):
     assert content["framing"] == "opportunity_bet"
     assert content["was_detected"] is True
     assert content["next_question"]["framing"] == "opportunity_bet"
-    assert "opportunity is this going after" in content["next_question"]["question"]
+    assert "specific opportunity is this pursuing" in content["next_question"]["question"]
     assert "never changes" in content["scoring_note"]
 
 
@@ -831,23 +865,14 @@ async def test_assess_edge_case_coverage_returns_exhaustive_verified_ledger(tmp_
     extraction = json.dumps(
         {
             "runs": [
-                {
-                    "criteria": [
-                        {
-                            "criterion_id": "functional_requirements",
-                            "fields": [
-                                {"name": "primary_flow", "value": None},
-                                {"name": "preconditions", "value": None},
-                                {
-                                    "name": "requirements",
-                                    "value": [requirement],
-                                    "evidence": {"quote": requirement},
-                                },
-                                {"name": "prioritisation", "value": None},
-                            ],
-                        }
-                    ]
-                }
+                _complete_null_extraction(
+                    {
+                        ("functional_requirements", "requirements"): (
+                            [requirement],
+                            requirement,
+                        )
+                    }
+                )
             ]
         }
     )
@@ -1024,9 +1049,8 @@ def _fully_satisfying_document_and_extraction() -> tuple[str, dict]:
     """
     rubric = load_rubric("prd")
     quotes: list[str] = []
-    criteria_payload = []
+    overlays = {}
     for criterion in rubric.criteria:
-        fields = []
         for field in criterion.required_fields:
             if field.value_pattern:
                 # Both the quote AND the value must satisfy the pattern:
@@ -1041,11 +1065,8 @@ def _fully_satisfying_document_and_extraction() -> tuple[str, dict]:
                 quote = f"quoted {criterion.id} {field.name}"
                 value = f"value for {criterion.id} {field.name}"
             quotes.append(quote)
-            fields.append(
-                {"name": field.name, "value": value, "evidence": {"quote": quote}}
-            )
-        criteria_payload.append({"criterion_id": criterion.id, "fields": fields})
-    return "\n".join(quotes), {"runs": [{"criteria": criteria_payload}]}
+            overlays[(criterion.id, field.name)] = (value, quote)
+    return "\n".join(quotes), {"runs": [_complete_null_extraction(overlays)]}
 
 
 @pytest.mark.anyio
@@ -1092,19 +1113,380 @@ async def test_observe_prd_visual_reports_an_unknown_asset(tmp_path):
 
 
 def _bare_extraction() -> str:
-    problem = load_rubric("prd").criterion("problem_statement")
-    return json.dumps(
-        {
-            "criteria": [
-                {
-                    "criterion_id": problem.id,
-                    "fields": [
-                        {"name": field.name, "value": None, "evidence": None}
-                        for field in problem.fields
-                    ],
-                }
-            ]
+    return json.dumps(_complete_null_extraction())
+
+
+def _revision_ready_session(path, answer: SupplementalAnswer):
+    import forge.mcp.server as server
+
+    extraction = json.dumps(_complete_null_extraction())
+    state = begin_remediation(str(path), extraction).state.model_copy(
+        update={
+            "verified_answers": [answer],
+            "pending_answers": [],
+            "question_queue": [],
         }
+    )
+    return server._reviews_store().create(state)
+
+
+@pytest.mark.anyio
+async def test_integrated_revision_is_session_bound_and_idempotent(tmp_path):
+    source = tmp_path / "prd.md"
+    source.write_text("# PRD\n\n## Problem\n\nCurrent problem.\n")
+    answer = SupplementalAnswer(
+        criterion_id="problem_statement",
+        answer="Mobile viewers cannot find relevant short-form stories.",
+    )
+    session = _revision_ready_session(source, answer)
+
+    async with Client(mcp, raise_exceptions=True) as client:
+        preview_payload = {
+            "review_session_id": session.review_session_id,
+            "session_version": session.session_version,
+            "operation_id": "preview-revision",
+        }
+        preview = await client.call_tool("preview_prd_revision", preview_payload)
+        replayed_preview = await client.call_tool(
+            "preview_prd_revision", preview_payload
+        )
+
+        assert preview.structured_content == replayed_preview.structured_content
+        assert preview.structured_content["workflow_state"] == (
+            "awaiting_revision_approval"
+        )
+        assert preview.structured_content["next_action"] == {
+            "type": "approve_revision",
+            "tool": "write_integrated_prd_revision",
+        }
+        plan = preview.structured_content["plan"]
+        edit_id = plan["edits"][0]["edit_id"]
+        write_payload = {
+            "review_session_id": session.review_session_id,
+            "session_version": preview.structured_content["session_version"],
+            "operation_id": "write-integrated-revision",
+            "output_path": str(tmp_path / "revised.md"),
+            "plan": plan,
+            "actions": {edit_id: "integrate"},
+        }
+        written = await client.call_tool(
+            "write_integrated_prd_revision", write_payload
+        )
+
+        output = tmp_path / "revised.md"
+        output.write_text("sentinel: replay must not rewrite this file\n")
+        replayed_write = await client.call_tool(
+            "write_integrated_prd_revision", write_payload
+        )
+
+    assert written.structured_content == replayed_write.structured_content
+    assert output.read_text() == "sentinel: replay must not rewrite this file\n"
+    assert written.structured_content["workflow_state"] == (
+        "final_assessment_required"
+    )
+    assert written.structured_content["next_action"] == {
+        "type": "complete_review",
+        "tool": "complete_prd_review",
+    }
+
+
+@pytest.mark.anyio
+async def test_integrated_revision_rejects_arbitrary_answers_and_stale_version(
+    tmp_path,
+):
+    from forge.revise import preview_integrated_revision
+
+    source = tmp_path / "prd.md"
+    source.write_text("# PRD\n\n## Problem\n\nCurrent problem.\n")
+    answer = SupplementalAnswer(
+        criterion_id="problem_statement",
+        answer="Mobile viewers cannot find relevant short-form stories.",
+    )
+    session = _revision_ready_session(source, answer)
+
+    async with Client(mcp) as client:
+        preview = await client.call_tool(
+            "preview_prd_revision",
+            {
+                "review_session_id": session.review_session_id,
+                "session_version": session.session_version,
+                "operation_id": "preview-valid-plan",
+            },
+        )
+        current_version = preview.structured_content["session_version"]
+        valid_plan = preview.structured_content["plan"]
+        valid_edit_id = valid_plan["edits"][0]["edit_id"]
+        rogue_plan = preview_integrated_revision(
+            source,
+            [
+                SupplementalAnswer(
+                    criterion_id="problem_statement",
+                    answer="An answer that was never verified.",
+                )
+            ],
+        )
+        rogue = await client.call_tool(
+            "write_integrated_prd_revision",
+            {
+                "review_session_id": session.review_session_id,
+                "session_version": current_version,
+                "operation_id": "write-rogue-plan",
+                "output_path": str(tmp_path / "rogue.md"),
+                "plan": rogue_plan.model_dump(mode="json"),
+                "actions": {rogue_plan.edits[0].edit_id: "integrate"},
+            },
+        )
+        independently_regenerated = preview_integrated_revision(source, [answer])
+        wrong_preview = await client.call_tool(
+            "write_integrated_prd_revision",
+            {
+                "review_session_id": session.review_session_id,
+                "session_version": current_version,
+                "operation_id": "write-unpreviewed-plan",
+                "output_path": str(tmp_path / "unpreviewed.md"),
+                "plan": independently_regenerated.model_dump(mode="json"),
+                "actions": {
+                    independently_regenerated.edits[0].edit_id: "integrate"
+                },
+            },
+        )
+        stale = await client.call_tool(
+            "write_integrated_prd_revision",
+            {
+                "review_session_id": session.review_session_id,
+                "session_version": session.session_version,
+                "operation_id": "write-stale-plan",
+                "output_path": str(tmp_path / "stale.md"),
+                "plan": valid_plan,
+                "actions": {valid_edit_id: "integrate"},
+            },
+        )
+
+    assert rogue.is_error
+    assert "verified answers" in rogue.content[0].text
+    assert not (tmp_path / "rogue.md").exists()
+    assert wrong_preview.is_error
+    assert "plan previewed by this review session" in wrong_preview.content[0].text
+    assert not (tmp_path / "unpreviewed.md").exists()
+    assert stale.is_error
+    assert "stale session_version" in stale.content[0].text
+    assert not (tmp_path / "stale.md").exists()
+
+
+@pytest.mark.anyio
+async def test_appendix_revision_uses_verified_session_answers(tmp_path):
+    source = tmp_path / "prd.md"
+    source.write_text("# PRD\n\nOriginal content.\n")
+    answer = SupplementalAnswer(
+        criterion_id="non_goals",
+        answer="Native mobile applications are excluded.",
+    )
+    session = _revision_ready_session(source, answer)
+    output = tmp_path / "appendix.md"
+
+    async with Client(mcp, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "write_prd_revision",
+            {
+                "review_session_id": session.review_session_id,
+                "session_version": session.session_version,
+                "operation_id": "write-appendix-revision",
+                "output_path": str(output),
+            },
+        )
+
+    assert answer.answer in output.read_text()
+    assert result.structured_content["workflow_state"] == (
+        "final_assessment_required"
+    )
+    assert result.structured_content["next_action"]["type"] == (
+        "complete_review"
+    )
+    assert result.structured_content["result"]["final_assessment_required"] is True
+
+
+@pytest.mark.anyio
+async def test_final_review_completion_verifies_artifact_and_is_idempotent(tmp_path):
+    import forge.mcp.server as server
+
+    source = tmp_path / "prd.md"
+    source.write_text("# PRD\n\nOriginal content.\n")
+    session = _revision_ready_session(
+        source,
+        SupplementalAnswer(
+            criterion_id="non_goals",
+            answer="Native mobile applications are excluded.",
+        ),
+    )
+    output = tmp_path / "final.md"
+    async with Client(mcp, raise_exceptions=True) as client:
+        written = await client.call_tool(
+            "write_prd_revision",
+            {
+                "review_session_id": session.review_session_id,
+                "session_version": session.session_version,
+                "operation_id": "write-final",
+                "output_path": str(output),
+            },
+        )
+        payload = {
+            "review_session_id": session.review_session_id,
+            "session_version": written.structured_content["session_version"],
+            "operation_id": "complete-final",
+            "extraction_json": _bare_extraction(),
+        }
+        completed = await client.call_tool("complete_prd_review", payload)
+        replayed = await client.call_tool("complete_prd_review", payload)
+
+    assert completed.structured_content == replayed.structured_content
+    assert completed.structured_content["workflow_state"] == "complete"
+    assert completed.structured_content["next_action"] == {
+        "type": "complete",
+        "tool": None,
+    }
+    assert completed.structured_content["assessment"]["supplemental_answers"] == []
+    stored = ReviewSessionRepository(server._reviews_store().path).get(
+        session.review_session_id
+    )
+    assert stored.state.revision_output_path == str(output.resolve())
+    assert stored.state.final_verification is not None
+    assert stored.state.final_verification.artifact_sha256 == (
+        stored.state.revision_output_sha256
+    )
+    assert stored.state.final_verification.assessment.supplemental_answers == []
+
+
+@pytest.mark.anyio
+async def test_final_review_completion_rejects_changed_generated_artifact(tmp_path):
+    source = tmp_path / "prd.md"
+    source.write_text("# PRD\n\nOriginal content.\n")
+    session = _revision_ready_session(
+        source,
+        SupplementalAnswer(criterion_id="non_goals", answer="Mobile is excluded."),
+    )
+    output = tmp_path / "changed.md"
+    async with Client(mcp) as client:
+        written = await client.call_tool(
+            "write_prd_revision",
+            {
+                "review_session_id": session.review_session_id,
+                "session_version": session.session_version,
+                "operation_id": "write-before-change",
+                "output_path": str(output),
+            },
+        )
+        output.write_text("changed after materialization")
+        completed = await client.call_tool(
+            "complete_prd_review",
+            {
+                "review_session_id": session.review_session_id,
+                "session_version": written.structured_content["session_version"],
+                "operation_id": "complete-changed",
+                "extraction_json": _bare_extraction(),
+            },
+        )
+
+    assert completed.is_error
+    assert "changed after it was materialized" in completed.content[0].text
+
+
+@pytest.mark.anyio
+async def test_appendix_revision_recovers_after_publish_before_db_commit(
+    tmp_path, monkeypatch
+):
+    import forge.mcp.server as server
+
+    source = tmp_path / "prd.md"
+    source.write_text("# PRD\n\nOriginal content.\n")
+    answer = SupplementalAnswer(
+        criterion_id="non_goals",
+        answer="Native mobile applications are excluded.",
+    )
+    session = _revision_ready_session(source, answer)
+    output = tmp_path / "recovered.md"
+    payload = {
+        "review_session_id": session.review_session_id,
+        "session_version": session.session_version,
+        "operation_id": "crash-after-publish",
+        "output_path": str(output),
+    }
+    repository = server._reviews_store()
+    original_update = repository.update
+
+    def fail_commit(*args, **kwargs):
+        if kwargs.get("event_type") == "revision_materialized":
+            raise RuntimeError("simulated process exit before DB commit")
+        return original_update(*args, **kwargs)
+
+    monkeypatch.setattr(repository, "update", fail_commit)
+    async with Client(mcp) as client:
+        interrupted = await client.call_tool("write_prd_revision", payload)
+    assert interrupted.is_error
+    assert output.exists()
+    published_bytes = output.read_bytes()
+
+    monkeypatch.setattr(repository, "update", original_update)
+    server._review_repository = None
+    async with Client(mcp, raise_exceptions=True) as client:
+        recovered = await client.call_tool("write_prd_revision", payload)
+
+    assert output.read_bytes() == published_bytes
+    assert recovered.structured_content["workflow_state"] == (
+        "final_assessment_required"
+    )
+    assert not list(tmp_path.glob(".recovered.forge-*"))
+
+
+@pytest.mark.anyio
+async def test_appendix_revision_publish_failure_cancels_pending_operation(
+    tmp_path, monkeypatch
+):
+    import forge.mcp.server as server
+
+    source = tmp_path / "prd.md"
+    source.write_text("# PRD\n\nOriginal content.\n")
+    session = _revision_ready_session(
+        source,
+        SupplementalAnswer(
+            criterion_id="non_goals",
+            answer="Native mobile applications are excluded.",
+        ),
+    )
+    output = tmp_path / "publish-failure.md"
+    payload = {
+        "review_session_id": session.review_session_id,
+        "session_version": session.session_version,
+        "operation_id": "publish-failure",
+        "output_path": str(output),
+    }
+    original_publish = server.publish_revision_temp
+
+    def fail_publish(temp, destination):
+        raise OSError("simulated link failure")
+
+    monkeypatch.setattr(server, "publish_revision_temp", fail_publish)
+    async with Client(mcp) as client:
+        failed = await client.call_tool("write_prd_revision", payload)
+
+    assert failed.is_error
+    assert not output.exists()
+    assert not list(tmp_path.glob(".publish-failure.forge-*"))
+    assert server._reviews_store().operation_record(
+        session.review_session_id,
+        payload["operation_id"],
+        operation_type="write_revision",
+        request_digest=operation_digest(
+            "write_revision", {"output_path": str(output)}
+        ),
+    ) is None
+
+    monkeypatch.setattr(server, "publish_revision_temp", original_publish)
+    async with Client(mcp, raise_exceptions=True) as client:
+        retried = await client.call_tool("write_prd_revision", payload)
+
+    assert output.is_file()
+    assert retried.structured_content["workflow_state"] == (
+        "final_assessment_required"
     )
 
 
@@ -1279,7 +1661,107 @@ async def test_agent_fallback_can_prepare_and_apply_framing(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_agent_fallback_can_classify_statement_consistency(tmp_path):
+async def test_agent_fallback_coverage_parses_source_once(tmp_path, monkeypatch):
+    path = tmp_path / "prd.md"
+    requirement = "Playback progress syncs with the backend every 10 seconds."
+    path.write_text(requirement)
+    extraction = json.dumps(
+        {
+            "runs": [
+                _complete_null_extraction(
+                    {
+                        ("functional_requirements", "requirements"): (
+                            [requirement],
+                            requirement,
+                        )
+                    }
+                )
+            ]
+        }
+    )
+    inputs = {
+        "kind": "edge_case_coverage",
+        "source_path": str(path),
+        "extraction_json": extraction,
+    }
+    parse_calls = 0
+    original_parse = LegacyDocumentParser.parse
+
+    def counted_parse(parser, artifact):
+        nonlocal parse_calls
+        parse_calls += 1
+        return original_parse(parser, artifact)
+
+    monkeypatch.setattr(LegacyDocumentParser, "parse", counted_parse)
+
+    async with Client(mcp, raise_exceptions=True) as client:
+        prepared = await client.call_tool("prepare_prd_advisory", inputs)
+        prompt = prepared.structured_content["prompt"]
+        pair_lines = prompt.split("PAIRS:\n", 1)[1].split(
+            "\n\nEVIDENCE OPTIONS:", 1
+        )[0].splitlines()
+        completion = json.dumps(
+            {
+                "items": [
+                    {"pair": index, "status": 2, "evidence": 0}
+                    for index, _ in enumerate(pair_lines, start=1)
+                ]
+            }
+        )
+        parse_calls = 0
+        monkeypatch.setattr(
+            ingest_document_module, "_SNAPSHOT_CACHE", SnapshotCache()
+        )
+
+        applied = await client.call_tool(
+            "apply_prd_advisory",
+            {**inputs, "completions": [completion] * 3},
+        )
+
+    assert not applied.is_error
+    assert parse_calls == 1
+
+
+@pytest.mark.anyio
+async def test_agent_fallback_contextualization_parses_source_once(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "prd.md"
+    path.write_text(_CONTEXTUALIZE_DOC)
+    inputs = {
+        "kind": "contextualize",
+        "source_path": str(path),
+        "extraction_json": _CONTEXTUALIZE_EXTRACTION,
+    }
+    parse_calls = 0
+    original_parse = LegacyDocumentParser.parse
+
+    def counted_parse(parser, artifact):
+        nonlocal parse_calls
+        parse_calls += 1
+        return original_parse(parser, artifact)
+
+    monkeypatch.setattr(LegacyDocumentParser, "parse", counted_parse)
+
+    async with Client(mcp, raise_exceptions=True) as client:
+        await client.call_tool("prepare_prd_advisory", inputs)
+        parse_calls = 0
+        monkeypatch.setattr(
+            ingest_document_module, "_SNAPSHOT_CACHE", SnapshotCache()
+        )
+        applied = await client.call_tool(
+            "apply_prd_advisory",
+            {**inputs, "completions": ['{"choice": 1}']},
+        )
+
+    assert not applied.is_error
+    assert parse_calls == 1
+
+
+@pytest.mark.anyio
+async def test_agent_fallback_can_classify_statement_consistency(
+    tmp_path, monkeypatch
+):
     path = tmp_path / "prd.md"
     path.write_text(
         "Mood picker is shown after 3 consecutive hard skips.\n"
@@ -1290,11 +1772,24 @@ async def test_agent_fallback_can_classify_statement_consistency(tmp_path):
         "source_path": str(path),
         "extraction_json": _bare_extraction(),
     }
+    parse_calls = 0
+    original_parse = LegacyDocumentParser.parse
+
+    def counted_parse(parser, artifact):
+        nonlocal parse_calls
+        parse_calls += 1
+        return original_parse(parser, artifact)
+
+    monkeypatch.setattr(LegacyDocumentParser, "parse", counted_parse)
 
     async with Client(mcp, raise_exceptions=True) as client:
         prepared = await client.call_tool("prepare_prd_advisory", inputs)
         assert prepared.structured_content["completion_count"] == 3
         assert "CANDIDATE 1:" in prepared.structured_content["prompt"]
+        parse_calls = 0
+        monkeypatch.setattr(
+            ingest_document_module, "_SNAPSHOT_CACHE", SnapshotCache()
+        )
 
         completion = '{"relations": [{"candidate": 1, "relation": 2}]}'
         applied = await client.call_tool(
@@ -1303,6 +1798,7 @@ async def test_agent_fallback_can_classify_statement_consistency(tmp_path):
         )
 
         result = applied.structured_content["result"]
+        assert parse_calls == 1
         assert result["conflict_count"] == 1
         assert result["unclear_count"] == 0
 

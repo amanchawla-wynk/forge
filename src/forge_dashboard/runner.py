@@ -15,7 +15,6 @@ import asyncio
 from forge.extract.batch import ExtractionBatch, ExtractionFragment, ExtractionRun
 from forge.extract.parse import parse_extraction
 from forge.extract.prompt import build_extraction_prompt
-from forge.ingest.batching import batch_document, plan_fingerprint
 from forge.ingest.models import ProductContextTerm, SupplementalAnswer
 from forge.rubric.models import Rubric
 from forge.score.contextualize import (
@@ -27,9 +26,16 @@ from forge.score.contextualize import (
     parse_coverage_classification,
     parse_framing_choice,
 )
-from forge.score.edge_coverage import EdgeCaseCoverageLedger
-from forge.remediation import RemediationState, begin_remediation
-from forge.service import AssessmentResponse, assess_extractions, prepare_assessment_input
+from forge.score.edge_coverage import (
+    EdgeCaseCoverageLedger,
+    consolidate_coverage_ledgers,
+)
+from forge.remediation import RemediationState, begin_remediation_prepared
+from forge.service import (
+    AssessmentResponse,
+    assess_prepared_extractions,
+    prepare_assessment,
+)
 
 from forge_dashboard.llm import LLMCallError, call_model
 from forge_dashboard.models import LLMConfig
@@ -78,16 +84,19 @@ async def run_assessment_with_remediation(
 ) -> tuple[AssessmentResponse, RemediationState | None]:
     answers = supplemental_answers or []
     context = product_context or []
-    document, rubric = prepare_assessment_input(
+    prepared = prepare_assessment(
         source_path, rubric_name, answers, context
     )
-    batches = batch_document(document)
+    rubric = prepared.rubric
+    batches = prepared.batches
     run_count = rubric.extraction_runs
 
     if len(batches) == 1:
         batch, models = await _run_single_batch(batches[0].document, rubric, llm, run_count)
     else:
-        batch, models = await _run_multi_batch(batches, rubric, llm, run_count)
+        batch, models = await _run_multi_batch(
+            batches, rubric, llm, run_count, prepared.plan_fingerprint
+        )
 
     # Framing affects question wording only. Detect it once from already-
     # verified facts; a failed or malformed call safely leaves the rubric's
@@ -95,38 +104,31 @@ async def run_assessment_with_remediation(
     # the browser can resubmit it on later remediation turns without drift.
     resolved_framing = framing
     if resolved_framing is None and rubric.framings:
-        preliminary = assess_extractions(
-            source_path,
+        preliminary = assess_prepared_extractions(
+            prepared,
             batch,
-            rubric_name=rubric_name,
             client_models=models,
-            supplemental_answers=answers,
-            product_context=context,
             display_name=display_name,
         )
         resolved_framing = await _detect_framing(preliminary, rubric, llm)
 
-    preliminary = assess_extractions(
-        source_path,
+    preliminary = assess_prepared_extractions(
+        prepared,
         batch,
-        rubric_name=rubric_name,
         client_models=models,
-        supplemental_answers=answers,
-        product_context=context,
         framing=resolved_framing,
         display_name=display_name,
     )
-    coverage = edge_case_coverage or await _classify_edge_case_coverage(preliminary, llm)
+    coverage = edge_case_coverage or await _classify_edge_case_coverage(
+        preliminary, rubric, llm
+    )
     response = (
         preliminary
         if coverage is None
-        else assess_extractions(
-            source_path,
+        else assess_prepared_extractions(
+            prepared,
             batch,
-            rubric_name=rubric_name,
             client_models=models,
-            supplemental_answers=answers,
-            product_context=context,
             framing=resolved_framing,
             display_name=display_name,
             edge_case_coverage=coverage,
@@ -137,11 +139,9 @@ async def run_assessment_with_remediation(
         # answer collection and checkpoint deltas instead.
         return response, None
     extraction_json = batch.model_dump_json()
-    turn = begin_remediation(
-        source_path,
+    turn = begin_remediation_prepared(
+        prepared,
         extraction_json,
-        rubric_name=rubric_name,
-        product_context=context,
         framing=resolved_framing,
         edge_case_coverage=coverage,
         client_models=models,
@@ -163,7 +163,7 @@ async def _detect_framing(
 
 
 async def _classify_edge_case_coverage(
-    response: AssessmentResponse, llm: LLMConfig
+    response: AssessmentResponse, rubric: Rubric, llm: LLMConfig
 ) -> EdgeCaseCoverageLedger | None:
     requirements = build_requirement_candidates(response.assessment)
     if not requirements:
@@ -178,16 +178,25 @@ async def _classify_edge_case_coverage(
     if not pairs:
         return None
     prompt = build_coverage_prompt(requirements, evidence_candidates, pairs)
-    try:
-        completion = await call_model(llm, prompt, max_tokens=4_000, temperature=0)
-    except LLMCallError:
-        return None
-    return parse_coverage_classification(
-        completion.text,
-        requirements,
-        evidence_candidates,
-        pairs,
+    completions = await _gather_completions(
+        llm, [prompt] * rubric.extraction_runs, max_tokens=4_000
     )
+    ledgers = []
+    for completion in completions:
+        ledger = parse_coverage_classification(
+            completion.text,
+            requirements,
+            evidence_candidates,
+            pairs,
+        )
+        if ledger is None:
+            raise ExtractionFailed(
+                "model returned invalid edge-case coverage JSON; expected every "
+                "declared pair exactly once with closed-set status/evidence indexes"
+            )
+        ledgers.append(ledger)
+    consolidated, _ = consolidate_coverage_ledgers(ledgers)
+    return consolidated
 
 
 async def _run_single_batch(document, rubric, llm: LLMConfig, run_count: int):
@@ -198,8 +207,9 @@ async def _run_single_batch(document, rubric, llm: LLMConfig, run_count: int):
     return ExtractionBatch(runs=runs), models
 
 
-async def _run_multi_batch(batches, rubric, llm: LLMConfig, run_count: int):
-    fingerprint = plan_fingerprint(batches, rubric.version)
+async def _run_multi_batch(
+    batches, rubric, llm: LLMConfig, run_count: int, fingerprint: str
+):
     prompts = [
         build_extraction_prompt(batch.document, rubric, batch_id=batch.id)
         for batch in batches
@@ -227,10 +237,15 @@ async def _run_multi_batch(batches, rubric, llm: LLMConfig, run_count: int):
     return ExtractionBatch(runs=runs), models
 
 
-async def _gather_completions(llm: LLMConfig, prompts: list[str]):
+async def _gather_completions(
+    llm: LLMConfig,
+    prompts: list[str],
+    *,
+    max_tokens: int = MAX_EXTRACTION_TOKENS,
+):
     results = await asyncio.gather(
         *(
-            call_model(llm, prompt, max_tokens=MAX_EXTRACTION_TOKENS)
+            call_model(llm, prompt, max_tokens=max_tokens)
             for prompt in prompts
         ),
         return_exceptions=True,

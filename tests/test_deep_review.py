@@ -33,6 +33,10 @@ def _set_requirement(criteria, quote: str) -> None:
     field["evidence"] = {"quote": quote}
 
 
+def _empty_extraction_json() -> str:
+    return json.dumps({"criteria": _empty_criteria()})
+
+
 def test_deep_review_preserves_cross_batch_claims_and_finds_threshold_conflicts(
     tmp_path,
 ):
@@ -47,7 +51,7 @@ def test_deep_review_preserves_cross_batch_claims_and_finds_threshold_conflicts(
     batches = batch_document(ingest_document(path))
     assert len(batches) > 1
     rubric = load_rubric("prd")
-    fingerprint = plan_fingerprint(batches, rubric.version)
+    fingerprint = plan_fingerprint(batches, rubric.id, rubric.version)
     fragments = []
     for batch in batches:
         criteria = _empty_criteria()
@@ -91,20 +95,9 @@ def test_deep_review_merges_repeated_run_observations(tmp_path):
     quote = "Hard skip means watch duration <= 5 secs."
     path = tmp_path / "prd.md"
     path.write_text(quote)
-    payload = {
-        "criteria": [
-            {
-                "criterion_id": "functional_requirements",
-                "fields": [
-                    {
-                        "name": "requirements",
-                        "value": [quote],
-                        "evidence": {"quote": quote},
-                    }
-                ],
-            }
-        ]
-    }
+    criteria = _empty_criteria()
+    _set_requirement(criteria, quote)
+    payload = {"criteria": criteria}
 
     response = assess_extraction_json(
         str(path), json.dumps({"runs": [payload, payload, payload]})
@@ -120,7 +113,7 @@ def test_deep_review_exposes_deterministic_claim_interpretations(tmp_path):
     path = tmp_path / "interpreted-prd.md"
     path.write_text(quote)
 
-    response = assess_extraction_json(str(path), '{"criteria": []}')
+    response = assess_extraction_json(str(path), _empty_extraction_json())
 
     claim = next(item for item in response.deep_review.claims if item.quote == quote)
     interpretation = next(
@@ -141,7 +134,7 @@ def test_deep_review_finds_conflicting_relative_timelines(tmp_path):
     path = tmp_path / "timeline-prd.md"
     path.write_text(first + "\n" + second)
 
-    response = assess_extraction_json(str(path), '{"criteria": []}')
+    response = assess_extraction_json(str(path), _empty_extraction_json())
 
     findings = [
         finding
@@ -166,7 +159,7 @@ def test_deep_review_normalizes_equivalent_exact_dates(tmp_path):
         "Beta launch is scheduled for October 1, 2026."
     )
 
-    response = assess_extraction_json(str(path), '{"criteria": []}')
+    response = assess_extraction_json(str(path), _empty_extraction_json())
 
     assert not any(
         finding.kind == "conflicting_timeline"
@@ -181,7 +174,7 @@ def test_deep_review_does_not_call_overlapping_timeline_ranges_a_conflict(tmp_pa
         "Top trending contents go live 2-3 weeks after MVP launch."
     )
 
-    response = assess_extraction_json(str(path), '{"criteria": []}')
+    response = assess_extraction_json(str(path), _empty_extraction_json())
 
     assert not any(
         finding.kind == "conflicting_timeline"
@@ -195,7 +188,7 @@ def test_deep_review_finds_metric_formula_with_undeclared_event(tmp_path):
     path = tmp_path / "metric-prd.md"
     path.write_text(declaration + "\n" + formula)
 
-    response = assess_extraction_json(str(path), '{"criteria": []}')
+    response = assess_extraction_json(str(path), _empty_extraction_json())
 
     findings = [
         finding
@@ -213,7 +206,7 @@ def test_deep_review_abstains_when_no_events_are_declared(tmp_path):
     path = tmp_path / "metric-prd.md"
     path.write_text("Conversion is checkout_started / checkout_completed.")
 
-    response = assess_extraction_json(str(path), '{"criteria": []}')
+    response = assess_extraction_json(str(path), _empty_extraction_json())
 
     assert not any(
         finding.kind == "metric_not_computable"
@@ -230,7 +223,7 @@ def test_deep_review_accepts_complete_formula_and_ignores_deadlines(tmp_path):
         "GA must happen by October 15, 2026."
     )
 
-    response = assess_extraction_json(str(path), '{"criteria": []}')
+    response = assess_extraction_json(str(path), _empty_extraction_json())
 
     assert not any(
         finding.kind in {"metric_not_computable", "conflicting_timeline"}
@@ -255,7 +248,7 @@ def test_deep_review_finds_enum_domain_and_schema_type_conflicts(tmp_path):
         "All genre tags attached to this item"
     )
 
-    response = assess_extraction_json(str(path), '{"criteria": []}')
+    response = assess_extraction_json(str(path), _empty_extraction_json())
     by_kind = {finding.kind: finding for finding in response.deep_review.findings}
 
     enum_finding = by_kind["enum_domain_conflict"]
@@ -285,7 +278,7 @@ def test_deep_review_abstains_for_scoped_enum_and_schema_variants(tmp_path):
         "Product 2 schema: genre_tags: string"
     )
 
-    response = assess_extraction_json(str(path), '{"criteria": []}')
+    response = assess_extraction_json(str(path), _empty_extraction_json())
 
     assert not any(
         finding.kind in {"enum_domain_conflict", "schema_type_conflict"}
@@ -306,7 +299,7 @@ def test_deep_review_accepts_repeated_compatible_contract_declarations(tmp_path)
         "genre_tags: array"
     )
 
-    response = assess_extraction_json(str(path), '{"criteria": []}')
+    response = assess_extraction_json(str(path), _empty_extraction_json())
 
     assert not any(
         finding.kind in {"enum_domain_conflict", "schema_type_conflict"}
@@ -326,7 +319,7 @@ def test_deep_review_finds_polarity_rank_and_precedence_conflicts(tmp_path):
         "freshness_source before editorial_source."
     )
 
-    response = assess_extraction_json(str(path), '{"criteria": []}')
+    response = assess_extraction_json(str(path), _empty_extraction_json())
     by_kind = {finding.kind: finding for finding in response.deep_review.findings}
 
     assert len(by_kind["opposite_polarity"].evidence) == 2
@@ -348,7 +341,7 @@ def test_deep_review_abstains_from_cross_scope_decision_rules(tmp_path):
         "Phase 2 engagement_source before editorial_source."
     )
 
-    response = assess_extraction_json(str(path), '{"criteria": []}')
+    response = assess_extraction_json(str(path), _empty_extraction_json())
 
     assert not any(
         finding.kind in {"opposite_polarity", "duplicate_rank", "precedence_cycle"}

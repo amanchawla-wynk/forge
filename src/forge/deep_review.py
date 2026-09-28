@@ -119,6 +119,7 @@ class DeepReviewReport(BaseModel):
     graph: RequirementGraph = Field(default_factory=RequirementGraph)
     candidate_count: int = 0
     advisory: bool = True
+    evaluation_revision: int = 0
 
 
 def claim_occurrences(

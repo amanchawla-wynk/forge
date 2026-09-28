@@ -6,6 +6,7 @@ import pytest
 
 from forge.ingest.document import add_supplemental_answers, ingest_document
 from forge.ingest.models import SupplementalAnswer
+from forge.rubric.loader import load_rubric
 from forge.rubric.models import Verdict
 from forge.score.edge_coverage import (
     CoverageStatus,
@@ -22,6 +23,27 @@ from forge.service import assess_extraction_json
 
 REQUIREMENT = "Progress syncs with the backend every 10 seconds."
 COVERAGE = "When offline, progress is queued and synced after reconnection."
+
+
+def _extraction_criteria(
+    overrides: dict[tuple[str, str], dict[str, object]] | None = None,
+) -> list[dict[str, object]]:
+    overrides = overrides or {}
+    return [
+        {
+            "criterion_id": criterion.id,
+            "fields": [
+                {
+                    "name": field.name,
+                    "value": None,
+                    "evidence": None,
+                    **overrides.get((criterion.id, field.name), {}),
+                }
+                for field in criterion.fields
+            ],
+        }
+        for criterion in load_rubric("prd").criteria
+    ]
 
 
 def _item(
@@ -138,25 +160,21 @@ def test_ledger_overrides_coarse_edge_field_and_drives_question(tmp_path):
     extraction = {
         "runs": [
             {
-                "criteria": [
+                "criteria": _extraction_criteria(
                     {
-                        "criterion_id": "edge_cases_and_states",
-                        "fields": [
-                            {
-                                "name": name,
-                                "value": generic,
-                                "evidence": {"quote": generic},
-                            }
-                            for name in [
-                                "error_states",
-                                "empty_or_edge_states",
-                                "transitional_or_degraded_states",
-                                "supported_platforms",
-                                "accessibility_approach",
-                            ]
-                        ],
+                        ("edge_cases_and_states", name): {
+                            "value": generic,
+                            "evidence": {"quote": generic},
+                        }
+                        for name in [
+                            "error_states",
+                            "empty_or_edge_states",
+                            "transitional_or_degraded_states",
+                            "supported_platforms",
+                            "accessibility_approach",
+                        ]
                     }
-                ]
+                )
             }
         ]
     }

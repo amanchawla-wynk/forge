@@ -10,7 +10,9 @@ It never writes the key to disk, a database, or a log.
 
 from __future__ import annotations
 
+import hashlib
 import os
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -42,7 +44,10 @@ from forge_dashboard.models import (
     UploadResponse,
 )
 from forge.remediation import (
+    FinalVerification,
+    RemediationState,
     apply_checkpoint,
+    assert_current_source,
     current_turn,
     prepare_checkpoint,
     record_answer,
@@ -56,7 +61,9 @@ from forge.sessions import (
     operation_digest,
     next_action_for,
 )
+from forge.service import AssessmentResponse
 from forge.revise import (
+    RevisionResult,
     approve_revision_plan,
     materialize_integrated_prd_revision,
     preview_integrated_revision,
@@ -65,7 +72,7 @@ from forge_dashboard.runner import (
     ExtractionFailed,
     run_assessment_with_remediation,
 )
-from forge_dashboard.storage import DocumentStore
+from forge_dashboard.storage import DocumentStore, StoredDocument
 
 _VERIFY_PROMPT = "Reply with exactly the single word: OK"
 _MAX_UPLOAD_BYTES = int(
@@ -123,6 +130,25 @@ def _require_workflow(
         )
 
 
+def _assert_document_matches_session(stored: StoredDocument, session) -> None:
+    stored_path = stored.path.expanduser().resolve()
+    session_path = Path(session.state.source_path).expanduser().resolve()
+    if stored_path != session_path:
+        raise ValueError("document belongs to a different review source")
+    assert_current_source(session.state, str(stored_path))
+
+
+def _generated_from_metadata(metadata: dict[str, object]) -> StoredDocument:
+    try:
+        return StoredDocument(
+            document_id=str(metadata["generated_document_id"]),
+            filename=str(metadata["generated_filename"]),
+            path=Path(str(metadata["generated_path"])),
+        )
+    except KeyError as error:
+        raise ValueError("pending revision operation metadata is incomplete") from error
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -173,8 +199,12 @@ async def create_assessment(request: AssessRequest) -> DashboardAssessmentRespon
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
-    matches = _reviews().find(str(stored.path), workspace_root=str(_store.root))
-    if matches and not request.start_new:
+    matches = _reviews().find(
+        str(stored.path),
+        workspace_root=str(_store.root),
+        rubric_name=request.rubric_name,
+    )
+    if any(match.compatible for match in matches) and not request.start_new:
         raise HTTPException(
             status_code=409,
             detail=(
@@ -245,6 +275,8 @@ def find_document_reviews(document_id: str) -> DashboardReviewDiscovery:
                 pending_answer_count=item.pending_answer_count,
                 client_name=item.client_name,
                 updated_at=item.updated_at,
+                compatible=item.compatible,
+                incompatibility_reasons=item.incompatibility_reasons,
             )
             for item in matches
         ],
@@ -387,7 +419,7 @@ def record_remediation_answer(
 async def checkpoint_remediation(
     session_id: str, request: CheckpointRequest
 ) -> DashboardCheckpointResponse:
-    reserved = False
+    pending_operation = False
     try:
         request_digest = operation_digest(
             "dashboard_checkpoint",
@@ -397,20 +429,22 @@ async def checkpoint_remediation(
                 "model": request.llm.model,
             },
         )
-        cached = _reviews().operation_result(
+        operation = _reviews().operation_record(
             session_id,
             request.operation_id,
             operation_type="dashboard_checkpoint",
             request_digest=request_digest,
         )
-        if cached is not None:
+        if operation is not None and operation["status"] == "completed":
             session = _reviews().get(session_id)
             return DashboardCheckpointResponse(
                 review_session_id=session_id,
                 session_version=session.session_version,
                 workflow_state=session.workflow_state,
                 next_action=session.next_action,
-                result=DashboardCheckpointResult.model_validate_json(cached),
+                result=DashboardCheckpointResult.model_validate_json(
+                    operation["result_json"]
+                ),
             )
         session = _reviews().get(session_id)
         _require_workflow(
@@ -418,22 +452,42 @@ async def checkpoint_remediation(
             {WorkflowState.CHECKPOINT_REQUIRED, WorkflowState.AWAITING_DELTA_EXTRACTION},
             "checkpoint",
         )
-        _reviews().reserve_operation(
-            session_id,
-            expected_version=request.session_version,
-            operation_id=request.operation_id,
-            operation_type="dashboard_checkpoint",
-            request_digest=request_digest,
-        )
-        reserved = True
+        if operation is None:
+            _reviews().reserve_operation(
+                session_id,
+                expected_version=request.session_version,
+                operation_id=request.operation_id,
+                operation_type="dashboard_checkpoint",
+                request_digest=request_digest,
+                metadata={"stage": "reserved"},
+            )
+            metadata = {"stage": "reserved"}
+        else:
+            metadata = operation["metadata"]
+        pending_operation = True
         plan = prepare_checkpoint(session.state)
-        completion = await call_model(
-            request.llm,
-            plan.extraction_prompt,
-            max_tokens=4_000,
-            temperature=0,
-        )
-        result = apply_checkpoint(session.state, completion.text)
+        if metadata.get("stage") == "inference_completed":
+            completion_text = str(metadata["completion_text"])
+        else:
+            completion = await call_model(
+                request.llm,
+                plan.extraction_prompt,
+                max_tokens=4_000,
+                temperature=0,
+            )
+            completion_text = completion.text
+            metadata = {
+                "stage": "inference_completed",
+                "completion_text": completion_text,
+            }
+            _reviews().update_operation_metadata(
+                session_id,
+                request.operation_id,
+                operation_type="dashboard_checkpoint",
+                request_digest=request_digest,
+                metadata=metadata,
+            )
+        result = apply_checkpoint(session.state, completion_text)
         turn = current_turn(result.state)
         session = _reviews().update(
             session_id,
@@ -446,6 +500,8 @@ async def checkpoint_remediation(
                 state=DashboardReviewState(
                     assessment=result.state.assessment,
                     report=result.state.report,
+                    deep_review=result.state.deep_review,
+                    evaluation_revision=result.state.evaluation_revision,
                     verified_answers=result.state.verified_answers,
                     framing=result.state.framing,
                     edge_case_coverage=result.state.edge_case_coverage,
@@ -465,15 +521,15 @@ async def checkpoint_remediation(
             complete_reserved=True,
         )
     except KeyError as error:
-        if reserved:
+        if pending_operation:
             _reviews().cancel_operation(session_id, request.operation_id)
         raise HTTPException(status_code=404, detail=str(error)) from error
     except LLMCallError as error:
-        if reserved:
+        if pending_operation:
             _reviews().cancel_operation(session_id, request.operation_id)
         raise HTTPException(status_code=502, detail=str(error)) from error
     except (ValueError, FileNotFoundError) as error:
-        if reserved:
+        if pending_operation:
             _reviews().cancel_operation(session_id, request.operation_id)
         raise HTTPException(status_code=400, detail=str(error)) from error
     return DashboardCheckpointResponse(
@@ -485,6 +541,8 @@ async def checkpoint_remediation(
             state=DashboardReviewState(
                 assessment=result.state.assessment,
                 report=result.state.report,
+                deep_review=result.state.deep_review,
+                evaluation_revision=result.state.evaluation_revision,
                 verified_answers=result.state.verified_answers,
                 framing=result.state.framing,
                 edge_case_coverage=result.state.edge_case_coverage,
@@ -514,39 +572,76 @@ def delete_remediation(session_id: str) -> dict[str, object]:
 def preview_revision(
     document_id: str, request: RevisionPreviewRequest
 ) -> DashboardRevisionPreview:
+    pending_operation = False
+    plan_id: str | None = None
     try:
         stored = _store.get(document_id)
+        session = _reviews().get(request.review_session_id)
+        _assert_document_matches_session(stored, session)
         request_digest = operation_digest(
             "preview_revision",
             {
                 "document_id": document_id,
-                "answers": [
-                    answer.model_dump(mode="json")
-                    for answer in request.supplemental_answers
-                ],
                 "section_overrides": request.section_overrides,
             },
         )
-        cached = _reviews().operation_result(
+        operation = _reviews().operation_record(
             request.review_session_id,
             request.operation_id,
             operation_type="preview_revision",
             request_digest=request_digest,
         )
-        if cached is not None:
-            return DashboardRevisionPreview.model_validate_json(cached)
-        session = _reviews().get(request.review_session_id)
+        if operation is not None and operation["status"] == "completed":
+            return DashboardRevisionPreview.model_validate_json(
+                operation["result_json"]
+            )
         _require_workflow(
             session.workflow_state,
             {WorkflowState.REVISION_READY},
             "preview revision",
         )
-        plan = preview_integrated_revision(
-            stored.path,
-            request.supplemental_answers,
-            section_overrides=request.section_overrides,
-        )
-        plan_id = _store.save_revision_plan(document_id, plan)
+        if operation is None:
+            _reviews().reserve_operation(
+                request.review_session_id,
+                expected_version=request.session_version,
+                operation_id=request.operation_id,
+                operation_type="preview_revision",
+                request_digest=request_digest,
+                metadata={"stage": "reserved"},
+            )
+            metadata = {"stage": "reserved"}
+        else:
+            metadata = operation["metadata"]
+        pending_operation = True
+        if metadata.get("stage") == "plan_saved":
+            plan_id = str(metadata["plan_id"])
+            planned_document_id, plan = _store.get_revision_plan(plan_id)
+            if planned_document_id != document_id:
+                raise ValueError("pending revision plan belongs to a different document")
+        else:
+            plan_id = _store.revision_plan_id(
+                request.review_session_id, request.operation_id
+            )
+            try:
+                planned_document_id, plan = _store.get_revision_plan(plan_id)
+                if planned_document_id != document_id:
+                    raise ValueError(
+                        "pending revision plan belongs to a different document"
+                    )
+            except KeyError:
+                plan = preview_integrated_revision(
+                    session.state.source_path,
+                    session.state.verified_answers,
+                    section_overrides=request.section_overrides,
+                )
+                _store.save_revision_plan(document_id, plan, plan_id=plan_id)
+            _reviews().update_operation_metadata(
+                request.review_session_id,
+                request.operation_id,
+                operation_type="preview_revision",
+                request_digest=request_digest,
+                metadata={"stage": "plan_saved", "plan_id": plan_id},
+            )
         response = DashboardRevisionPreview(
             plan_id=plan_id,
             plan_digest=plan.plan_digest,
@@ -557,21 +652,43 @@ def preview_revision(
             workflow_state=WorkflowState.AWAITING_REVISION_APPROVAL,
             next_action=next_action_for(WorkflowState.AWAITING_REVISION_APPROVAL),
         )
+        previewed_state = session.state.model_copy(
+            update={"revision_plan": plan}, deep=True
+        )
         session = _reviews().update(
             request.review_session_id,
             expected_version=request.session_version,
             operation_id=request.operation_id,
-            state=session.state,
+            state=previewed_state,
             workflow_state=WorkflowState.AWAITING_REVISION_APPROVAL,
             event_type="revision_previewed",
             result_json=response.model_dump_json(),
             event_payload={"plan_id": plan_id, "plan_digest": plan.plan_digest},
             operation_type="preview_revision",
             request_digest=request_digest,
+            complete_reserved=True,
         )
     except KeyError as error:
+        if pending_operation:
+            if plan_id is not None:
+                try:
+                    _store.delete_revision_plan(plan_id)
+                except KeyError:
+                    pass
+            _reviews().cancel_operation(
+                request.review_session_id, request.operation_id
+            )
         raise HTTPException(status_code=404, detail=str(error)) from error
     except (ValueError, FileNotFoundError) as error:
+        if pending_operation:
+            if plan_id is not None:
+                try:
+                    _store.delete_revision_plan(plan_id)
+                except KeyError:
+                    pass
+            _reviews().cancel_operation(
+                request.review_session_id, request.operation_id
+            )
         raise HTTPException(status_code=400, detail=str(error)) from error
     return response.model_copy(
         update={
@@ -589,10 +706,15 @@ def preview_revision(
 async def create_revision(
     document_id: str, request: MaterializeRevisionRequest
 ) -> DashboardRevisionResponse:
-    reserved = False
-    generated = None
+    pending_operation = False
+    metadata: dict[str, object] = {}
+    generated: StoredDocument | None = None
     try:
         stored = _store.get(document_id)
+        original_session = _reviews().get(request.review_session_id)
+        _assert_document_matches_session(stored, original_session)
+        if request.rubric_name != original_session.state.rubric_name:
+            raise ValueError("final assessment must use the originating review rubric")
         request_digest = operation_digest(
             "materialize_revision",
             {
@@ -604,122 +726,279 @@ async def create_revision(
                 "rubric_name": request.rubric_name,
             },
         )
-        cached = _reviews().operation_result(
+        operation = _reviews().operation_record(
             request.review_session_id,
             request.operation_id,
             operation_type="materialize_revision",
             request_digest=request_digest,
         )
-        if cached is not None:
-            return DashboardRevisionResponse.model_validate_json(cached)
-        original_session = _reviews().get(request.review_session_id)
+        if operation is not None and operation["status"] == "completed":
+            try:
+                _store.delete_revision_plan(request.plan_id)
+            except KeyError:
+                pass
+            return DashboardRevisionResponse.model_validate_json(
+                operation["result_json"]
+            )
         _require_workflow(
             original_session.workflow_state,
             {WorkflowState.AWAITING_REVISION_APPROVAL},
             "materialize revision",
         )
-        _reviews().reserve_operation(
-            request.review_session_id,
-            expected_version=request.session_version,
-            operation_id=request.operation_id,
-            operation_type="materialize_revision",
-            request_digest=request_digest,
-        )
-        reserved = True
+        if operation is None:
+            _reviews().reserve_operation(
+                request.review_session_id,
+                expected_version=request.session_version,
+                operation_id=request.operation_id,
+                operation_type="materialize_revision",
+                request_digest=request_digest,
+                metadata={"stage": "reserved"},
+            )
+            metadata = {"stage": "reserved"}
+        else:
+            metadata = operation["metadata"]
+        pending_operation = True
+
+        def persist_stage(stage: str, **values: object) -> None:
+            nonlocal metadata
+            metadata = {**metadata, **values, "stage": stage}
+            _reviews().update_operation_metadata(
+                request.review_session_id,
+                request.operation_id,
+                operation_type="materialize_revision",
+                request_digest=request_digest,
+                metadata=metadata,
+            )
+
         planned_document_id, plan = _store.get_revision_plan(request.plan_id)
         if planned_document_id != document_id:
             raise ValueError("revision plan belongs to a different document")
+        if (
+            original_session.state.revision_plan is None
+            or original_session.state.revision_plan.plan_digest != plan.plan_digest
+            or original_session.state.revision_plan != plan
+        ):
+            raise ValueError(
+                "revision plan does not exactly match the plan previewed by this review session"
+            )
+        if (
+            plan.source_path != original_session.state.source_path
+            or plan.source_sha256 != original_session.state.source_sha256
+        ):
+            raise ValueError("revision plan belongs to a different review source")
         approved = approve_revision_plan(plan, actions=request.actions)
         filename = (
             f"{Path(stored.filename).stem} - Forge Revision"
             f"{Path(stored.filename).suffix}"
         )
-        generated = _store.allocate_generated(filename)
-        revision = materialize_integrated_prd_revision(
-            stored.path, generated.path, approved
-        )
-        result, remediation_state = await run_assessment_with_remediation(
-            str(generated.path),
-            request.llm,
-            rubric_name=request.rubric_name,
-            display_name=Path(filename).stem,
-        )
-        _store.register_generated(generated)
-    except KeyError as error:
-        if reserved:
-            _reviews().cancel_operation(
-                request.review_session_id, request.operation_id
+        if "generated_document_id" in metadata:
+            generated = _generated_from_metadata(metadata)
+            if generated.filename != filename:
+                raise ValueError("pending revision allocation does not match request")
+        else:
+            generated = _store.allocate_generated(filename)
+            persist_stage(
+                "allocated",
+                generated_document_id=generated.document_id,
+                generated_filename=generated.filename,
+                generated_path=str(generated.path),
             )
+
+        completed_stages = {
+            "materialized",
+            "assessed",
+            "registered",
+            "final_session",
+            "linked",
+        }
+        if metadata.get("stage") in completed_stages:
+            revision = RevisionResult.model_validate_json(str(metadata["revision_json"]))
+            if (
+                not generated.path.is_file()
+                or hashlib.sha256(generated.path.read_bytes()).hexdigest()
+                != metadata.get("artifact_sha256")
+            ):
+                raise ValueError("pending generated revision artifact is unavailable")
+        else:
+            generated.path.unlink(missing_ok=True)
+            revision = materialize_integrated_prd_revision(
+                original_session.state.source_path, generated.path, approved
+            )
+            persist_stage(
+                "materialized",
+                revision_json=revision.model_dump_json(),
+                artifact_sha256=hashlib.sha256(generated.path.read_bytes()).hexdigest(),
+            )
+
+        if metadata.get("stage") in {"assessed", "registered", "final_session", "linked"}:
+            result = AssessmentResponse.model_validate_json(
+                str(metadata["assessment_json"])
+            )
+            remediation_state_json = metadata.get("remediation_state_json")
+            remediation_state = (
+                RemediationState.model_validate_json(str(remediation_state_json))
+                if remediation_state_json is not None
+                else None
+            )
+        else:
+            result, remediation_state = await run_assessment_with_remediation(
+                str(generated.path),
+                request.llm,
+                rubric_name=request.rubric_name,
+                display_name=Path(filename).stem,
+            )
+            if (
+                remediation_state is not None
+                and remediation_state.source_snapshot is not None
+            ):
+                _reviews().put_snapshot(remediation_state.source_snapshot)
+            persist_stage(
+                "assessed",
+                assessment_json=result.model_dump_json(),
+                remediation_state_json=(
+                    remediation_state.model_dump_json()
+                    if remediation_state is not None
+                    else None
+                ),
+            )
+
+        _store.register_generated(generated)
+        if metadata.get("stage") not in {"registered", "final_session", "linked"}:
+            persist_stage("registered")
+
+        final_review_session_id = metadata.get("final_review_session_id")
+        session = None
+        if remediation_state is not None:
+            if final_review_session_id is None:
+                final_review_session_id = "rvw_" + uuid.uuid4().hex
+                persist_stage(
+                    "registered",
+                    final_review_session_id=final_review_session_id,
+                )
+            try:
+                session = _reviews().get(str(final_review_session_id))
+                if (
+                    session.state.source_path != remediation_state.source_path
+                    or session.state.source_sha256 != remediation_state.source_sha256
+                    or session.state.snapshot_id != remediation_state.snapshot_id
+                    or session.state.parser_fingerprint
+                    != remediation_state.parser_fingerprint
+                    or session.state.normalized_hash
+                    != remediation_state.normalized_hash
+                ):
+                    raise ValueError(
+                        "pending final review session belongs to a different artifact"
+                    )
+            except KeyError:
+                session = _reviews().create(
+                    remediation_state,
+                    review_session_id=str(final_review_session_id),
+                    workspace_root=str(_store.root),
+                    client_binding=ClientBinding(client_name="dashboard"),
+                )
+        if metadata.get("stage") not in {"final_session", "linked"}:
+            persist_stage("final_session")
+    except KeyError as error:
+        if pending_operation:
+            _cleanup_dashboard_revision_operation(request, metadata, generated)
         raise HTTPException(status_code=404, detail=str(error)) from error
     except (ValueError, FileNotFoundError) as error:
-        if reserved:
-            _reviews().cancel_operation(
-                request.review_session_id, request.operation_id
-            )
+        if pending_operation:
+            _cleanup_dashboard_revision_operation(request, metadata, generated)
         raise HTTPException(status_code=400, detail=str(error)) from error
     except ExtractionFailed as error:
-        if reserved:
-            _reviews().cancel_operation(
-                request.review_session_id, request.operation_id
-            )
-        if generated is not None:
-            generated.path.unlink(missing_ok=True)
+        if pending_operation:
+            _cleanup_dashboard_revision_operation(request, metadata, generated)
         raise HTTPException(status_code=502, detail=str(error)) from error
-    payload = result.model_dump()
-    payload["source_path"] = filename
-    payload["document_id"] = generated.document_id
-    session = (
-        _reviews().create(
-            remediation_state,
-            workspace_root=str(_store.root),
-            client_binding=ClientBinding(client_name="dashboard"),
+    try:
+        payload = result.model_dump()
+        payload["source_path"] = filename
+        payload["document_id"] = generated.document_id
+        payload["review_session_id"] = session.review_session_id if session else None
+        payload["session_version"] = session.session_version if session else None
+        payload["workflow_state"] = session.workflow_state if session else None
+        payload["next_action"] = session.next_action if session else None
+        assessment = DashboardAssessmentResponse.model_validate(payload)
+        response = DashboardRevisionResponse(
+            document_id=generated.document_id,
+            filename=filename,
+            revision=DashboardRevisionResult(
+                supplemental_answer_count=revision.supplemental_answer_count,
+                note=revision.note,
+                mode=revision.mode,
+                plan_digest=revision.plan_digest,
+                final_assessment_required=revision.final_assessment_required,
+            ),
+            assessment=assessment,
         )
-        if remediation_state is not None
-        else None
-    )
-    payload["review_session_id"] = session.review_session_id if session else None
-    payload["session_version"] = session.session_version if session else None
-    payload["workflow_state"] = session.workflow_state if session else None
-    payload["next_action"] = session.next_action if session else None
-    assessment = DashboardAssessmentResponse.model_validate(payload)
-    response = DashboardRevisionResponse(
-        document_id=generated.document_id,
-        filename=filename,
-        revision=DashboardRevisionResult(
-            supplemental_answer_count=revision.supplemental_answer_count,
-            note=revision.note,
-            mode=revision.mode,
-            plan_digest=revision.plan_digest,
-            final_assessment_required=revision.final_assessment_required,
-        ),
-        assessment=assessment,
-    )
-    original_session = _reviews().update(
-        request.review_session_id,
-        expected_version=request.session_version,
-        operation_id=request.operation_id,
-        state=original_session.state,
-        workflow_state=WorkflowState.COMPLETE,
-        event_type="revision_materialized_and_verified",
-        result_json=response.model_dump_json(),
-        event_payload={
-            "plan_id": request.plan_id,
-            "generated_document_id": generated.document_id,
-            "final_review_session_id": session.review_session_id if session else None,
-        },
-        operation_type="materialize_revision",
-        request_digest=request_digest,
-        complete_reserved=True,
-    )
-    _store.link_review_artifact(
-        review_session_id=original_session.review_session_id,
-        plan_id=request.plan_id,
-        source_document_id=document_id,
-        generated_document_id=generated.document_id,
-        final_review_session_id=session.review_session_id if session else None,
-    )
-    _store.delete_revision_plan(request.plan_id)
-    return response
+        _store.link_review_artifact(
+            review_session_id=original_session.review_session_id,
+            plan_id=request.plan_id,
+            source_document_id=document_id,
+            generated_document_id=generated.document_id,
+            final_review_session_id=session.review_session_id if session else None,
+        )
+        if metadata.get("stage") != "linked":
+            persist_stage("linked")
+        _reviews().update(
+            request.review_session_id,
+            expected_version=request.session_version,
+            operation_id=request.operation_id,
+            state=original_session.state.model_copy(
+                update={
+                    "revision_plan": None,
+                    "revision_output_path": str(generated.path.resolve()),
+                    "revision_output_sha256": str(metadata["artifact_sha256"]),
+                    "final_verification": FinalVerification(
+                        artifact_path=str(generated.path.resolve()),
+                        artifact_sha256=str(metadata["artifact_sha256"]),
+                        operation_id=request.operation_id,
+                        rubric_id=original_session.state.rubric_id,
+                        rubric_version=original_session.state.rubric_version,
+                        supplemental_answer_count=0,
+                        assessment=result,
+                    ),
+                },
+                deep=True,
+            ),
+            workflow_state=WorkflowState.COMPLETE,
+            event_type="revision_materialized_and_verified",
+            result_json=response.model_dump_json(),
+            event_payload={
+                "plan_id": request.plan_id,
+                "generated_document_id": generated.document_id,
+                "final_review_session_id": session.review_session_id if session else None,
+            },
+            operation_type="materialize_revision",
+            request_digest=request_digest,
+            complete_reserved=True,
+        )
+        _store.delete_revision_plan(request.plan_id)
+        return response
+    except KeyError as error:
+        _cleanup_dashboard_revision_operation(request, metadata, generated)
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (ValueError, FileNotFoundError) as error:
+        _cleanup_dashboard_revision_operation(request, metadata, generated)
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+def _cleanup_dashboard_revision_operation(
+    request: MaterializeRevisionRequest,
+    metadata: dict[str, object],
+    generated: StoredDocument | None,
+) -> None:
+    """Compensate normal failures across the separate local SQLite stores."""
+    _store.unlink_review_artifact(request.review_session_id, request.plan_id)
+    final_review_session_id = metadata.get("final_review_session_id")
+    if isinstance(final_review_session_id, str):
+        try:
+            _reviews().delete(final_review_session_id)
+        except KeyError:
+            pass
+    if generated is not None:
+        _store.discard_generated(generated)
+    _reviews().cancel_operation(request.review_session_id, request.operation_id)
 
 
 @app.get("/api/documents/{document_id}/download")

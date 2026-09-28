@@ -22,6 +22,24 @@ _SOURCE = (
 )
 
 
+def _empty_extraction_json() -> str:
+    rubric = load_rubric("prd")
+    return json.dumps(
+        {
+            "criteria": [
+                {
+                    "criterion_id": criterion.id,
+                    "fields": [
+                        {"name": field.name, "value": None, "evidence": None}
+                        for field in criterion.fields
+                    ],
+                }
+                for criterion in rubric.criteria
+            ]
+        }
+    )
+
+
 def _claims(tmp_path):
     path = tmp_path / "prd.md"
     path.write_text(_SOURCE)
@@ -77,7 +95,7 @@ def test_classified_conflict_becomes_an_advisory_finding(tmp_path):
     assert len(findings[0].evidence) == 2
 
     response = assess_extraction_json(
-        str(path), '{"criteria": []}', consistency_ledger=ledger
+        str(path), _empty_extraction_json(), consistency_ledger=ledger
     )
     kinds = {finding.kind for finding in response.deep_review.findings}
     assert "scoped_contradiction" in kinds
@@ -109,7 +127,7 @@ def test_compatible_and_disagreeing_runs_publish_nothing(tmp_path):
     assert disputed.items[0].relation is ConsistencyRelation.UNCLEAR
 
     response = assess_extraction_json(
-        str(path), '{"criteria": []}', consistency_ledger=compatible
+        str(path), _empty_extraction_json(), consistency_ledger=compatible
     )
     assert not any(
         finding.confidence == "classified"

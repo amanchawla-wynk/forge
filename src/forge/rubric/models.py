@@ -113,6 +113,104 @@ class GateLevel(str, Enum):
     CAPS_AT_READY_WITH_GAPS = "caps_at_ready_with_gaps"
 
 
+class EvidenceRoleSpec(BaseModel):
+    id: str
+    description: str
+    required: bool = False
+
+
+class AssertionSpec(BaseModel):
+    id: str
+    description: str
+    required: bool = True
+    legacy_field: str
+    evidence_roles: list[str]
+    answer_contract: str
+    resolution_contract: str | None = None
+    prerequisite_assertion_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _default_resolution_contract(self) -> AssertionSpec:
+        if self.resolution_contract is None:
+            self.resolution_contract = self.answer_contract
+        if not self.resolution_contract.strip():
+            raise ValueError("assertion resolution_contract must not be empty")
+        return self
+
+
+class CriterionEvaluationSpec(BaseModel):
+    version: str
+    assertions: list[AssertionSpec]
+    evidence_roles: list[EvidenceRoleSpec]
+    semantic_statuses: list[
+        Literal[
+            "supported",
+            "partial",
+            "unsupported",
+            "contradictory",
+            "unclear",
+            "not_applicable",
+        ]
+    ]
+    hard_negatives: list[str]
+    fallback_question_template: str
+
+    @model_validator(mode="after")
+    def _validate_references(self) -> CriterionEvaluationSpec:
+        role_ids = [role.id for role in self.evidence_roles]
+        assertion_ids = [assertion.id for assertion in self.assertions]
+        if len(role_ids) != len(set(role_ids)):
+            raise ValueError("duplicate evaluation evidence role ids")
+        if len(assertion_ids) != len(set(assertion_ids)):
+            raise ValueError("duplicate evaluation assertion ids")
+        known_roles = set(role_ids)
+        known_assertions = set(assertion_ids)
+        for assertion in self.assertions:
+            unknown = sorted(set(assertion.evidence_roles) - known_roles)
+            if unknown:
+                raise ValueError(
+                    f"assertion {assertion.id!r} references unknown evidence roles: "
+                    + ", ".join(unknown)
+                )
+            prerequisites = assertion.prerequisite_assertion_ids
+            if len(prerequisites) != len(set(prerequisites)):
+                raise ValueError(
+                    f"assertion {assertion.id!r} has duplicate prerequisites"
+                )
+            unknown_prerequisites = sorted(set(prerequisites) - known_assertions)
+            if unknown_prerequisites:
+                raise ValueError(
+                    f"assertion {assertion.id!r} references unknown prerequisite "
+                    "assertion ids: " + ", ".join(unknown_prerequisites)
+                )
+            if assertion.id in prerequisites:
+                raise ValueError(
+                    f"assertion {assertion.id!r} cannot require itself"
+                )
+
+        prerequisites_by_id = {
+            assertion.id: assertion.prerequisite_assertion_ids
+            for assertion in self.assertions
+        }
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(assertion_id: str) -> None:
+            if assertion_id in visiting:
+                raise ValueError("evaluation assertion prerequisite cycle detected")
+            if assertion_id in visited:
+                return
+            visiting.add(assertion_id)
+            for prerequisite_id in prerequisites_by_id[assertion_id]:
+                visit(prerequisite_id)
+            visiting.remove(assertion_id)
+            visited.add(assertion_id)
+
+        for assertion_id in assertion_ids:
+            visit(assertion_id)
+        return self
+
+
 class Criterion(BaseModel):
     id: str
     name: str
@@ -128,16 +226,86 @@ class Criterion(BaseModel):
     # Some criteria genuinely don't apply (e.g. no PII => no privacy section).
     # If set, the extractor may return not_applicable with a justification.
     allow_not_applicable: bool = False
+    evaluation: CriterionEvaluationSpec | None = None
 
     @model_validator(mode="after")
     def _require_at_least_one_required_field(self) -> Criterion:
         if not any(f.required for f in self.fields):
             raise ValueError(f"criterion {self.id!r} has no required fields")
+        field_names = [field.name for field in self.fields]
+        if len(field_names) != len(set(field_names)):
+            raise ValueError(f"criterion {self.id!r} has duplicate field names")
+        if self.evaluation is None:
+            self.evaluation = CriterionEvaluationSpec(
+                version="1.0",
+                evidence_roles=[
+                    EvidenceRoleSpec(
+                        id="supporting",
+                        description="Exact source spans that support the assertion.",
+                    ),
+                    EvidenceRoleSpec(
+                        id="counterevidence",
+                        description="Exact source spans that conflict with the assertion.",
+                    ),
+                    EvidenceRoleSpec(
+                        id="context",
+                        description="Exact source spans needed to interpret scope or applicability.",
+                    ),
+                ],
+                assertions=[
+                    AssertionSpec(
+                        id=field.name,
+                        description=field.description,
+                        required=field.required,
+                        legacy_field=field.name,
+                        evidence_roles=["supporting", "counterevidence", "context"],
+                        answer_contract=field.remediation_question
+                        or self.remediation_prompt,
+                        resolution_contract=field.remediation_question
+                        or self.remediation_prompt,
+                    )
+                    for field in self.fields
+                ],
+                semantic_statuses=[
+                    "supported",
+                    "partial",
+                    "unsupported",
+                    "contradictory",
+                    "unclear",
+                    "not_applicable",
+                ],
+                hard_negatives=[
+                    "A heading without substantive content is not evidence.",
+                    "An aspiration, example, or implementation observation is not a committed requirement.",
+                    "A placeholder such as TBD, unknown, or to be decided is not a resolved decision.",
+                ],
+                fallback_question_template=self.remediation_prompt,
+            )
+        known_fields = set(field_names)
+        for assertion in self.evaluation.assertions:
+            if assertion.legacy_field not in known_fields:
+                raise ValueError(
+                    f"criterion {self.id!r} evaluation assertion {assertion.id!r} "
+                    f"references unknown legacy field {assertion.legacy_field!r}"
+                )
         return self
 
     @property
     def required_fields(self) -> list[FieldSpec]:
         return [f for f in self.fields if f.required]
+
+    def field(self, field_name: str) -> FieldSpec:
+        for field in self.fields:
+            if field.name == field_name:
+                return field
+        raise KeyError(field_name)
+
+    def assertion(self, assertion_id: str) -> AssertionSpec:
+        assert self.evaluation is not None
+        for assertion in self.evaluation.assertions:
+            if assertion.id == assertion_id:
+                return assertion
+        raise KeyError(assertion_id)
 
 
 class Framing(BaseModel):

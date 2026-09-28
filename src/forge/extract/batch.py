@@ -106,7 +106,10 @@ def _verify_extraction_run_with_claims(
         raise ValueError(
             "document requires batched extraction; submit every prepared batch fragment"
         )
-    verified = verify_run(batches[0].document, run)
+    verified = verify_run(
+        batches[0].document,
+        ExtractionRun(criteria=_validate_fragment_schema(rubric, run.criteria)),
+    )
     return verified, claim_occurrences(
         verified, run_index=run_index, batch_id=batches[0].id
     )
@@ -199,7 +202,7 @@ def _validate_plan_fingerprint(
             + ", ".join(sorted(missing))
         )
     supplied = {fragment.plan_fingerprint for fragment in run.fragments}
-    expected = plan_fingerprint(batches, rubric.version)
+    expected = plan_fingerprint(batches, rubric.id, rubric.version)
     stale = sorted(value for value in supplied if value != expected)
     if stale:
         raise ValueError(

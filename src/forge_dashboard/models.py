@@ -12,6 +12,7 @@ from forge.score.engine import Assessment
 from forge.score.planner import Question
 from forge.score.report import NarrativeReport
 from forge.sessions import NextAction, WorkflowState
+from forge.deep_review import DeepReviewReport
 
 # "cursor" is not an LLM provider: it authenticates to Cursor's Cloud Agents
 # API with a Cursor-issued key and is handled separately from the LiteLLM
@@ -111,6 +112,8 @@ class DashboardCheckpointResponse(BaseModel):
 class DashboardReviewState(BaseModel):
     assessment: Assessment
     report: NarrativeReport
+    deep_review: DeepReviewReport | None
+    evaluation_revision: int
     verified_answers: list[SupplementalAnswer]
     framing: str | None
     edge_case_coverage: EdgeCaseCoverageLedger | None
@@ -140,6 +143,8 @@ class DashboardReviewSummary(BaseModel):
     pending_answer_count: int
     client_name: str | None
     updated_at: float
+    compatible: bool = True
+    incompatibility_reasons: list[str] = Field(default_factory=list)
 
 
 class ResumeReviewRequest(BaseModel):
@@ -151,7 +156,6 @@ class RevisionPreviewRequest(BaseModel):
     review_session_id: str
     session_version: int = Field(ge=1)
     operation_id: str = Field(min_length=1)
-    supplemental_answers: list[SupplementalAnswer] = Field(min_length=1)
     section_overrides: dict[str, str] = Field(default_factory=dict)
 
 

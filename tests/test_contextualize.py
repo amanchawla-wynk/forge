@@ -27,6 +27,27 @@ from forge.score.planner import level0_question
 from forge.service import assess_extraction_json
 
 
+def _extraction_criteria(
+    overrides: dict[tuple[str, str], dict[str, object]] | None = None,
+) -> list[dict[str, object]]:
+    overrides = overrides or {}
+    return [
+        {
+            "criterion_id": criterion.id,
+            "fields": [
+                {
+                    "name": field.name,
+                    "value": None,
+                    "evidence": None,
+                    **overrides.get((criterion.id, field.name), {}),
+                }
+                for field in criterion.fields
+            ],
+        }
+        for criterion in load_rubric("prd").criteria
+    ]
+
+
 def _candidate(index: int, criterion_id: str = "problem_statement") -> ContextCandidate:
     return ContextCandidate(
         index=index,
@@ -123,22 +144,18 @@ def test_list_items_become_candidates_only_after_individual_quote_verification(
     extraction = {
         "runs": [
             {
-                "criteria": [
+                "criteria": _extraction_criteria(
                     {
-                        "criterion_id": "non_goals",
-                        "fields": [
-                            {
-                                "name": "non_goals",
-                                "value": [
-                                    "Web is out of scope.",
-                                    "Offline downloads are excluded.",
-                                    "This invented item is not in the document.",
-                                ],
-                                "evidence": {"quote": "Web is out of scope."},
-                            }
-                        ],
+                        ("non_goals", "non_goals"): {
+                            "value": [
+                                "Web is out of scope.",
+                                "Offline downloads are excluded.",
+                                "This invented item is not in the document.",
+                            ],
+                            "evidence": {"quote": "Web is out of scope."},
+                        }
                     }
-                ]
+                )
             }
         ]
     }
@@ -235,15 +252,16 @@ def test_planner_uses_rubric_authored_opportunity_question(tmp_path):
     path = tmp_path / "Micro Dramas.md"
     path.write_text("GenZ users watch short vertical video on mobile.")
     response = assess_extraction_json(
-        str(path), json.dumps({"runs": [{"criteria": []}]}), framing="opportunity_bet"
+        str(path),
+        json.dumps({"runs": [{"criteria": _extraction_criteria()}]}),
+        framing="opportunity_bet",
     )
 
     assert response.framing == "opportunity_bet"
     assert response.next_question is not None
     assert response.next_question.framing == "opportunity_bet"
     assert response.next_question.base_question == (
-        "What opportunity is this going after, and what does the business "
-        "lose by not taking it now?"
+        "What specific opportunity is this pursuing?"
     )
     assert response.next_question.question.startswith('For "Micro Dramas":')
 
@@ -311,31 +329,24 @@ def test_coverage_matrix_uses_verified_requirement_atoms(tmp_path):
     extraction = {
         "runs": [
             {
-                "criteria": [
+                "criteria": _extraction_criteria(
                     {
-                        "criterion_id": "functional_requirements",
-                        "fields": [
-                            {
-                                "name": "primary_flow",
-                                "value": "Playback should start immediately.",
-                                "evidence": {
-                                    "quote": "Playback should start immediately."
-                                },
+                        ("functional_requirements", "primary_flow"): {
+                            "value": "Playback should start immediately.",
+                            "evidence": {
+                                "quote": "Playback should start immediately."
                             },
-                            {"name": "preconditions", "value": None},
-                            {
-                                "name": "requirements",
-                                "value": [
-                                    "Progress should sync with the backend every 10 seconds."
-                                ],
-                                "evidence": {
-                                    "quote": "Progress should sync with the backend every 10 seconds."
-                                },
+                        },
+                        ("functional_requirements", "requirements"): {
+                            "value": [
+                                "Progress should sync with the backend every 10 seconds."
+                            ],
+                            "evidence": {
+                                "quote": "Progress should sync with the backend every 10 seconds."
                             },
-                            {"name": "prioritisation", "value": None},
-                        ],
+                        },
                     }
-                ]
+                )
             }
         ]
     }
@@ -411,36 +422,19 @@ def test_coverage_positive_status_requires_evidence_index():
 
 
 def _full_extraction_payload() -> list[dict[str, object]]:
-    return [
+    return _extraction_criteria(
         {
-            "criterion_id": "problem_statement",
-            "fields": [
-                {
-                    "name": "problem",
-                    "value": "Users cannot export invoices",
-                    "evidence": {"quote": "Users cannot export invoices."},
-                },
-                {
-                    "name": "affected_users",
-                    "value": "Finance administrators",
-                    "evidence": {"quote": "Finance administrators are affected."},
-                },
-                {
-                    "name": "evidence",
-                    "value": "42 support tickets",
-                    "evidence": {"quote": "42 support tickets"},
-                },
-                {"name": "cost_of_inaction", "value": None, "evidence": None},
-            ],
-        },
-        {
-            "criterion_id": "success_metrics",
-            "fields": [
-                {"name": "primary_metric", "value": None, "evidence": None},
-                {"name": "baseline", "value": None, "evidence": None},
-                {"name": "target", "value": None, "evidence": None},
-                {"name": "measurement_window", "value": None, "evidence": None},
-                {"name": "guardrail_metric", "value": None, "evidence": None},
-            ],
-        },
-    ]
+            ("problem_statement", "problem"): {
+                "value": "Users cannot export invoices",
+                "evidence": {"quote": "Users cannot export invoices."},
+            },
+            ("problem_statement", "affected_users"): {
+                "value": "Finance administrators",
+                "evidence": {"quote": "Finance administrators are affected."},
+            },
+            ("problem_statement", "evidence"): {
+                "value": "42 support tickets",
+                "evidence": {"quote": "42 support tickets"},
+            },
+        }
+    )

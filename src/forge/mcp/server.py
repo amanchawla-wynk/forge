@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 from typing import Annotated, Any, Literal
 from collections import Counter
@@ -24,19 +26,26 @@ from pydantic import BaseModel
 from base64 import b64encode
 from dataclasses import dataclass
 
+from forge.evaluate.batch import (
+    CriterionEvaluationBatch,
+    CriterionEvaluationPlanItem,
+    VerifiedCriterionEvaluations,
+    prepare_evaluation_item,
+    verify_evaluation_batch,
+)
 from forge.extract.batch import ExtractionBatch, ExtractionFragment
 from forge.extract.models import CriterionExtraction
 from forge.ingest.batching import DocumentBatch
 from forge.rubric.models import Rubric
 from forge.extract.parse import parse_extraction
 from forge.extract.prompt import build_extraction_prompt
-from forge.ingest.batching import batch_document, plan_fingerprint
 from forge.ingest.models import (
-    NormalizedDocument,
     ProductContextTerm,
     SupplementalAnswer,
 )
 from forge.ingest.visuals import render_visual_asset
+from forge.questions.apply import apply_question_generation
+from forge.questions.models import ShadowQuestion
 from forge.rubric.loader import load_rubric
 from forge.revise import (
     RevisionPlan,
@@ -44,13 +53,18 @@ from forge.revise import (
     approve_revision_plan,
     materialize_integrated_prd_revision,
     materialize_prd_revision,
+    publish_revision_temp,
     preview_integrated_revision,
+    revision_artifact_sha256,
+    revision_operation_temp_path,
 )
 from forge.remediation import (
     CheckpointPolicy,
+    FinalVerification,
     RemediationCheckpointResult,
     RemediationTurn,
     apply_checkpoint,
+    assert_current_source,
     begin_remediation,
     current_turn,
     prepare_checkpoint,
@@ -67,6 +81,7 @@ from forge.sessions import (
     status_for,
     turn_for_session,
     workflow_for_turn,
+    next_action_for,
     operation_digest,
 )
 from forge.extract.delta import DeltaExtractionPlan
@@ -115,9 +130,11 @@ from forge.score.planner import (
 )
 from forge.service import (
     AssessmentResponse,
+    PreparedAssessmentInput,
     assess_extraction_json,
     assess_extractions,
-    prepare_assessment_input,
+    assess_prepared_extraction_json,
+    prepare_assessment,
 )
 
 
@@ -130,7 +147,14 @@ mcp = MCPServer(
         "once per batch, and submit the collected fragments to "
         "score_prd_extraction. Without sampling, call prepare_prd_assessment, "
         "complete every returned batch yourself, and submit the fragments to "
-        "score_prd_extraction. After the first assessment, call "
+        "score_prd_extraction. Call prepare_prd_evaluation and "
+        "apply_prd_evaluation only when a score-neutral "
+        "Phase 2 semantic audit is requested; its output never changes scoring. "
+        "If that result includes question_generation, complete its bounded prompt "
+        "and pass the same evaluation_json plus the completion to "
+        "apply_prd_question_generation. The result is a shadow diagnostic, not "
+        "the live remediation question. "
+        "After the first assessment, call "
         "detect_prd_framing with its assessment JSON (or the fallback "
         "extraction JSON), then pass the returned framing on later assessment "
         "calls. Return next_question to the user. For token-efficient follow-up, "
@@ -150,9 +174,14 @@ mcp = MCPServer(
         "only that cell updates on rescore. discover_edge_case_question is a "
         "lighter one-off alternative that cannot by itself move the verdict "
         "past partial. When the user approves the answers, call "
-        "preview_integrated_prd_revision, then write_integrated_prd_revision "
-        "with explicit per-edit actions to create a new editable copy. Run one "
-        "final assessment of that copy without supplemental answers. The simpler "
+        "preview_prd_revision with the current review session, then "
+        "write_integrated_prd_revision with the returned plan and explicit "
+        "per-edit actions to create a new editable copy. For final verification, "
+        "call prepare_prd_assessment on the generated output, perform every "
+        "extraction without supplemental answers, then submit that extraction "
+        "JSON to complete_prd_review. Do not submit it only to "
+        "score_prd_extraction, because that cannot complete the durable review. "
+        "The simpler "
         "write_prd_revision appendix mode remains available. Forge is advisory."
     ),
 )
@@ -301,6 +330,30 @@ class PreparedCheckpointResponse(BaseModel):
     plan: DeltaExtractionPlan
 
 
+class RevisionPreviewResponse(BaseModel):
+    review_session_id: str
+    session_version: int
+    workflow_state: WorkflowState
+    next_action: NextAction
+    plan: RevisionPlan
+
+
+class RevisionWriteResponse(BaseModel):
+    review_session_id: str
+    session_version: int
+    workflow_state: WorkflowState
+    next_action: NextAction
+    result: RevisionResult
+
+
+class FinalReviewCompletion(BaseModel):
+    review_session_id: str
+    session_version: int
+    workflow_state: WorkflowState
+    next_action: NextAction
+    assessment: AssessmentResponse
+
+
 class DeletedRemediationSession(BaseModel):
     review_session_id: str
     deleted: bool
@@ -340,6 +393,18 @@ _ALLOWED_STATES: dict[str, set[WorkflowState]] = {
     "apply_prd_checkpoint": {
         WorkflowState.AWAITING_DELTA_EXTRACTION,
     },
+    "preview_prd_revision": {
+        WorkflowState.REVISION_READY,
+    },
+    "write_integrated_prd_revision": {
+        WorkflowState.AWAITING_REVISION_APPROVAL,
+    },
+    "write_prd_revision": {
+        WorkflowState.REVISION_READY,
+    },
+    "complete_prd_review": {
+        WorkflowState.FINAL_ASSESSMENT_REQUIRED,
+    },
 }
 
 
@@ -373,6 +438,152 @@ def _session_response(session: ReviewSession) -> RemediationSessionResponse:
         next_action=session.next_action,
         turn=turn_for_session(session),
     )
+
+
+def _assert_session_source(session: ReviewSession) -> None:
+    assert_current_source(session.state)
+
+
+def _assert_revision_artifact(session: ReviewSession) -> tuple[Path, str]:
+    output_path = session.state.revision_output_path
+    expected_sha256 = session.state.revision_output_sha256
+    if output_path is None or expected_sha256 is None:
+        raise ValueError("review has no persisted generated revision artifact")
+    output = Path(output_path).expanduser().resolve()
+    if not output.is_file():
+        raise FileNotFoundError(f"generated revision not found: {output}")
+    if revision_artifact_sha256(output) != expected_sha256:
+        raise ValueError("generated revision changed after it was materialized")
+    return output, expected_sha256
+
+
+def _assert_plan_matches_session(
+    session: ReviewSession, plan: RevisionPlan
+) -> None:
+    source = str(Path(session.state.source_path).expanduser().resolve())
+    if plan.source_path != source or plan.source_sha256 != session.state.source_sha256:
+        raise ValueError("revision plan belongs to a different review source")
+    planned = Counter((edit.criterion_id, edit.answer) for edit in plan.edits)
+    verified = Counter(
+        (answer.criterion_id, answer.answer)
+        for answer in session.state.verified_answers
+    )
+    if planned != verified:
+        raise ValueError(
+            "revision plan edits do not exactly match the session's verified answers"
+        )
+    previewed = session.state.revision_plan
+    if previewed is None or previewed.plan_digest != plan.plan_digest:
+        raise ValueError(
+            "revision plan digest does not match the plan previewed by this review session"
+        )
+    if previewed != plan:
+        raise ValueError("revision plan does not exactly match the previewed plan")
+
+
+def _stage_revision_write(
+    *,
+    session: ReviewSession,
+    session_version: int,
+    operation_id: str,
+    operation_type: str,
+    request_digest: str,
+    output_path: str,
+    materialize: Callable[[Path], RevisionResult],
+) -> tuple[RevisionResult, Path]:
+    """Create or recover one revision artifact before the session commit."""
+    repository = _reviews_store()
+    output = Path(output_path).expanduser().resolve()
+    temp = revision_operation_temp_path(
+        output, session.review_session_id, operation_id
+    )
+    record = repository.operation_record(
+        session.review_session_id,
+        operation_id,
+        operation_type=operation_type,
+        request_digest=request_digest,
+    )
+    if record is None:
+        if output.exists():
+            raise ValueError(f"output already exists: {output}")
+        repository.reserve_operation(
+            session.review_session_id,
+            expected_version=session_version,
+            operation_id=operation_id,
+            operation_type=operation_type,
+            request_digest=request_digest,
+            metadata={
+                "stage": "reserved",
+                "output_path": str(output),
+                "temp_path": str(temp),
+            },
+        )
+        metadata: dict[str, Any] = {
+            "stage": "reserved",
+            "output_path": str(output),
+            "temp_path": str(temp),
+        }
+    else:
+        if record["status"] == "completed":
+            raise ValueError("operation is already completed")
+        metadata = record["metadata"]
+        if metadata.get("output_path") != str(output) or metadata.get(
+            "temp_path"
+        ) != str(temp):
+            raise ValueError("pending revision operation metadata does not match request")
+
+    if metadata.get("stage") == "ready":
+        result = RevisionResult.model_validate_json(metadata["result_json"])
+        if not temp.is_file() or revision_artifact_sha256(temp) != metadata.get(
+            "artifact_sha256"
+        ):
+            raise ValueError("pending revision temporary artifact is unavailable")
+    else:
+        if output.exists():
+            raise ValueError(f"output already exists: {output}")
+        temp.unlink(missing_ok=True)
+        try:
+            result = materialize(temp).model_copy(
+                update={"output_path": str(output)}
+            )
+            with temp.open("rb") as artifact:
+                os.fsync(artifact.fileno())
+            metadata = {
+                "stage": "ready",
+                "output_path": str(output),
+                "temp_path": str(temp),
+                "artifact_sha256": revision_artifact_sha256(temp),
+                "result_json": result.model_dump_json(),
+            }
+            repository.update_operation_metadata(
+                session.review_session_id,
+                operation_id,
+                operation_type=operation_type,
+                request_digest=request_digest,
+                metadata=metadata,
+            )
+        except BaseException:
+            temp.unlink(missing_ok=True)
+            repository.cancel_operation(session.review_session_id, operation_id)
+            raise
+
+    if output.exists():
+        if not temp.exists() or not os.path.samefile(temp, output):
+            raise ValueError(f"output already exists: {output}")
+    else:
+        try:
+            publish_revision_temp(temp, output)
+        except Exception:
+            temp.unlink(missing_ok=True)
+            repository.cancel_operation(session.review_session_id, operation_id)
+            raise
+    return result, temp
+
+
+def _cleanup_completed_revision_temp(operation: dict[str, Any]) -> None:
+    temp_path = operation.get("metadata", {}).get("temp_path")
+    if isinstance(temp_path, str):
+        Path(temp_path).unlink(missing_ok=True)
 
 
 class VisualAssetSummary(BaseModel):
@@ -432,9 +643,9 @@ def _sample_visual(
     supplemental_answers: list[SupplementalAnswer] | None = None,
 ) -> Sample:
     _require_sampling(context, "observe_prd_visual", _NO_SAMPLING_FALLBACK_HINT)
-    document, _ = prepare_assessment_input(
+    document = prepare_assessment(
         source_path, rubric_name, supplemental_answers
-    )
+    ).document
     rendered = render_visual_asset(document, asset_id)
     return Sample(
         [
@@ -473,10 +684,11 @@ def _select_batch(
     supplemental_answers: list[SupplementalAnswer] | None,
     product_context: list[ProductContextTerm] | None,
 ) -> _SelectedBatch:
-    document, rubric = prepare_assessment_input(
+    prepared = prepare_assessment(
         source_path, rubric_name, supplemental_answers, product_context
     )
-    batches = batch_document(document)
+    rubric = prepared.rubric
+    batches = list(prepared.batches)
     selected = next((batch for batch in batches if batch.id == batch_id), None)
     if selected is None:
         known = ", ".join(batch.id for batch in batches)
@@ -485,7 +697,7 @@ def _select_batch(
         batch=selected,
         rubric=rubric,
         batch_count=len(batches),
-        plan_fingerprint=plan_fingerprint(batches, rubric.version),
+        plan_fingerprint=prepared.plan_fingerprint,
     )
 
 
@@ -563,10 +775,12 @@ def _sample(
     product_context: list[ProductContextTerm] | None = None,
 ) -> Sample:
     _require_sampling(context, "assess_prd", _SAMPLING_FALLBACK_HINT)
-    document, rubric = prepare_assessment_input(
+    prepared = prepare_assessment(
         source_path, rubric_name, supplemental_answers, product_context
     )
-    batches = batch_document(document)
+    document = prepared.document
+    rubric = prepared.rubric
+    batches = prepared.batches
     if len(batches) > 1:
         raise ValueError(
             f"this document needs {len(batches)} extraction batches, so a single "
@@ -672,10 +886,12 @@ def list_prd_batches(
     product_context: list[ProductContextTerm] | None = None,
 ) -> DocumentBatchPlan:
     """List the exhaustive extraction batches Forge derived for a PRD."""
-    document, rubric = prepare_assessment_input(
+    prepared = prepare_assessment(
         source_path, rubric_name, supplemental_answers, product_context
     )
-    batches = batch_document(document)
+    document = prepared.document
+    rubric = prepared.rubric
+    batches = prepared.batches
     return DocumentBatchPlan(
         source_path=document.source_path,
         expected_runs=rubric.extraction_runs,
@@ -689,7 +905,7 @@ def list_prd_batches(
             for batch in batches
         ],
         visual_asset_count=len(document.visual_assets),
-        plan_fingerprint=plan_fingerprint(batches, rubric.version),
+        plan_fingerprint=prepared.plan_fingerprint,
         instructions=(
             "Call assess_prd_batch once for every batch_id, then group the "
             "returned fragments by run_index and submit them to "
@@ -752,9 +968,9 @@ def list_prd_visuals(
     supplemental_answers: list[SupplementalAnswer] | None = None,
 ) -> VisualAssetInventory:
     """List the images and diagrams detected in a PRD."""
-    document, _ = prepare_assessment_input(
+    document = prepare_assessment(
         source_path, rubric_name, supplemental_answers
-    )
+    ).document
     return VisualAssetInventory(
         source_path=document.source_path,
         assets=[
@@ -780,9 +996,9 @@ async def observe_prd_visual(
     supplemental_answers: list[SupplementalAnswer] | None = None,
 ) -> VisualObservation:
     """Describe one PRD image using the MCP client's vision-capable model."""
-    document, _ = prepare_assessment_input(
+    document = prepare_assessment(
         source_path, rubric_name, supplemental_answers
-    )
+    ).document
     rendered = render_visual_asset(document, asset_id)
     return VisualObservation(
         asset_id=asset_id,
@@ -804,11 +1020,13 @@ def prepare_prd_assessment(
 ) -> PreparedAssessment:
     """Prepare the extraction task for a client that lacks MCP sampling."""
     answers = supplemental_answers or []
-    document, rubric = prepare_assessment_input(
+    prepared = prepare_assessment(
         source_path, rubric_name, answers, product_context
     )
-    batches = batch_document(document)
-    fingerprint = plan_fingerprint(batches, rubric.version)
+    document = prepared.document
+    rubric = prepared.rubric
+    batches = prepared.batches
+    fingerprint = prepared.plan_fingerprint
     return PreparedAssessment(
         source_path=document.source_path,
         rubric_id=rubric.id,
@@ -836,9 +1054,72 @@ def prepare_prd_assessment(
             '"plan_fingerprint": "...", "criteria": [...]}, ...]}]}. Copy the '
             "returned plan_fingerprint onto every fragment. For stronger confidence, repeat every "
             "batch independently for three complete runs. A single complete run "
-            "is accepted but cannot establish test/retest stability."
+            "is accepted but cannot establish test/retest stability. If this "
+            "prepares the generated artifact for a review whose next_action is "
+            "complete_prd_review, submit the resulting extraction_json to that "
+            "tool, not only to score_prd_extraction."
         ),
     )
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def prepare_prd_evaluation(
+    source_path: str,
+    criterion_id: str,
+    batch_id: str,
+    run_index: int,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+) -> CriterionEvaluationPlanItem:
+    """Prepare one bounded score-neutral criterion/batch evaluation prompt."""
+    prepared = prepare_assessment(
+        source_path, rubric_name, supplemental_answers, product_context
+    )
+    return prepare_evaluation_item(
+        prepared, criterion_id, batch_id, run_index=run_index
+    )
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def apply_prd_evaluation(
+    source_path: str,
+    evaluation_json: str,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+) -> VerifiedCriterionEvaluations:
+    """Verify and consolidate score-neutral criterion evaluation runs."""
+    prepared = prepare_assessment(
+        source_path, rubric_name, supplemental_answers, product_context
+    )
+    submitted = CriterionEvaluationBatch.model_validate_json(evaluation_json)
+    return verify_evaluation_batch(prepared, submitted)
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def apply_prd_question_generation(
+    source_path: str,
+    evaluation_json: str,
+    completion: str,
+    rubric_name: str = "prd",
+    supplemental_answers: list[SupplementalAnswer] | None = None,
+    product_context: list[ProductContextTerm] | None = None,
+) -> ShadowQuestion:
+    """Validate one bounded Phase 3 shadow question or use its safe fallback."""
+    prepared = prepare_assessment(
+        source_path, rubric_name, supplemental_answers, product_context
+    )
+    submitted = CriterionEvaluationBatch.model_validate_json(evaluation_json)
+    verified = verify_evaluation_batch(prepared, submitted)
+    if verified.question_generation is None:
+        raise ValueError(
+            "no strict-majority native evaluation issue is eligible for a shadow question"
+        )
+    return apply_question_generation(verified.question_generation, completion)
 
 
 @mcp.tool(structured_output=True)
@@ -878,6 +1159,7 @@ def score_prd_extraction(
 def find_prd_reviews(
     source_path: str,
     workspace_root: str | None = None,
+    rubric_name: str = "prd",
 ) -> ReviewDiscovery:
     """Find existing reviews for this exact PRD before starting a new one.
 
@@ -885,16 +1167,21 @@ def find_prd_reviews(
     never its filename. Always show the user the choices and let them decide;
     never resume a review automatically, even when exactly one matches.
     """
-    matches = _reviews_store().find(source_path, workspace_root=workspace_root)
+    matches = _reviews_store().find(
+        source_path,
+        workspace_root=workspace_root,
+        rubric_name=rubric_name,
+    )
     return ReviewDiscovery(
         source_path=source_path,
         matches=matches,
         choices=["resume_review", "start_new_review", "cancel"],
         instructions=(
             "Show these matches to the user and ask which they want. Call "
-            "resume_prd_review with the chosen review_session_id, or "
-            "start_prd_review to start a separate review. Never pick a "
-            "match automatically, even if there is only one."
+            "resume_prd_review with a compatible chosen review_session_id, or "
+            "start_prd_review to start a separate review. Incompatible matches "
+            "are audit-only. Never pick a match automatically, even if there "
+            "is only one."
         ),
     )
 
@@ -955,8 +1242,10 @@ def _start_review(
     host_conversation_id: str | None = None,
     start_new: bool = False,
 ) -> RemediationSessionResponse:
-    matches = _reviews_store().find(source_path, workspace_root=workspace_root)
-    if matches and not start_new:
+    matches = _reviews_store().find(
+        source_path, workspace_root=workspace_root, rubric_name=rubric_name
+    )
+    if any(match.compatible for match in matches) and not start_new:
         raise ValueError(
             "matching reviews exist; ask the user to resume one, start a new "
             "review, or cancel. Set start_new=true only after that explicit choice."
@@ -1216,41 +1505,299 @@ def delete_prd_remediation(review_session_id: str) -> DeletedRemediationSession:
 @mcp.tool(structured_output=True)
 @_anticipated
 def preview_prd_revision(
-    source_path: str,
-    supplemental_answers: list[SupplementalAnswer],
+    review_session_id: str,
+    session_version: int,
+    operation_id: str,
     section_overrides: dict[str, str] | None = None,
-) -> RevisionPlan:
-    """Preview source-bound placements and conflicts without writing a file."""
-    return preview_integrated_revision(
-        source_path,
-        supplemental_answers,
+) -> RevisionPreviewResponse:
+    """Preview placements for a review's verified answers without writing a file."""
+    request_digest = operation_digest(
+        "preview_revision", {"section_overrides": section_overrides}
+    )
+    cached = _reviews_store().operation_result(
+        review_session_id,
+        operation_id,
+        operation_type="preview_revision",
+        request_digest=request_digest,
+    )
+    if cached is not None:
+        session = _reviews_store().get(review_session_id)
+        return RevisionPreviewResponse(
+            review_session_id=session.review_session_id,
+            session_version=session.session_version,
+            workflow_state=session.workflow_state,
+            next_action=session.next_action,
+            plan=RevisionPlan.model_validate_json(cached),
+        )
+    session = _reviews_store().get(review_session_id)
+    _require_state(session, "preview_prd_revision")
+    _assert_session_source(session)
+    plan = preview_integrated_revision(
+        session.state.source_path,
+        session.state.verified_answers,
         section_overrides=section_overrides,
+    )
+    previewed_state = session.state.model_copy(
+        update={"revision_plan": plan}, deep=True
+    )
+    updated = _reviews_store().update(
+        review_session_id,
+        expected_version=session_version,
+        operation_id=operation_id,
+        state=previewed_state,
+        workflow_state=WorkflowState.AWAITING_REVISION_APPROVAL,
+        event_type="revision_previewed",
+        result_json=plan.model_dump_json(),
+        event_payload={"plan_digest": plan.plan_digest},
+        operation_type="preview_revision",
+        request_digest=request_digest,
+    )
+    return RevisionPreviewResponse(
+        review_session_id=updated.review_session_id,
+        session_version=updated.session_version,
+        workflow_state=updated.workflow_state,
+        next_action=updated.next_action,
+        plan=plan,
     )
 
 
 @mcp.tool(structured_output=True)
 @_anticipated
 def write_integrated_prd_revision(
-    source_path: str,
+    review_session_id: str,
+    session_version: int,
+    operation_id: str,
     output_path: str,
     plan: RevisionPlan,
     actions: dict[str, Literal["integrate", "audit_only", "skip"]],
-) -> RevisionResult:
-    """Write one explicitly approved revision plan into a new editable copy."""
+) -> RevisionWriteResponse:
+    """Materialize an approved session revision once into a new editable copy."""
+    request_digest = operation_digest(
+        "write_integrated_revision",
+        {
+            "output_path": output_path,
+            "plan": plan.model_dump(mode="json"),
+            "actions": actions,
+        },
+    )
+    operation = _reviews_store().operation_record(
+        review_session_id,
+        operation_id,
+        operation_type="write_integrated_revision",
+        request_digest=request_digest,
+    )
+    if operation is not None and operation["status"] == "completed":
+        _cleanup_completed_revision_temp(operation)
+        session = _reviews_store().get(review_session_id)
+        return RevisionWriteResponse(
+            review_session_id=session.review_session_id,
+            session_version=session.session_version,
+            workflow_state=session.workflow_state,
+            next_action=session.next_action,
+            result=RevisionResult.model_validate_json(operation["result_json"]),
+        )
+    session = _reviews_store().get(review_session_id)
+    _require_state(session, "write_integrated_prd_revision")
+    _assert_session_source(session)
+    _assert_plan_matches_session(session, plan)
     approved = approve_revision_plan(plan, actions=actions)
-    return materialize_integrated_prd_revision(source_path, output_path, approved)
+    result, temp = _stage_revision_write(
+        session=session,
+        session_version=session_version,
+        operation_id=operation_id,
+        operation_type="write_integrated_revision",
+        request_digest=request_digest,
+        output_path=output_path,
+        materialize=lambda staged: materialize_integrated_prd_revision(
+            session.state.source_path, staged, approved
+        ),
+    )
+    materialized_state = session.state.model_copy(
+        update={
+            "revision_plan": None,
+            "revision_output_path": result.output_path,
+            "revision_output_sha256": revision_artifact_sha256(result.output_path),
+            "final_verification": None,
+        },
+        deep=True,
+    )
+    updated = _reviews_store().update(
+        review_session_id,
+        expected_version=session_version,
+        operation_id=operation_id,
+        state=materialized_state,
+        workflow_state=WorkflowState.FINAL_ASSESSMENT_REQUIRED,
+        event_type="revision_materialized",
+        result_json=result.model_dump_json(),
+        event_payload={
+            "output_path": result.output_path,
+            "plan_digest": plan.plan_digest,
+            "mode": result.mode,
+        },
+        operation_type="write_integrated_revision",
+        request_digest=request_digest,
+        complete_reserved=True,
+    )
+    temp.unlink(missing_ok=True)
+    return RevisionWriteResponse(
+        review_session_id=updated.review_session_id,
+        session_version=updated.session_version,
+        workflow_state=updated.workflow_state,
+        next_action=updated.next_action,
+        result=result,
+    )
 
 
 @mcp.tool(structured_output=True)
 @_anticipated
 def write_prd_revision(
-    source_path: str,
+    review_session_id: str,
+    session_version: int,
+    operation_id: str,
     output_path: str,
-    supplemental_answers: list[SupplementalAnswer],
-) -> RevisionResult:
-    """Write approved clarification answers into a new editable PRD copy."""
-    return materialize_prd_revision(
-        source_path, output_path, supplemental_answers
+) -> RevisionWriteResponse:
+    """Append a review's verified answers once into a new editable PRD copy."""
+    request_digest = operation_digest(
+        "write_revision", {"output_path": output_path}
+    )
+    operation = _reviews_store().operation_record(
+        review_session_id,
+        operation_id,
+        operation_type="write_revision",
+        request_digest=request_digest,
+    )
+    if operation is not None and operation["status"] == "completed":
+        _cleanup_completed_revision_temp(operation)
+        session = _reviews_store().get(review_session_id)
+        return RevisionWriteResponse(
+            review_session_id=session.review_session_id,
+            session_version=session.session_version,
+            workflow_state=session.workflow_state,
+            next_action=session.next_action,
+            result=RevisionResult.model_validate_json(operation["result_json"]),
+        )
+    session = _reviews_store().get(review_session_id)
+    _require_state(session, "write_prd_revision")
+    _assert_session_source(session)
+    result, temp = _stage_revision_write(
+        session=session,
+        session_version=session_version,
+        operation_id=operation_id,
+        operation_type="write_revision",
+        request_digest=request_digest,
+        output_path=output_path,
+        materialize=lambda staged: materialize_prd_revision(
+            session.state.source_path, staged, session.state.verified_answers
+        ).model_copy(update={"final_assessment_required": True}),
+    )
+    updated = _reviews_store().update(
+        review_session_id,
+        expected_version=session_version,
+        operation_id=operation_id,
+        state=session.state.model_copy(
+            update={
+                "revision_output_path": result.output_path,
+                "revision_output_sha256": revision_artifact_sha256(result.output_path),
+                "final_verification": None,
+            },
+            deep=True,
+        ),
+        workflow_state=WorkflowState.FINAL_ASSESSMENT_REQUIRED,
+        event_type="revision_materialized",
+        result_json=result.model_dump_json(),
+        event_payload={"output_path": result.output_path, "mode": result.mode},
+        operation_type="write_revision",
+        request_digest=request_digest,
+        complete_reserved=True,
+    )
+    temp.unlink(missing_ok=True)
+    return RevisionWriteResponse(
+        review_session_id=updated.review_session_id,
+        session_version=updated.session_version,
+        workflow_state=updated.workflow_state,
+        next_action=updated.next_action,
+        result=result,
+    )
+
+
+@mcp.tool(structured_output=True)
+@_anticipated
+def complete_prd_review(
+    review_session_id: str,
+    session_version: int,
+    operation_id: str,
+    extraction_json: str,
+) -> FinalReviewCompletion:
+    """Verify the generated revision and atomically complete its originating review.
+
+    The extraction must cover the persisted generated output and must have been
+    produced without supplemental answers. Non-sampling clients obtain its
+    prompts from `prepare_prd_assessment` for that exact output path.
+    """
+    request_digest = operation_digest(
+        "complete_review", {"extraction_json": extraction_json}
+    )
+    cached = _reviews_store().operation_result(
+        review_session_id,
+        operation_id,
+        operation_type="complete_review",
+        request_digest=request_digest,
+    )
+    session = _reviews_store().get(review_session_id)
+    if cached is not None:
+        _assert_revision_artifact(session)
+        return FinalReviewCompletion.model_validate_json(cached)
+    _require_state(session, "complete_prd_review")
+    output, artifact_sha256 = _assert_revision_artifact(session)
+    result = assess_extraction_json(
+        str(output),
+        extraction_json,
+        rubric_name=session.state.rubric_name,
+        supplemental_answers=[],
+        product_context=session.state.product_context,
+        framing=session.state.framing,
+    )
+    verification = FinalVerification(
+        artifact_path=str(output),
+        artifact_sha256=artifact_sha256,
+        operation_id=operation_id,
+        rubric_id=session.state.rubric_id,
+        rubric_version=session.state.rubric_version,
+        supplemental_answer_count=0,
+        assessment=result,
+    )
+    completed_state = session.state.model_copy(
+        update={"final_verification": verification}, deep=True
+    )
+    response = FinalReviewCompletion(
+        review_session_id=review_session_id,
+        session_version=session_version + 1,
+        workflow_state=WorkflowState.COMPLETE,
+        next_action=next_action_for(WorkflowState.COMPLETE),
+        assessment=result,
+    )
+    updated = _reviews_store().update(
+        review_session_id,
+        expected_version=session_version,
+        operation_id=operation_id,
+        state=completed_state,
+        workflow_state=WorkflowState.COMPLETE,
+        event_type="final_assessment_completed",
+        result_json=response.model_dump_json(),
+        event_payload={
+            "artifact_path": str(output),
+            "artifact_sha256": artifact_sha256,
+            "final_band": result.assessment.band,
+        },
+        operation_type="complete_review",
+        request_digest=request_digest,
+    )
+    return response.model_copy(
+        update={
+            "session_version": updated.session_version,
+            "workflow_state": updated.workflow_state,
+            "next_action": updated.next_action,
+        }
     )
 
 
@@ -1320,10 +1867,14 @@ _EDGE_CASE_NOTE = (
 
 @dataclass(frozen=True)
 class _FramingPlan:
+    prepared: PreparedAssessmentInput
     assessment: Assessment
-    rubric: Rubric
     display_name: str
     candidates: list[ContextCandidate]
+
+    @property
+    def rubric(self) -> Rubric:
+        return self.prepared.rubric
 
 
 def _prepare_framing_plan(
@@ -1338,19 +1889,22 @@ def _prepare_framing_plan(
         raise ValueError(
             "supply exactly one of extraction_json or assessment_json"
         )
-    rubric = load_rubric(rubric_name)
+    prepared = prepare_assessment(
+        source_path,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+    )
+    rubric = prepared.rubric
     if extraction_json:
         serialized = (
             json.dumps(extraction_json)
             if isinstance(extraction_json, dict)
             else extraction_json
         )
-        response = assess_extraction_json(
-            source_path,
+        response = assess_prepared_extraction_json(
+            prepared,
             serialized,
-            rubric_name=rubric_name,
-            supplemental_answers=supplemental_answers,
-            product_context=product_context,
         )
         assessment = response.assessment
     else:
@@ -1368,9 +1922,9 @@ def _prepare_framing_plan(
                 f"requested rubric {rubric.id!r}"
             )
     return _FramingPlan(
+        prepared=prepared,
         assessment=assessment,
-        rubric=rubric,
-        display_name=planner_display_name(source_path),
+        display_name=planner_display_name(prepared.document.source_path),
         candidates=build_candidates(assessment, "", limit=8),
     )
 
@@ -1685,10 +2239,9 @@ async def assess_edge_case_coverage(
             )
         parsed_runs.append(parsed)
     consolidated, agreement = consolidate_coverage_ledgers(parsed_runs)
-    document, _ = prepare_assessment_input(
-        source_path, rubric_name, supplemental_answers, product_context
+    ledger = verify_coverage_ledger(
+        plan.framing_plan.prepared.document, consolidated
     )
-    ledger = verify_coverage_ledger(document, consolidated)
     next_item = next_uncovered_item(ledger)
     counts = {status: 0 for status in CoverageStatus}
     for item in ledger.items:
@@ -1943,7 +2496,7 @@ _CONSISTENCY_NOTE = (
 @dataclass(frozen=True)
 class _ConsistencyPlan:
     response: AssessmentResponse
-    document: NormalizedDocument
+    prepared: PreparedAssessmentInput
     candidates: list[ConsistencyCandidate]
     prompt: str
 
@@ -1964,12 +2517,15 @@ def _prepare_consistency_plan(
     )
     if extraction_json is None:
         raise ValueError("consistency requires extraction_json")
-    response = assess_extraction_json(
+    prepared = prepare_assessment(
         source_path,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+    )
+    response = assess_prepared_extraction_json(
+        prepared,
         payload,
-        rubric_name=rubric_name,
-        supplemental_answers=supplemental_answers,
-        product_context=product_context,
     )
     claims = response.deep_review.claims if response.deep_review else []
     candidates = build_consistency_candidates(claims)
@@ -1979,12 +2535,9 @@ def _prepare_consistency_plan(
             "there is nothing to classify; the deterministic deep-review "
             "findings are already complete"
         )
-    document, _ = prepare_assessment_input(
-        source_path, rubric_name, supplemental_answers, product_context
-    )
     return _ConsistencyPlan(
         response=response,
-        document=document,
+        prepared=prepared,
         candidates=candidates,
         prompt=build_consistency_prompt(candidates),
     )
@@ -2007,6 +2560,7 @@ _CONTEXTUALIZATION_NOTE = (
 
 @dataclass(frozen=True)
 class _ContextualizationPlan:
+    prepared: PreparedAssessmentInput
     response: AssessmentResponse
     question: Question
     display_name: str
@@ -2016,19 +2570,27 @@ class _ContextualizationPlan:
 
 def _prepare_contextualization(
     source_path: str,
-    extraction_json: str,
+    extraction_json: str | dict[str, object],
     rubric_name: str,
     supplemental_answers: list[SupplementalAnswer] | None,
     product_context: list[ProductContextTerm] | None,
     criterion_id: str | None,
     framing: str | None = None,
 ) -> _ContextualizationPlan:
-    response = assess_extraction_json(
+    payload = (
+        extraction_json
+        if isinstance(extraction_json, str)
+        else json.dumps(extraction_json)
+    )
+    prepared = prepare_assessment(
         source_path,
-        extraction_json,
-        rubric_name=rubric_name,
-        supplemental_answers=supplemental_answers,
-        product_context=product_context,
+        rubric_name,
+        supplemental_answers,
+        product_context,
+    )
+    response = assess_prepared_extraction_json(
+        prepared,
+        payload,
         framing=framing,
     )
     question = response.next_question
@@ -2053,7 +2615,9 @@ def _prepare_contextualization(
     prompt = build_choice_prompt(
         question.base_question, question.criterion_name, candidates
     )
-    return _ContextualizationPlan(response, question, display_name, candidates, prompt)
+    return _ContextualizationPlan(
+        prepared, response, question, display_name, candidates, prompt
+    )
 
 
 @_anticipated
@@ -2199,8 +2763,8 @@ def prepare_prd_advisory(
         prompt = plan.prompt
         count = 3
     else:
-        if not isinstance(extraction_json, str):
-            raise ValueError("contextualize requires extraction_json as a JSON string")
+        if extraction_json is None:
+            raise ValueError("contextualize requires extraction_json")
         plan = _prepare_contextualization(
             source_path,
             extraction_json,
@@ -2293,10 +2857,9 @@ def apply_prd_advisory(
         if any(item is None for item in parsed_runs):
             raise ValueError("agent returned invalid edge-case coverage JSON")
         consolidated, agreement = consolidate_coverage_ledgers(parsed_runs)  # type: ignore[arg-type]
-        document, _ = prepare_assessment_input(
-            source_path, rubric_name, supplemental_answers, product_context
+        ledger = verify_coverage_ledger(
+            plan.framing_plan.prepared.document, consolidated
         )
-        ledger = verify_coverage_ledger(document, consolidated)
         next_item = next_uncovered_item(ledger)
         counts = Counter(item.status for item in ledger.items)
         result = EdgeCaseCoverageResult(
@@ -2354,7 +2917,7 @@ def apply_prd_advisory(
         if any(item is None for item in parsed_runs):
             raise ValueError("agent returned invalid consistency classification JSON")
         ledger = verify_consistency_ledger(
-            plan.document,
+            plan.prepared.document,
             consolidate_consistency_ledgers(parsed_runs),  # type: ignore[arg-type]
         )
         result = ConsistencyResult(
@@ -2368,8 +2931,8 @@ def apply_prd_advisory(
             scoring_note=_CONSISTENCY_NOTE,
         )
     else:
-        if not isinstance(extraction_json, str):
-            raise ValueError("contextualize requires extraction_json as a JSON string")
+        if extraction_json is None:
+            raise ValueError("contextualize requires extraction_json")
         plan = _prepare_contextualization(
             source_path, extraction_json, rubric_name, supplemental_answers,
             product_context, criterion_id, framing,

@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
+from forge.ingest.parsers import LegacyDocumentParser
 from forge.rubric.loader import load_rubric
 from forge_dashboard.llm import Completion, LLMCallError
 from forge_dashboard.models import LLMConfig
-from forge_dashboard.runner import ExtractionFailed, run_assessment
+from forge_dashboard.runner import (
+    ExtractionFailed,
+    _classify_edge_case_coverage,
+    run_assessment,
+)
 
 
 @pytest.fixture
@@ -19,6 +25,24 @@ def _llm_config() -> LLMConfig:
     return LLMConfig(provider="anthropic", model="claude-3-5-sonnet", api_key="sk-test")
 
 
+def _empty_extraction() -> str:
+    rubric = load_rubric("prd")
+    return json.dumps(
+        {
+            "criteria": [
+                {
+                    "criterion_id": criterion.id,
+                    "fields": [
+                        {"name": field.name, "value": None, "evidence": None}
+                        for field in criterion.fields
+                    ],
+                }
+                for criterion in rubric.criteria
+            ]
+        }
+    )
+
+
 @pytest.mark.anyio
 async def test_run_assessment_calls_extractor_three_times_and_detects_framing(
     tmp_path, monkeypatch
@@ -26,6 +50,13 @@ async def test_run_assessment_calls_extractor_three_times_and_detects_framing(
     path = tmp_path / "prd.md"
     path.write_text("A short and incomplete product note.")
     calls: list[str] = []
+    parse_calls = 0
+    original_parse = LegacyDocumentParser.parse
+
+    def counted_parse(parser, artifact):
+        nonlocal parse_calls
+        parse_calls += 1
+        return original_parse(parser, artifact)
 
     async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
         calls.append(prompt)
@@ -33,13 +64,15 @@ async def test_run_assessment_calls_extractor_three_times_and_detects_framing(
         assert "UNTRUSTED DATA" in prompt
         if "OPTIONS:" in prompt:
             return Completion(text='{"framing": 2}', model="claude-test")
-        return Completion(text='{"criteria": []}', model="claude-test")
+        return Completion(text=_empty_extraction(), model="claude-test")
 
     monkeypatch.setattr("forge_dashboard.runner.call_model", fake_call_model)
+    monkeypatch.setattr(LegacyDocumentParser, "parse", counted_parse)
 
     result = await run_assessment(str(path), _llm_config())
 
     assert len(calls) == 4
+    assert parse_calls == 1
     assert sum("strict information extractor" in prompt for prompt in calls) == 3
     assert sum("OPTIONS:" in prompt for prompt in calls) == 1
     assert result.run_count == 3
@@ -47,7 +80,7 @@ async def test_run_assessment_calls_extractor_three_times_and_detects_framing(
     assert result.assessment.band == "not_a_prd"
     assert result.next_question is not None
     assert result.framing == "opportunity_bet"
-    assert "opportunity is this going after" in result.next_question.question
+    assert "specific opportunity is this pursuing" in result.next_question.question
 
 
 @pytest.mark.anyio
@@ -63,7 +96,7 @@ async def test_run_assessment_includes_accumulated_supplemental_answers(
         seen_prompts.append(prompt)
         if "OPTIONS:" in prompt:
             return Completion(text='{"framing": 0}', model="claude-test")
-        return Completion(text='{"criteria": []}', model="claude-test")
+        return Completion(text=_empty_extraction(), model="claude-test")
 
     monkeypatch.setattr("forge_dashboard.runner.call_model", fake_call_model)
 
@@ -163,7 +196,7 @@ async def test_run_assessment_reuses_supplied_framing_without_redetecting(
     async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
         calls.append(prompt)
         assert "OPTIONS:" not in prompt
-        return Completion(text='{"criteria": []}', model="claude-test")
+        return Completion(text=_empty_extraction(), model="claude-test")
 
     monkeypatch.setattr("forge_dashboard.runner.call_model", fake_call_model)
 
@@ -174,19 +207,20 @@ async def test_run_assessment_reuses_supplied_framing_without_redetecting(
     assert len(calls) == 3
     assert result.framing == "opportunity_bet"
     assert result.next_question is not None
-    assert "opportunity is this going after" in result.next_question.question
+    assert "specific opportunity is this pursuing" in result.next_question.question
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("coverage_statuses", [[1, 2, 2], [1, 4, 2]])
 async def test_run_assessment_discovers_anchored_edge_case_when_it_is_next(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, coverage_statuses
 ):
     rubric = load_rubric("prd")
     quotes: list[str] = []
     criteria: list[dict[str, object]] = []
     for criterion in rubric.criteria:
         fields: list[dict[str, object]] = []
-        for field in criterion.required_fields:
+        for field in criterion.fields:
             if (
                 criterion.id == "edge_cases_and_states"
                 and field.name == "transitional_or_degraded_states"
@@ -207,18 +241,26 @@ async def test_run_assessment_discovers_anchored_edge_case_when_it_is_next(
     path = tmp_path / "stored-id.md"
     path.write_text("\n".join(quotes))
     calls: list[str] = []
+    coverage_runs = 0
 
     async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
+        nonlocal coverage_runs
         calls.append(prompt)
         if "Classify coverage for every listed" in prompt:
+            coverage_runs += 1
             pair_lines = prompt.split("PAIRS:\n", 1)[1].split(
                 "\n\nEVIDENCE OPTIONS:", 1
             )[0].splitlines()
+            status = coverage_statuses[coverage_runs - 1]
             return Completion(
                 text=json.dumps(
                     {
                         "items": [
-                            {"pair": index, "status": 2, "evidence": 0}
+                            {
+                                "pair": index,
+                                "status": status,
+                                "evidence": 1 if status == 1 else 0,
+                            }
                             for index, _ in enumerate(pair_lines, start=1)
                         ]
                     }
@@ -238,7 +280,10 @@ async def test_run_assessment_discovers_anchored_edge_case_when_it_is_next(
         display_name="Micro Dramas",
     )
 
-    assert len(calls) == 4
+    assert len(calls) == 6
+    assert coverage_runs == rubric.extraction_runs == 3
+    assert result.edge_case_coverage is not None
+    assert result.edge_case_coverage.items[0].status.value == "missing"
     assert result.next_question is not None
     assert result.next_question.target_field == "edge_case_coverage"
     assert result.next_question.edge_case_id == "interruption_recovery"
@@ -247,6 +292,55 @@ async def test_run_assessment_discovers_anchored_edge_case_when_it_is_next(
     )
     assert "interrupted after it starts" in result.next_question.question
     assert result.report.next_step == result.next_question.question
+
+
+@pytest.mark.anyio
+async def test_coverage_classification_rejects_failed_or_invalid_runs(monkeypatch):
+    rubric = load_rubric("prd")
+    monkeypatch.setattr(
+        "forge_dashboard.runner.build_requirement_candidates", lambda response: [object()]
+    )
+    monkeypatch.setattr(
+        "forge_dashboard.runner.build_candidates", lambda *args, **kwargs: []
+    )
+    monkeypatch.setattr(
+        "forge_dashboard.runner.build_coverage_pairs", lambda requirements: [object()]
+    )
+    monkeypatch.setattr(
+        "forge_dashboard.runner.build_coverage_prompt", lambda *args: "coverage prompt"
+    )
+
+    calls = 0
+
+    async def malformed_call_model(config, prompt, *, max_tokens, temperature=0):
+        nonlocal calls
+        calls += 1
+        return Completion(text="not json", model="claude-test")
+
+    monkeypatch.setattr("forge_dashboard.runner.call_model", malformed_call_model)
+
+    with pytest.raises(ExtractionFailed, match="invalid edge-case coverage JSON"):
+        await _classify_edge_case_coverage(
+            SimpleNamespace(assessment=object()), rubric, _llm_config()
+        )
+
+    assert calls == rubric.extraction_runs == 3
+
+    failure_calls = 0
+
+    async def failing_call_model(config, prompt, *, max_tokens, temperature=0):
+        nonlocal failure_calls
+        failure_calls += 1
+        raise LLMCallError("coverage provider failed")
+
+    monkeypatch.setattr("forge_dashboard.runner.call_model", failing_call_model)
+
+    with pytest.raises(ExtractionFailed, match="coverage provider failed"):
+        await _classify_edge_case_coverage(
+            SimpleNamespace(assessment=object()), rubric, _llm_config()
+        )
+
+    assert failure_calls == rubric.extraction_runs == 3
 
 
 @pytest.mark.anyio

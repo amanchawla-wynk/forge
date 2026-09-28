@@ -48,6 +48,8 @@
     {
       "criterion_id": "functional_requirements",
       "fields": [
+        {"name": "primary_flow", "value": null, "evidence": null},
+        {"name": "preconditions", "value": null, "evidence": null},
         {
           "name": "requirements",
           "value": [
@@ -63,12 +65,17 @@
           "name": "prioritisation",
           "value": "All listed requirements are required for launch",
           "evidence": {"quote": "Everything listed here is required for launch."}
-        }
+        },
+        {"name": "decision_rules_and_precedence", "value": null, "evidence": null}
       ]
     },
     {
       "criterion_id": "acceptance_criteria",
-      "fields": [{"name": "criteria", "value": null, "evidence": null}]
+      "fields": [
+        {"name": "criteria", "value": null, "evidence": null},
+        {"name": "failure_and_boundary_criteria", "value": null, "evidence": null},
+        {"name": "requirement_coverage", "value": null, "evidence": null}
+      ]
     },
     {
       "criterion_id": "edge_cases_and_states",
@@ -94,7 +101,8 @@
             "quote": "If the payout service is unavailable the dashboard shows a cached view with a stale-data notice."
           }
         },
-        {"name": "platform_and_accessibility_states", "value": null, "evidence": null}
+        {"name": "supported_platforms", "value": null, "evidence": null},
+        {"name": "accessibility_approach", "value": null, "evidence": null}
       ]
     },
     {
@@ -115,6 +123,7 @@
             "quote": "This work depends on the Payouts service team and the existing notification platform."
           }
         },
+        {"name": "dependency_readiness", "value": null, "evidence": null},
         {"name": "constraints", "value": null, "evidence": null}
       ]
     },
@@ -122,6 +131,8 @@
       "criterion_id": "risk_compliance",
       "fields": [
         {"name": "data_handled", "value": null, "evidence": null},
+        {"name": "purpose_and_minimisation", "value": null, "evidence": null},
+        {"name": "access_and_third_parties", "value": null, "evidence": null},
         {"name": "review_status", "value": null, "evidence": null},
         {"name": "data_lifecycle", "value": null, "evidence": null}
       ]
@@ -136,7 +147,10 @@
             "quote": "We will ship the dashboard to all sellers in a single release."
           }
         },
-        {"name": "rollback_plan", "value": null, "evidence": null}
+        {"name": "launch_and_stop_criteria", "value": null, "evidence": null},
+        {"name": "rollback_plan", "value": null, "evidence": null},
+        {"name": "rollout_owner", "value": null, "evidence": null},
+        {"name": "support_and_communications", "value": null, "evidence": null}
       ]
     },
     {
@@ -149,7 +163,8 @@
             "quote": "Whether we show fee breakdowns is still undecided."
           }
         },
-        {"name": "owners", "value": null, "evidence": null}
+        {"name": "owners", "value": null, "evidence": null},
+        {"name": "target_dates", "value": null, "evidence": null}
       ]
     },
     {
@@ -157,6 +172,28 @@
       "fields": [
         {"name": "alternatives", "value": null, "evidence": null},
         {"name": "rejection_reasons", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "assumptions_validation",
+      "fields": [
+        {"name": "assumptions", "value": null, "evidence": null},
+        {"name": "validation", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "operational_readiness",
+      "fields": [
+        {"name": "service_expectations", "value": null, "evidence": null},
+        {"name": "support_owner", "value": null, "evidence": null},
+        {"name": "recovery_plan", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "document_governance",
+      "fields": [
+        {"name": "document_owner", "value": null, "evidence": null},
+        {"name": "status_and_version", "value": null, "evidence": null}
       ]
     }
   ]

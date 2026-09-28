@@ -166,7 +166,6 @@ export async function previewRevision(
   reviewSessionId: string,
   sessionVersion: number,
   operationId: string,
-  supplementalAnswers: SupplementalAnswer[],
 ): Promise<RevisionPreview> {
   const response = await fetch(
     `${API_BASE_URL}/api/documents/${documentId}/revisions/preview`,
@@ -177,7 +176,6 @@ export async function previewRevision(
         review_session_id: reviewSessionId,
         session_version: sessionVersion,
         operation_id: operationId,
-        supplemental_answers: supplementalAnswers,
       }),
     },
   );

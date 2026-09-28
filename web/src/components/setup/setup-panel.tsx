@@ -202,8 +202,13 @@ export function SetupPanel() {
                     <p className="text-xs text-muted-foreground">
                       {BAND_STYLES[match.current_band]?.label ?? match.current_band} · {match.verified_answer_count} verified · {match.pending_answer_count} pending · {new Date(match.updated_at * 1000).toLocaleString()}
                     </p>
+                    {!match.compatible ? (
+                      <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                        Audit only: {match.incompatibility_reasons.join("; ")}
+                      </p>
+                    ) : null}
                   </div>
-                  <Button size="sm" onClick={() => handleResume(match.review_session_id, match.client_name)} disabled={isSubmitting}>
+                  <Button size="sm" onClick={() => handleResume(match.review_session_id, match.client_name)} disabled={isSubmitting || !match.compatible}>
                     Resume
                   </Button>
                 </div>

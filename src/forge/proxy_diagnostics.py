@@ -20,6 +20,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from forge.proxy_labels import ProxyLabel, verify_proxy_artifact
+from forge.rubric.loader import load_rubric
 from forge.score.consistency import build_consistency_candidates
 from forge.service import assess_extraction_json
 
@@ -71,7 +72,7 @@ def run_proxy_diagnostics(
 
     # Deterministic path only: no model runs, so this measures what Forge can
     # find on its own rather than what a particular model produced today.
-    response = assess_extraction_json(str(source), '{"criteria": []}')
+    response = assess_extraction_json(str(source), _null_extraction_json())
     review = response.deep_review
     findings = review.findings if review else []
     claims = review.claims if review else []
@@ -197,6 +198,25 @@ def _proven_pairs(findings) -> set[tuple[str, str]]:
             for right in claim_ids[position + 1 :]:
                 pairs.add((left, right))
     return pairs
+
+
+def _null_extraction_json() -> str:
+    """Build a strict-schema extraction that deliberately claims no evidence."""
+    rubric = load_rubric("prd")
+    return json.dumps(
+        {
+            "criteria": [
+                {
+                    "criterion_id": criterion.id,
+                    "fields": [
+                        {"name": field.name, "value": None, "evidence": None}
+                        for field in criterion.fields
+                    ],
+                }
+                for criterion in rubric.criteria
+            ]
+        }
+    )
 
 
 def _covered(label_quotes: list[list[str]], evidence: list[str]) -> int:

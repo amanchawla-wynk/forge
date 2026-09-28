@@ -44,6 +44,203 @@ coverage, and only versioned rubric rules may affect readiness points or bands.
 This bounded per-document graph does not require embeddings, community
 summaries, or a general GraphRAG store.
 
+## Immutable Source Baseline
+
+Acquisition, parsing, projection, and scoring are separate operations. A source
+adapter first acquires exact bytes plus origin metadata. A versioned parser then
+produces normalized blocks and canonical nodes. Forge binds those outputs into
+an immutable `DocumentSnapshot` identified by source SHA-256, source type,
+parser fingerprint, normalized-schema version, and normalized-content hash.
+Origin path and display metadata are deliberately excluded from content identity:
+identical bytes parsed by identical code share a snapshot id, while each review
+retains its own origin metadata.
+
+SQLite review sessions persist the complete snapshot, including source bytes,
+before the session is created. Reload revalidates the snapshot and rebinds its
+origin-facing metadata to that session's source path. Checkpoints project
+supplemental answers and product terminology onto the persisted normalized
+document; they do not reopen or reparse the source. Discovery and resume compare
+the current source type, parser fingerprint, normalized hash, snapshot id, and
+rubric id/version. Sessions created before durable snapshots remain visible for
+audit but are not resumable as exact matches.
+
+`PreparedAssessmentInput` is the operation-local boundary shared by service,
+MCP advisory, and dashboard paths. It holds one snapshot, rubric, projected
+document, exhaustive batches, and extraction-plan fingerprint. The fingerprint
+is versioned and binds snapshot id, parser fingerprint, normalized hash, rubric
+id/version, product context, batch ids, and rendered batch text. A fragment from
+a different parser, normalized baseline, rubric, context, or batch plan is
+therefore rejected rather than scored against current evidence.
+
+## Criterion Evaluation Shadow
+
+Phase 2 adds a score-neutral criterion-evaluation representation beside legacy
+field extraction. `forge.evaluate` separates strict model submissions from
+verified records. The model may propose claims, support relations, gaps,
+ambiguities, and contradictions, but Python resolves every citation within its
+named source block, converts split-block offsets to canonical parent offsets,
+and mints all evidence, claim, set, gap, issue, run, and evaluation identities.
+The model cannot submit confidence, scores, weights, gates, bands, or verified
+identifiers.
+
+Each current field is projected into a versioned criterion assertion with
+supporting, counterevidence, and context roles, hard negatives, and a
+rubric-owned answer contract. Custom rubrics may declare the same contract
+explicitly. `prepare_prd_evaluation` returns one prompt per criterion and source
+batch. `apply_prd_evaluation` rejects missing, repeated, unknown, or stale
+fragments; only exhaustive coverage can establish global unsupported status.
+It preserves every verified support and counterevidence set, then consolidates
+each assertion across independent runs by strict majority before deriving the
+criterion status. Ties become `unclear`, including ties about contradictions.
+Minority evidence remains auditable but cannot make a majority-supported
+assertion contradictory.
+
+Legacy verified extraction runs are also projected reversibly into evaluation
+artifacts. This adapter is covered by score-parity tests and remains the only
+evaluation origin that can be translated back into score inputs. Native
+semantic evaluations are shadow audit records and cannot affect verdicts,
+weights, gates, bands, consumer readiness, or remediation priority. New review
+sessions transactionally persist their per-run artifacts in content-addressed
+SQLite rows linked to the review; state schema version `3` reloads those records
+without embedding them in mutable `state_json`.
+
+`forge.evaluate.diagnostics` is an offline-only measurement boundary. Its suites
+and reports are permanently `calibration_eligible: false` and
+`score_effect: none`. It verifies source/rubric identity, reruns the production
+evaluation verifier, measures abstention/agreement/evidence duplication, and may
+cross-tab native and legacy statuses symmetrically. Legacy extraction is not a
+ground-truth label. D-055 records why criterion-level agreement is not yet high
+enough for evaluation gaps to drive Phase 3 questions.
+
+Semantic identity excludes model-authored paraphrase. Support sets are keyed by
+criterion/assertion, verified evidence ids, role, and relation; ambiguities are
+keyed by assertion, verified evidence ids, and issue kind. Claims and alternative
+wording remain visible audit fields. `forge.evaluate.labels` creates blinded
+assertion sheets without predictions or scoring configuration and preserves
+reviewer disagreement unless a strict majority exists.
+
+When humans are unavailable, the same sheets may be completed by isolated agents
+only if they are permanently typed `synthetic_ai_proxy` and
+`calibration_eligible: false`. Proxy consensus can open an engineering shadow
+experiment but cannot establish product quality or organization validity. D-058
+allows Phase 3 question generation only for strict-majority native assertion
+outcomes with verified evidence ids, bounded validation, deterministic fallback,
+and no score effect.
+
+`forge.questions` implements the first Phase 3 vertical slice without entering
+the live remediation path. `prepare_question_generation` ranks eligible native
+assertion outcomes deterministically and packages only verified issue/evidence
+ids, exact evidence spans, the assertion description, and its rubric-owned
+answer contract. The host may return one strict object containing the plan id,
+one allowed issue id, and one question. `apply_question_generation` accepts the
+wording only when it is one bounded question, uses no substantive tokens outside
+the verified context, and contains no quoted phrase absent from exact evidence;
+otherwise it emits the answer contract as a fallback. `apply_prd_evaluation`
+exposes the preparation, while `apply_prd_question_generation` re-verifies the
+entire submitted evaluation batch before applying the completion. The resulting
+artifact is marked shadow and `score_effect: none`; `Question`, remediation
+queues, sessions, dashboards, and scoring do not consume it.
+
+`forge.questions.diagnostics` replays frozen completions through the production
+apply boundary and measures accepted generation, fallback, unsupported-text
+rejection, within-document duplication, deterministic preparation, and repeated
+wording stability. `forge.questions.labels` creates prediction-free synthetic
+proxy sheets for relevance, answerability, smallest scope, and unsupported
+assumptions. D-060 records that the first internal study passed mechanical safety
+but failed question quality. The live path remains blocked until plans are keyed
+and deduplicated by issue, unresolved antecedents suppress dependent questions,
+and gap records retain enough bounded decision detail to ask something narrower
+than the field fallback.
+
+D-061 adds bounded missing-decision detail to gap audit records while excluding
+that wording from `gap_id`. Consolidation retains all distinct descriptions for
+question experiments. The planner groups multi-run issue variants, deduplicates
+shared ids across sibling assertions, defers later gaps in a criterion, and uses
+verified evidence to render safe ambiguity/contradiction fallbacks. A fresh
+three-run internal study showed that this improves relevance but not atomicity.
+The next schema boundary is therefore the rubric evaluation contract: composite
+legacy fields may project into several score-neutral atomic assertions with
+explicit prerequisite edges and resolution contracts. Scoring continues to read
+only legacy field extraction.
+
+Rubric `0.8.0-atomic-evaluation-shadow` implements the first complete atomic
+vertical slice for dependency readiness. `AssertionSpec` carries a bounded
+resolution contract and same-criterion prerequisite ids. Rubric validation
+rejects duplicates, unknown ids, self-dependencies, and cycles. Native
+verification and consolidation enumerate evaluation assertions rather than
+legacy fields. The legacy adapter fans one verified field value out to every
+mapped shadow assertion and retains the untouched extraction for round-trip
+scoring, so atomic evaluation cannot alter a verdict or band. Question planning
+requires every prerequisite to have a three-run strict-majority supported
+outcome before a dependent issue is eligible.
+
+Operational readiness is the second contract `1.1` slice (D-063). A required
+scope atom selects applicable service-expectation dimensions; dimension atoms are
+optional and become question-eligible only when the evaluator reports a verified
+gap after that scope is supported. Monitoring, support, and incident ownership
+are separate required atoms. Recovery procedure and optional degraded-mode or
+restore behavior depend on a supported diagnostic-method atom. This pattern
+avoids pretending that every service needs every SLO dimension while preserving
+atomic remediation when a dimension does apply.
+
+Rollout is the third contract `1.1` slice (D-064). The rollout mechanism gates
+threshold and rollback-trigger atoms; promotion additionally depends on entry
+criteria and an observation window, and rollback procedure depends on its
+trigger. Decision ownership, pause/stop authority, and rollback execution are
+separate required atoms. A communication-impact scope gates optional audience
+actions. This keeps the dependency graph explicit without treating every launch
+channel as applicable.
+
+Instrumentation is the fourth contract `1.1` slice (D-065). Event declarations
+gate optional properties. A local metric-definition reference plus declared
+events gate the metric formula; optional filters and dimensions follow that
+formula. Operational-signal scope gates one required named failure signal, its
+diagnostic use, and optional channel-specific atoms. Prerequisites remain within
+one criterion, avoiding hidden cross-criterion consolidation state.
+
+Acceptance criteria are the fifth contract `1.1` slice (D-066). Static atoms
+represent completion, pass, fail, applicability scope, requirement inventory,
+mapping, and completeness; requirement names remain document data inside those
+records rather than becoming dynamic schema ids. Requirement mapping depends on
+the launch-critical set plus pass/fail conditions, and completeness depends on
+the mapping. Optional boundary mappings depend on both an applicable boundary set
+and failure/boundary scope. The legacy gate continues to read only field
+extraction.
+
+D-067 makes deterministic question rendering an explicit generation mode rather
+than reporting it as model fallback. The atomic diagnostic runner records gate
+thresholds before review, verifies three fresh evaluation runs, renders one
+stable rubric/evidence question per eligible plan, and creates prediction-free
+proxy sheets. The first 0.8 run passed unsupported-text, duplication, and
+stability gates but failed relevance, answerability, atomicity, and assumption
+gates. No deterministic question artifact is consumed by live remediation.
+
+D-068 advances this shadow contract to
+`0.8.1-atomic-question-corrections-shadow`. Consolidation still records every
+verified contradiction for audit, but a question target receives only canonical
+relation/evidence-pair variants supported by a strict majority of independent
+runs. A gap target may carry one exact verified subject span from a supported
+prerequisite or same-field sibling; this context is represented separately from
+issue evidence so it cannot be mistaken for proof of absence. Optional framing
+can select only an explicit rubric-owned field variant and never changes target
+eligibility or scoring. These corrections remain outside remediation/session
+state.
+
+D-069 makes evidence-set relations a required integrity boundary. Exact quotes
+and claims are not semantic support by themselves: every claim must be referenced
+by an evidence set, and that set must include the claim's assertion id. Invalid
+runs fail before consolidation. Python still does not infer a support relation.
+
+D-070 and D-071 advance the current shadow rubric to
+`0.9.1-applicability-contracts-shadow`. Remaining composite criteria use explicit
+contract `1.1` assertions and criterion-local prerequisite DAGs. Applicability
+roots precede conditional behavior for transitional states, instrumentation, and
+sensitive data. Acceptance subject, open-question identity, alternative
+disposition, and assumption identity are explicit prerequisite evidence sources.
+Only declared prerequisites may contextualize a gap; an arbitrary same-field
+sibling cannot. These additions remain reversible through the untouched legacy
+extraction adapter and are not persisted into remediation state.
+
 The implemented deterministic path retains every verified field claim before
 batch consolidation, records quote-local source offsets, and supplements model
 extraction with a bounded source scan. It projects claims into an in-process
@@ -145,8 +342,15 @@ The target public surface is:
 - `observe_prd_visual`: describe one rendered image through client sampling.
 - `prepare_prd_assessment`: create a sampling-independent extraction request.
 - `score_prd_extraction`: verify and score submitted extraction JSON.
+- `prepare_prd_evaluation`: create exhaustive criterion-by-batch semantic
+  evaluation prompts for optional shadow review.
+- `apply_prd_evaluation`: verify and conservatively consolidate those shadow
+  evaluations without changing readiness scoring.
 - `write_prd_revision`: materialize approved supplemental answers into a new
   editable PRD copy without overwriting the source.
+- `complete_prd_review`: verify extraction from the exact generated revision,
+  persist its full no-supplemental assessment, and atomically complete the
+  originating durable review.
 - `describe_prd_rubric`: explain the active rubric without exposing a prompt
   that encourages point gaming.
 - `contextualize_next_question`: optionally phrase the current `next_question`
@@ -178,6 +382,14 @@ when the user requests a rescore. The checkpoint sends only pending answer
 blocks and affected criterion schemas to the connected model. It verifies and
 merges criterion-local patches, deterministically rescores, and replaces the
 question queue. The unchanged source PRD is not re-extracted.
+
+Every scored projection carries one `evaluation_revision`. Applying a
+checkpoint increments it and rebuilds the assessment, narrative report,
+deterministic deep review, and question queue together. Per-item evidence for
+list-valued fields is serialized in review state but omitted from model-facing
+JSON schemas. Edge-case remediation materializes one queue item per uncovered
+requirement/taxonomy cell, so advancing one cell does not depend on mutating an
+unrelated broad field question.
 
 The selected question names one `target_field`, one concise field-specific
 prompt, and one answer requirement. It also retains all `missing_fields` for the
@@ -248,13 +460,22 @@ has no remaining failed criterion.
 Questions include the configured descriptions of their missing required fields.
 `write_prd_revision` supports DOCX, Markdown, and text sources,
 requires a new same-format output path, refuses to overwrite an existing file,
-and appends a clarification section. `preview_prd_revision` and
-`write_integrated_prd_revision` add source-bound section placement, explicit
-per-edit approval, conflict resolution, and an audit appendix. The dashboard
-fully reassesses the generated copy without supplemental answers; MCP callers
-are instructed to run the same final assessment because writing itself never
-borrows a model. PDF remains read-only because revision would not preserve an
-editable source or its layout semantics.
+and appends a clarification section. The MCP revision tools are session-bound:
+they require `review_session_id`, optimistic `session_version`, and idempotent
+`operation_id`; derive source and answers from verified durable state; enforce
+`REVISION_READY -> AWAITING_REVISION_APPROVAL -> FINAL_ASSESSMENT_REQUIRED`;
+and reject plans whose exact answer multiset differs from the session. The
+dashboard follows the same workflow states and fully reassesses the generated
+copy without supplemental answers. PDF remains read-only because revision would
+not preserve an editable source or its layout semantics.
+
+Revision writes stage a same-filesystem temporary artifact, persist its digest
+in operation metadata, and publish without overwriting. A retry can recover a
+crash between publication and the SQLite transition. Deleting or expiring a
+session removes only temp paths that match Forge's deterministic revision-temp
+name and parent directory. The generated artifact path and hash remain bound to
+the session; `complete_prd_review` refuses a missing or changed artifact and
+accepts only a full extraction of that copy without supplemental answers.
 
 Assessment responses expose disputed criteria and recommend up to two more
 complete runs after initial disagreement. The fallback scorer already accepts
@@ -286,6 +507,11 @@ Every mutation carries `review_session_id`, `session_version`, and an idempotent
 Stale versions, duplicate operations, source/rubric/workspace mismatches, and
 illegal workflow transitions are rejected with the current state and allowed
 actions. A model or MCP client never chooses a session by filename or recency.
+Pending answer UUIDs are also copied into the durable supplemental-answer record,
+so evidence block identity survives checkpointing, restart, and later document
+reconstruction. Loading a version-1 session repairs this nested identity from
+the existing pending-answer id without claiming that the stored state schema was
+already upgraded.
 
 New conversations use a discovery/resume protocol. `find_prd_reviews` receives
 an exact source path or dashboard document id, computes the current source hash,
@@ -427,6 +653,9 @@ the resulting boundary.
   `forge.extract.batch`, and deterministic scoring in `forge.score` are reused
   unmodified through `forge.service`. The dashboard backend only replaces MCP
   sampling with a direct LiteLLM call as the source of extraction completions.
+- Edge-case coverage uses the rubric-declared repeated-run count and the same
+  pessimistic modal consolidation as MCP/fallback coverage. A failed or malformed
+  run fails the dashboard assessment rather than silently omitting the ledger.
 - The dashboard uses the same durable SQLite review repository as MCP. The
   browser retains `review_session_id`, `session_version`, workflow state, and
   `next_action` in per-tab `sessionStorage`; it never persists the provider key
@@ -461,8 +690,14 @@ not generic chunking.
 For long text, the initial integration target is `semchunk`, using returned
 source offsets when an individual block must be split. Forge groups the
 resulting blocks into bounded extraction batches and processes every batch.
-Docling will be evaluated directly as a future structured or multimodal parser
-adapter rather than importing a RAG stack.
+`spikes/parser_benchmark.py` compares the current parser with optional direct
+Docling and PyMuPDF4LLM controls without adding either package to Forge. It emits
+repeat timing, deterministic-output, text-retention, structure, image, page, and
+provenance measurements. Docling remains a future structured or multimodal
+parser candidate rather than an adopted dependency. The representative PDF and
+DOCX measurements in `reports/parser benchmark 2026-09-26.md` justify a bounded
+adapter prototype, but manual quote, table-order, and provenance review is still
+required before that parser can supply score-eligible evidence.
 
 `semchunk` is text-only and has no responsibility for images or diagrams.
 Visual assets are a parallel input stream. Ingestion adapters detect PDF pages

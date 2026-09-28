@@ -26,6 +26,10 @@ still requires independent labels from the organization's own reviewers.
   for hosts without MCP sampling.
 - `score_prd_extraction`: verifies and scores extraction JSON produced by the
   calling agent.
+- `prepare_prd_evaluation` / `apply_prd_evaluation`: optionally run exhaustive,
+  repeated criterion-level semantic evaluation in score-neutral shadow mode.
+  These tools retain multiple support, conflict, ambiguity, and gap records but
+  cannot change readiness scoring.
 - `write_prd_revision`: writes approved supplemental answers into a new DOCX,
   Markdown, or text revision while preserving the original.
 - `describe_prd_rubric`: describes the active criteria and consumers.
@@ -518,6 +522,14 @@ To measure how much of that ledger the deterministic review actually finds:
 
 ```bash
 forge-proxy-diagnostics fixtures/proxy/microdrama-recommendations.proxy-panel.v1.json
+```
+
+Score-neutral criterion evaluation has a separate diagnostic CLI. It reports
+agreement, abstention, evidence duplication, and optional runtime metadata but
+never changes scoring or claims calibration:
+
+```bash
+forge-evaluation-diagnostics path/to/evaluation-suite.json --workspace-root .
 ```
 
 The current measurement is finding recall 3/19, blocker recall 3/9, and zero

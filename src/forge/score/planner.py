@@ -62,6 +62,7 @@ class Question(BaseModel):
     requirement_quote: str | None = None
     edge_case_id: str | None = None
     taxonomy_version: str | None = None
+    evaluation_revision: int = 0
 
 
 def _simulate_field_answer(

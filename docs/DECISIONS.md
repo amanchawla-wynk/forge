@@ -1009,3 +1009,518 @@ supersedes the old one.
   the p16 mood rule survives only as `"last 30 days window (top 5"` and can
   never pair with the p5 session rule. Claim granularity for multi-line source
   units must be fixed before further semantic detectors are worth adding.
+
+## D-052: Harden The Existing Review Contract Before The Representation Migration
+
+- Status: implemented
+- Decision: Complete a bounded correctness phase before introducing source
+  snapshots, criterion-evaluation ledgers, retrieval, or generated contextual
+  questions. Enforce exact rubric schemas for direct and fragmented extraction;
+  persist verifier-produced list-item evidence while excluding it from
+  model-facing schemas; stamp assessment, report, deep review, and questions
+  with one checkpointed `evaluation_revision`; rebuild deterministic deep review
+  after answer deltas; represent every uncovered edge-case ledger cell as a real
+  queue item; use repeated pessimistic coverage consolidation in the dashboard;
+  and bind MCP revision preview/materialization to durable session identity,
+  optimistic versioning, idempotent operations, verified answers, and legal
+  workflow transitions.
+- Reason: The architecture audit found that correctness defects in current state
+  could invalidate later parser, evaluation, and question-generation work. A
+  sparse direct extraction could bypass the fragment contract; restart discarded
+  per-item provenance; post-checkpoint outputs mixed old deep review with a new
+  score; one synthetic edge field could strand uncovered cells; dashboard and
+  MCP coverage had different confidence bases; and stateless MCP revision tools
+  could write answers not owned by the authoritative review. Adding richer
+  semantic representations on those foundations would preserve hidden drift.
+- Consequence: Direct extraction is now a strict schema contract, including for
+  fixtures and offline diagnostics. Review-session schema version `2` and
+  `evaluation_revision` are persisted in SQLite with migration defaults.
+  Dashboard coverage costs the configured repeated-run count and fails visibly
+  on malformed classification. MCP revision tool signatures are intentionally
+  breaking pre-release changes: callers provide review/session/operation
+  identity, while Forge derives source and verified answers. The next migration
+  phase may add immutable source snapshots without changing these guarantees.
+  Revision publication is recoverable through staged artifact metadata, the
+  exact preview plan is persisted in the review, and generated artifact path and
+  hash are retained until `complete_prd_review` performs a full assessment with
+  no supplemental evidence and advances the session to `COMPLETE`. Durable
+  supplemental-answer ids preserve evidence block identity across checkpoints;
+  version-1 pending sessions are repaired on load without relabelling their
+  schema version.
+
+## D-053: Bind Reviews And Extractions To Immutable Parser-Versioned Snapshots
+
+- Status: implemented
+- Decision: Separate local-file acquisition from parsing and represent one parse
+  as an immutable `DocumentSnapshot`. Its content identity combines exact source
+  SHA-256, source type, an explicit parser fingerprint, normalized-schema
+  version, and normalized-content hash; origin path and display metadata do not
+  change that identity. Persist complete snapshots in the review SQLite database,
+  reload them for checkpoints without reparsing, and require exact snapshot,
+  parser, normalized, and rubric compatibility for resume. Keep pre-snapshot
+  sessions visible but audit-only. Bind extraction-plan and remediation-baseline
+  fingerprints to the same identities. Use one `PreparedAssessmentInput` within
+  each service, dashboard, or MCP advisory operation. Add a developer-only
+  parser benchmark that can load Docling and PyMuPDF4LLM through `uv --with`, but
+  do not add either as a production dependency or choose a replacement parser.
+- Reason: Raw file hashes alone cannot prove that two extractions saw the same
+  evidence when parser behavior or normalization changes. Reopening the source at
+  every advisory and checkpoint also permits intra-review drift and wastes parse
+  work. Content identity must remain stable when identical bytes are reached by
+  different paths, while each session still needs correct origin metadata.
+  Candidate parser adoption requires measured text, structure, provenance,
+  determinism, and runtime behavior on representative documents rather than a
+  library-feature comparison.
+- Consequence: New review creation transactionally stores the exact source bytes,
+  normalized blocks, and canonical nodes. Restarted checkpoints use that stored
+  baseline and fail closed when it is missing or incompatible. Equal content at
+  different paths shares one snapshot id and stored content row, but hydration
+  rebinds origin metadata to the owning session. Version-2 plan fingerprints
+  reject fragments prepared with another parser, normalized result, rubric,
+  product context, or batch plan. The legacy parser is now explicitly identified
+  as `forge.legacy-document-parser/1.0`. `spikes/parser_benchmark.py` is runnable,
+  and was run against the two DOCX and one PDF samples in `sampleDoc/` using
+  Docling 2.130.0 and PyMuPDF4LLM 1.28.2. Docling retained 98.26-99.41% of the
+  current parser's token multiset while recovering 12-46 headings and 2-29
+  tables; its warm conversions took 0.417-63.958 seconds versus Forge's
+  0.029-0.101 seconds. On the PDF, PyMuPDF4LLM retained 98.34% of baseline tokens,
+  rendered 21 headings and 152 table rows, and took 6.321-9.601 seconds. All
+  repeated outputs were deterministic. These measurements justify a bounded
+  Docling adapter prototype but not production adoption: candidate-only text,
+  table order, quote alignment, OCR, and provenance still require manual review.
+  Full results are in `reports/parser benchmark 2026-09-26.md`.
+
+## D-054: Introduce Criterion Evaluation In Score-Neutral Shadow Mode
+
+- Status: implemented; quality validation pending
+- Decision: Add strict criterion-evaluation submissions and Python-verified
+  artifacts beside current field extraction. Represent multiple claims and
+  evidence sets, explicit support/counterevidence relations, gaps, ambiguities,
+  contradictions, applicability, exact evidence ids, exhaustive batch coverage,
+  and repeated-run confidence. Derive the initial version-1.0 assertion contract
+  from each versioned rubric field and its remediation answer contract, while
+  allowing a rubric to declare an explicit contract. Expose agent-driven
+  `prepare_prd_evaluation` and `apply_prd_evaluation` tools. Keep native semantic
+  evaluations out of scoring. Project verified legacy extraction into the new
+  representation with a reversible adapter, and persist those per-run artifacts
+  transactionally when a durable review starts.
+- Reason: Selecting one satisfied field witness discards compatible support,
+  counterevidence, and conflicting spans before a criterion can be reviewed for
+  coherence. Asking a model for numeric quality would weaken Forge's trust
+  boundary, while allowing model-authored evidence ids or batch-level absence
+  would weaken provenance and exhaustiveness. A shadow path permits measurement
+  of the richer representation without changing established readiness behavior.
+- Consequence: The bundled rubric advances to `0.7.0-evaluation-shadow`; its
+  weights, gates, bands, verdict credits, and required fields are unchanged.
+  Python mints every authoritative identifier and rejects stale/incomplete batch
+  plans. Strict-majority repeated-run consolidation resolves ties to `unclear`.
+  Only `legacy_field_adapter` evaluations can round-trip into scoring, with
+  regression tests proving exact assessment parity. Native evaluations are
+  auditable output only. Review state schema version `3` adds a plan fingerprint
+  and reloads immutable artifacts from `criterion_evaluation_artifacts` plus
+  `review_evaluation_artifacts`; pre-v3 sessions continue without synthesized
+  artifacts. Phase 2 does not pass its quality exit gate until shadow runs improve
+  human/proxy evidence alignment without new hard-negative violations.
+
+## D-055: Hold Phase 3 Until Assertion-Level Evaluation Agreement Improves
+
+- Status: implemented diagnostic; Phase 3 blocked
+- Decision: Add `forge-evaluation-diagnostics` and retain three independent
+  native evaluation runs for every authored corpus criterion plus ignored runs
+  for the two internal DOCX samples. Report quote verification, duplicate
+  references, status distributions, abstention, full run agreement, optional
+  call metadata, and a symmetric native/legacy status matrix. Treat neither the
+  authored corpus nor legacy extraction as semantic truth. Do not make native
+  gaps user-facing or start generated question plans while internal full status
+  agreement remains at the measured 56.67%. The next slice must consolidate
+  assertion-level support/gap/conflict/ambiguity states by strict majority before
+  deriving criterion status.
+- Reason: The first shadow study verified all 541 submitted citations and found
+  no duplicate references, so provenance is behaving correctly. The authored
+  corpus reached 88% full run agreement, 5.33% abstention, and 81.33%
+  native/legacy agreement; native evaluation also correctly downgraded many
+  fluent-but-hollow gaming fields and unanimously rejected placeholders.
+  However, the internal documents reached only 17/30 full-agreement criteria.
+  Micro Dramas had nine disputed criteria and 40% full agreement. Whole-criterion
+  status voting conflates several independently variable assertion judgments and
+  is not stable enough to choose a user-facing gap.
+- Consequence: `fixtures/evaluation/corpus.run{1,2,3}.json` become synthetic,
+  calibration-ineligible regression inputs. `spikes/run_corpus_evaluation_diagnostics.py`
+  and `spikes/run_internal_evaluation_diagnostics.py` reproduce the measurements;
+  internal runs remain gitignored. Diagnostics have no thresholds and no score
+  effect. Full results and the gate rationale are recorded in
+  `reports/criterion evaluation shadow diagnostics 2026-09-26.md`. Phase 3
+  remains explicitly blocked pending assertion-level reconciliation and blinded
+  review of disputed internal criteria and proxy hard negatives.
+
+## D-056: Reconcile Assertions Before Deriving Shadow Criterion Status
+
+- Status: implemented; Phase 3 remains blocked
+- Decision: Derive a per-run state for each rubric assertion (`supported`,
+  `gap`, `contradictory`, `ambiguous`, or `unclear`), consolidate that state by
+  strict majority across independent runs, and only then derive the criterion's
+  shadow status. Retain minority evidence and issue records for audit. Report
+  assertion-level full agreement separately from raw criterion-status agreement
+  so an implementation change cannot rewrite the D-055 baseline metric.
+- Reason: Support and conflict are asserted at the assertion/evidence-set level,
+  while the first Phase 2 implementation voted on a whole criterion. One
+  minority contradiction could remain attached to a majority-supported
+  criterion, and several independently variable fields were compressed into one
+  unstable vote. Assertion reconciliation is the smallest conservative unit and
+  preserves abstention without discarding source spans.
+- Consequence: Re-running the unchanged three-agent study yields 243/255
+  assertion outcomes in full agreement (95.29%) on the authored corpus and
+  76/102 (74.51%) on the two internal PRDs. Raw criterion-status agreement
+  remains 88% and 56.67%, respectively. Consolidated internal abstention falls
+  from 20% to 16.67%. These are diagnostic improvements, not a quality claim;
+  74.51% internal assertion agreement plus missing human adjudication is still
+  insufficient for native gaps to drive Phase 3 questions.
+
+## D-057: Normalize Semantic Identity And Blind Internal Adjudication
+
+- Status: implementation complete; waiting for reviewers
+- Decision: Exclude model-authored claim values and alternative wording from
+  support-set and ambiguity identity. Bind semantic records to the criterion,
+  assertion ids, verified evidence ids, evidence role, relation, and issue kind;
+  retain the model wording only as audit content. Add prediction-free reviewer
+  sheets covering every assertion in both internal documents, plus a strict
+  agreement/consensus evaluator. Do not preselect only disputed criteria, expose
+  Forge predictions, or resolve two-reviewer disagreement.
+- Reason: Independent models can express the same supported fact or ambiguity
+  with different paraphrases. Including those strings in identity prevents
+  deterministic deduplication even when citations and assertion semantics are
+  identical. Human review is the remaining Phase 3 gate, but showing reviewers
+  predictions or only Forge-disputed rows would anchor the labels and overstate
+  agreement.
+- Consequence: Equivalent support and ambiguity observations can merge without
+  deleting their claims or alternatives. Generated sheets live under ignored
+  `sampleDoc/.forge/evaluation-reviewer-{1,2}.json`; they include all assertions,
+  blank labels, exact-quote fields, and no scoring configuration or predictions.
+  `spikes/evaluate_evaluation_reviewer_sheets.py` reports no result until both
+  reviewers label an assertion, keeps disagreement contested, and publishes
+  consensus only with strict majority. Phase 3 remains blocked on completion of
+  those independent sheets.
+
+## D-058: Use Isolated AI Proxy Consensus To Open Phase 3 In Shadow Only
+
+- Status: implemented diagnostic; Phase 3 shadow prototype allowed
+- Decision: When human reviewers are unavailable, use three isolated connected
+  agents as explicitly synthetic proxy reviewers. Each agent reads only source
+  documents and its own prediction-free sheet; it cannot read native shadow
+  runs, legacy assessments, reports, or peer labels. Consolidate assertion labels
+  by strict majority, keep every disagreement contested, and compare consensus
+  with native assertion outcomes symmetrically. Permit Phase 3 implementation
+  only in shadow mode: a generated question may target a strict-majority native
+  assertion outcome, must use verified evidence ids, must pass bounded output
+  validation, and must have a deterministic rubric-owned fallback. It remains
+  advisory and score-neutral.
+- Reason: The user has no available human reviewers, but runtime development does
+  not require a human-labelled calibration set. Three proxy reviewers completed
+  all 102 internal assertions with 79 unanimous labels (77.45%), strict-majority
+  consensus for 100, and two unresolved three-way splits. Native evaluation
+  matched 81/100 proxy consensus labels. Inspection of the most expensive
+  apparent mismatch found real conflicting source spans but a taxonomy boundary:
+  proxies credited the presence of discrete requirements and attached the
+  conflict to precedence, while native evaluation attached conflict to both.
+  This supports a guarded question-generation experiment, not a quality claim.
+- Consequence: AI proxy sheets and comparison outputs remain gitignored,
+  `synthetic_ai_proxy`, calibration-ineligible, and no-score-effect. Phase 3 may
+  now be built behind the shadow boundary, but it cannot replace current
+  rubric-authored questions by default until bounded-question diagnostics and
+  independent human validation pass. D-057's wait for human reviewers remains a
+  blocker for calibration claims, not for this explicitly provisional runtime
+  experiment.
+
+## D-059: Start Phase 3 With A Lexically Bounded Shadow Question Slice
+
+- Status: implemented in shadow; live remediation unchanged
+- Decision: Derive at most one shadow question target from verified native
+  criterion evaluations. Eligibility requires exhaustive coverage, at least
+  three runs, strict-majority agreement, an outcome of `gap`, `ambiguous`, or
+  `contradictory`, and verified issue identities. Rank targets deterministically
+  using the existing gate/weight/consumer ordering, then issue status and rubric
+  assertion order. Let the host model return only the plan id, one allowed issue
+  id, and one question. Accept the wording only when it is one bounded question,
+  every substantive token comes from the assertion, answer contract, selected
+  verified evidence, or a small question-language allowlist, and every quoted
+  phrase occurs exactly in verified evidence. Otherwise use the assertion's
+  rubric-owned answer contract.
+- Reason: Free question generation would reintroduce unsupported claims at the
+  point closest to the user. A lexical closed-world check is deliberately
+  conservative and measurable: false rejections safely increase fallback use,
+  while source-specific terms and exact quotations remain available. Requiring
+  the apply MCP tool to re-verify the original exhaustive evaluation batch avoids
+  trusting a caller-supplied question plan as evidence authority.
+- Consequence: `apply_prd_evaluation` may now include a bounded
+  `question_generation` prompt, and `apply_prd_question_generation` returns a
+  stable shadow artifact with `score_effect: none`. This artifact does not enter
+  `Question`, remediation state, user answer binding, dashboard behavior, or
+  scoring. Relevance, answerability, fallback, duplication, and unsupported-text
+  diagnostics must pass before proposing a live-path migration.
+
+## D-060: Keep Phase 3 Shadowed After Question-Quality Diagnostics Fail
+
+- Status: implemented diagnostic; live integration blocked
+- Decision: Measure every eligible D-059 target with three independent bounded
+  generation runs, then submit every unique rendered candidate to three isolated
+  prediction-free synthetic proxy reviewers. Keep generated questions out of
+  live remediation because the first frozen internal study fails the
+  smallest-scope and unsupported-assumption gates. Correct the representation at
+  issue level before changing prompts or relaxing validation: retain a bounded
+  missing-decision description, deduplicate shared issue ids, suppress questions
+  whose antecedent is unresolved, and use verified-evidence resolution templates
+  for ambiguities and contradictions.
+- Reason: Across 198 completions, production validation allowed no unsupported
+  text to reach output, fallback was only 0-4.55% per run, and 63/66 targets were
+  wording-stable. Mechanical safety therefore passed. Quality did not: proxy
+  consensus found only 29/71 candidates to be the smallest single-decision
+  question and found unsupported assumptions in 13/71. One gap id often spans
+  several assertions, later metric fields presuppose a missing primary metric,
+  and contradiction fallbacks can ask for content that already exists. Prompt
+  tuning cannot restore detail the evaluation record does not retain.
+- Consequence: `forge.questions.diagnostics` and `forge.questions.labels` remain
+  offline, calibration-ineligible boundaries. The ignored internal artifacts and
+  `reports/question generation shadow diagnostics 2026-09-28.md` freeze the
+  baseline. `Question`, remediation/session state, scoring, and dashboard output
+  remain unchanged. Human validation is still required after the engineering
+  gate eventually passes.
+
+## D-061: Atomize Shadow Assertions Before Further Question Tuning
+
+- Status: corrective experiment implemented; live integration remains blocked
+- Decision: Retain bounded `missing_decision` descriptions on verified gap
+  records without including wording in semantic identity. Group multi-run issue
+  variants into one outcome plan, deduplicate shared issue ids across sibling
+  assertions, expose at most the first unresolved gap per criterion, and use
+  verified-evidence templates for ambiguity and contradiction fallback. Do not
+  continue tuning free question wording after the enriched rerun. The next
+  representation change must split composite shadow assertions into atomic
+  resolution contracts with explicit prerequisite edges. Several atomic shadow
+  assertions may map to one legacy field; scoring remains unchanged.
+- Reason: Three new isolated evaluation runs produced 90 verified criterion
+  artifacts and bounded detail for 98 gap variants. The planner reduced active
+  targets from 66 to 28 and improved synthetic proxy relevance to 44/46 and
+  answerability to 46/46. It did not solve question scope: only 15/46 candidates
+  were single-decision questions, 8/46 retained unsupported assumptions, exact
+  wording stability was 14/28, and 39-46% of completions fell back. Composite
+  assertions such as dependency owner/readiness/fallback or
+  availability/latency/capacity/recovery cannot be made atomic by phrasing alone.
+- Consequence: Phase 3 remains shadow-only. The v2 internal evaluation and
+  question artifacts remain ignored, synthetic, calibration-ineligible, and
+  score-neutral. Rubric evaluation schema work may add explicit atomic assertions
+  and dependencies, but it cannot change legacy fields, verdicts, weights, gates,
+  bands, or live remediation until the frozen diagnostics and human review pass.
+
+## D-062: Introduce Atomic Evaluation Contracts Without Changing Scoring
+
+- Status: first atomic vertical slice implemented; live integration blocked
+- Decision: Advance the bundled rubric to
+  `0.8.0-atomic-evaluation-shadow` and evaluation contract `1.1`. Each shadow
+  assertion may declare a bounded resolution contract and prerequisite assertion
+  ids. Validate references and reject duplicate edges, self-dependencies, and
+  cycles. Derive and consolidate native outcomes over evaluation assertions, not
+  scoring fields. Allow several atomic assertions to map to one legacy field.
+  Fan a verified legacy field witness into all mapped assertions only inside the
+  reversible legacy adapter; scoring continues to consume the original field
+  extraction. Implement dependency readiness as the first vertical slice:
+  dependency owner, readiness proof, freshness/availability expectation, and
+  stale/unavailable fallback all require the dependency itself to be named.
+- Reason: D-061 showed that question wording cannot atomize a contract combining
+  owner, proof, availability, impact, and fallback. The dependency criterion is
+  a bounded representative slice that exercises one-to-many field mapping and a
+  prerequisite DAG while leaving deterministic scoring untouched.
+- Consequence: Existing `0.7.0-evaluation-shadow` diagnostic submissions contain
+  the removed composite assertion id and remain historical artifacts; Forge does
+  not silently reinterpret them as atomic judgments. Fresh evaluation runs under
+  the new rubric fingerprint are required. Other composite contracts still need
+  migration before D-060 is rerun, and generated questions remain shadow-only.
+
+## D-063: Atomize Operational Readiness With Explicit Applicability Scope
+
+- Status: implemented in shadow; scoring unchanged
+- Decision: Convert `operational_readiness` to evaluation contract `1.1` without
+  changing its three legacy scoring fields. Require one
+  `service_expectation_scope` assertion that identifies which production
+  expectation dimensions apply; represent availability, latency, capacity,
+  data-integrity, and recovery objectives as optional atoms gated by that scope.
+  Split the owner field into monitoring, support, and incident-response owners.
+  Split recovery into a diagnostic method and recovery procedure, with recovery
+  and any optional degraded-mode/backup/restore contingency gated by diagnosis.
+- Reason: Treating every possible service-level dimension as universally required
+  would manufacture gaps, while leaving availability, latency, capacity,
+  integrity, recovery, ownership, diagnosis, and restoration in three composite
+  assertions reproduces the D-061 scope failure. A required applicability atom
+  lets the document select relevant dimensions before Forge asks for their
+  values.
+- Consequence: Native operational evaluation can now identify one unresolved
+  production decision at a time. The reversible legacy adapter maps each original
+  field witness to its shadow atoms and round-trips the untouched extraction, so
+  verdicts, weights, gates, bands, and live remediation remain unchanged. Fresh
+  0.8 evaluation runs are still deferred until the remaining priority composites
+  are migrated.
+
+## D-064: Atomize Rollout Decisions And Gate Promotion On Observation
+
+- Status: implemented in shadow; scoring unchanged
+- Decision: Convert `rollout` to evaluation contract `1.1` without changing its
+  five legacy scoring fields. Make the rollout mechanism the prerequisite for
+  entry, observation, pause, stop, and rollback-trigger decisions. Require both
+  entry criteria and an observation window before promotion criteria become
+  question-eligible. Require a rollback trigger before asking for the executable
+  rollback procedure. Split rollout ownership into decision owner,
+  pause/stop authority, and rollback execution owner. Use a required
+  communication-impact scope before optional customer, support,
+  documentation/migration, or go-to-market actions.
+- Reason: The prior fields combined opposing thresholds, timing, authority, and
+  execution into broad questions. Those decisions are independently answerable,
+  but their order matters: promotion has no meaning before initial exposure and
+  observation, and rollback procedure should resolve a named trigger. Audience
+  actions are conditional, so making every channel universally required would
+  manufacture gaps.
+- Consequence: Native rollout evaluation can expose one ordered decision at a
+  time. The legacy adapter still round-trips the original field extraction, so
+  rollout verdicts, weight, gates, bands, and live remediation do not change.
+  Fresh 0.8 diagnostic runs remain deferred until instrumentation and requirement
+  coverage complete the priority atomic slices.
+
+## D-065: Atomize Instrumentation Without Cross-Criterion Dependencies
+
+- Status: implemented in shadow; scoring unchanged
+- Decision: Convert `instrumentation` to evaluation contract `1.1` without
+  changing its three legacy scoring fields. Split event declarations from
+  optional event properties. Add a local metric-definition reference and require
+  both that reference and declared events before the event-to-metric formula is
+  question-eligible; optional filters or dimensions follow the formula. Require
+  an operational-signal scope, one named failure-detection signal, and its
+  diagnostic use, with additional log, dashboard, alert, monitoring, and support
+  channels represented as optional scoped atoms.
+- Reason: Prerequisite edges are deliberately criterion-local, so directly
+  coupling instrumentation to `success_metrics` would make rubric contracts and
+  consolidation cross-criterion state machines. A local metric reference keeps
+  the dependency graph bounded while still preventing formula questions before
+  events and the intended metric are named. Optional channel atoms avoid
+  requiring every observability mechanism for every product.
+- Consequence: Native instrumentation evaluation can distinguish missing events,
+  properties, metric linkage, detection, and diagnosis. The legacy adapter still
+  preserves list evidence and objective operational-signal constraints while
+  round-tripping the original extraction with exact score parity. Live scoring
+  and remediation remain unchanged.
+
+## D-066: Keep Dynamic Requirements Inside Atomic Coverage Contracts
+
+- Status: implemented in shadow; acceptance gate and scoring unchanged
+- Decision: Convert `acceptance_criteria` to evaluation contract `1.1` without
+  changing its three legacy scoring fields or gate. Split the core into
+  completion outcome, observable pass condition, and observable fail condition.
+  Use a required failure/boundary scope before optional failure, invalid-input,
+  permission, or boundary-value criteria. Represent requirement coverage with a
+  launch-critical requirement set, optional decision-rule boundary set,
+  requirement-to-case mapping, optional boundary-to-case mapping, and coverage
+  completeness. Gate requirement mapping on the requirement set plus pass/fail
+  conditions, and gate completeness on that mapping.
+- Reason: Requirement identities are document data and cannot safely become
+  dynamic rubric assertion ids without destabilizing contracts, persistence, and
+  consolidation. Bounded mapping assertions retain atomic resolution while
+  allowing one document to contain any number of requirements. Applicability
+  scope avoids requiring every failure category for every product.
+- Consequence: Native acceptance evaluation can ask for one missing coverage
+  decision at a time. The legacy adapter round-trips the original extraction, and
+  the `caps_at_ready_with_gaps` gate behaves exactly as before. The four priority
+  D-061 composite slices are now migrated, so fresh 0.8 evaluation and D-060
+  question diagnostics are the next gate before further rubric atomization.
+
+## D-067: Deterministic Atomic Questions Pass Safety But Fail The Semantic Gate
+
+- Status: measured; live integration remains blocked
+- Decision: Make deterministic rubric/evidence rendering the primary Phase 3
+  diagnostic mode and predeclare the D-060 engineering thresholds before proxy
+  review. Preserve model-authored wording as optional shadow comparison only.
+  Keep live remediation unchanged because the fresh rubric-0.8 run fails every
+  semantic threshold despite passing every mechanical threshold.
+- Reason: Three fresh isolated evaluation runs produced 90 verified artifacts and
+  29 currently eligible deterministic questions. Rendering was 100% stable, with
+  zero unsupported output and zero within-document duplicates. Proxy review
+  measured 99.14% consensus coverage, 82.76% relevance, 86.21% answerability,
+  58.62% smallest scope, and 82.76% no-unsupported-assumption, below the
+  predeclared 100%/90%/90%/80%/95% gates. Remaining failures come from unatomized
+  lower-priority contracts, generic gap templates without verified subject
+  context, incomplete instrumentation ordering, category framing, and one
+  source-disproved contradiction.
+- Consequence: `Question`, remediation/session state, scoring, and dashboard
+  behavior remain unchanged. The frozen artifacts under `sampleDoc/.forge/` and
+  `reports/atomic question gate 2026-09-28.md` become the new comparison baseline.
+  The next rerun must retain the same thresholds; synthetic results remain
+  calibration-ineligible and human review remains required.
+
+## D-068: Issue-Level Consensus Improves Semantics But Does Not Open The Gate
+
+- Status: implemented and measured in shadow; live integration remains blocked
+- Decision: Advance the rubric to
+  `0.8.1-atomic-question-corrections-shadow` rather than reinterpreting 0.8.0
+  artifacts after changing instrumentation prerequisites. Require a strict
+  majority for the same canonical contradiction relation and unordered evidence
+  pair before attaching a contradiction issue to a question target. Carry exact
+  source subject evidence separately from issue evidence, accept only explicit
+  rubric-owned variants for a supplied closed-set framing, and require the local
+  metric reference before an event-declaration question is eligible.
+- Reason: Assertion-status agreement did not imply agreement on a specific issue;
+  unioning every issue from runs that voted `contradictory` promoted singleton
+  false positives. Gap context must remain auditable without pretending a
+  prerequisite quote proves absence. The 0.8.1 rerun removed the known Rush
+  precedence false positive and improved relevance from 82.76% to 92.59% and
+  answerability from 86.21% to 92.59%.
+- Consequence: The gate still fails. Consensus coverage was 99.07%, smallest-scope
+  was 59.26%, and no-unsupported-assumption was 88.89%. Composite lower-priority
+  contracts remain the binding defect. Scoring, legacy restoration, session
+  state, the public `Question` model, and live remediation are unchanged. Exact
+  results and limitations are appended to
+  `reports/atomic question gate 2026-09-28.md`.
+
+## D-069: Reject Relation-Incomplete Evaluation Claims
+
+- Status: implemented; prior 0.8.1 evaluation-recall result superseded
+- Decision: Reject a criterion-evaluation submission when any claim is absent
+  from all evidence sets or when a referencing evidence set omits that claim's
+  assertion id. State the same relation-completeness rule in the bounded prompt;
+  never infer support from a bare claim in Python.
+- Reason: Two 0.8.1 runs contained verified quotes and claims but no evidence-set
+  relations. Their claims looked substantive in the raw artifact but could not
+  contribute semantic support, causing false gaps such as Rush constraints.
+- Consequence: Rubric `0.8.2-relation-complete-evaluation-shadow` forced fresh
+  runs and became the valid pre-atomization baseline. Historical 0.8.1 proxy
+  metrics remain renderer diagnostics only. Scoring remains unchanged.
+
+## D-070: Atomize The Remaining Composite Question Contracts
+
+- Status: implemented and measured in shadow
+- Decision: Add contract `1.1` assertions and criterion-local prerequisites for
+  acceptance subject, transitional state behavior, accessibility, open-question
+  scope/identity/owner/deadline, alternative scope/disposition/rejection,
+  assumption validation, and service-expectation dimensions. Remove same-field
+  sibling evidence as implicit subject context; only declared prerequisites may
+  provide exact subject evidence.
+- Reason: The relation-complete 0.8.2 baseline confirmed that broad composite
+  contracts, rather than generation variability, were the binding atomicity
+  defect. Same-field evidence could also create misleading acceptance context.
+- Consequence: Rubric `0.9.0-remaining-atomic-contracts-shadow` raised
+  smallest-scope quality to 81.48%, passing that threshold, but applicability
+  assumptions still blocked the full gate. Legacy fields, scores, gates, and
+  restoration remain unchanged.
+
+## D-071: Pass The Synthetic Engineering Gate Without Enabling Live Questions
+
+- Status: engineering gate passed; human and integration gates remain blocked
+- Decision: In rubric `0.9.1-applicability-contracts-shadow`, separate
+  applicability from behavior for transitional states, sensitive data, and
+  instrumentation; atomize requirement priority; accept source-backed
+  framing-appropriate drivers in problem evaluation; and retain the unchanged
+  predeclared thresholds.
+- Reason: Three fresh relation-complete runs produced 25 deterministic questions
+  with 100% consensus coverage, 92% relevance, 92% answerability, 96% smallest
+  scope, and 100% no-unsupported-assumption. Unsupported output, duplicates, and
+  repeated-run instability remained zero.
+- Consequence: The synthetic engineering hypothesis passes for the first time,
+  but the labels remain calibration-ineligible. Do not connect shadow questions
+  to remediation sessions yet. First complete blinded human review and specify
+  durable question identity, answer binding, evaluation revision, same-answer
+  multi-gap closure, and state migration.

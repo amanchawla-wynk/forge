@@ -1,6 +1,6 @@
 # Expert Baseline
 
-Forge `0.6.0-expert-baseline` is a self-contained cross-industry PRD reviewer.
+Forge `0.9.1-applicability-contracts-shadow` is a self-contained cross-industry PRD reviewer.
 It converts published product, service, privacy, accessibility, and launch
 guidance into atomic fields that an LLM extracts and Python verifies. It does
 not copy external scoring weights and does not treat an online template as a
@@ -33,6 +33,18 @@ Version `0.6.0` adds two required fields inside existing criteria:
 and verdict credits are unchanged. The changes were transfer-checked against
 the repository's three sample PRDs and a synthetic complete fixture, but remain
 expert-baseline hypotheses rather than calibrated organization policy.
+
+Version `0.7.0` adds only the score-neutral criterion-evaluation contract and
+legacy parity projection described in D-054. Required fields, weights, gates,
+band thresholds, and verdict credits remain identical to `0.6.0`. Native
+criterion evaluations are shadow audit records and make no readiness claim.
+
+Version `0.8.0` adds atomic score-neutral evaluation assertions, bounded
+resolution contracts, and validated prerequisite edges. Dependency readiness,
+operational readiness, rollout, and instrumentation are the first one-to-many
+projections, followed by acceptance and requirement coverage. Their atomic
+outcomes remain shadow audit data; required scoring fields, weights, gates,
+bands, and verdict credits remain unchanged.
 
 ## Public Example Review
 

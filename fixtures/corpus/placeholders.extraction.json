@@ -23,7 +23,8 @@
           "name": "measurement_window",
           "value": "TBD",
           "evidence": {"quote": "Measurement window: TBD"}
-        }
+        },
+        {"name": "guardrail_metric", "value": null, "evidence": null}
       ]
     },
     {
@@ -35,28 +36,102 @@
     {
       "criterion_id": "functional_requirements",
       "fields": [
+        {"name": "primary_flow", "value": null, "evidence": null},
+        {"name": "preconditions", "value": null, "evidence": null},
         {"name": "requirements", "value": ["TBD"], "evidence": {"quote": "TBD"}},
-        {"name": "prioritisation", "value": "TBD", "evidence": {"quote": "TBD"}}
+        {"name": "prioritisation", "value": "TBD", "evidence": {"quote": "TBD"}},
+        {"name": "decision_rules_and_precedence", "value": null, "evidence": null}
       ]
     },
     {
       "criterion_id": "acceptance_criteria",
       "fields": [
-        {"name": "criteria", "value": ["TBD"], "evidence": {"quote": "TBD"}}
+        {"name": "criteria", "value": ["TBD"], "evidence": {"quote": "TBD"}},
+        {"name": "failure_and_boundary_criteria", "value": null, "evidence": null},
+        {"name": "requirement_coverage", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "edge_cases_and_states",
+      "fields": [
+        {"name": "error_states", "value": null, "evidence": null},
+        {"name": "empty_or_edge_states", "value": null, "evidence": null},
+        {"name": "transitional_or_degraded_states", "value": null, "evidence": null},
+        {"name": "supported_platforms", "value": null, "evidence": null},
+        {"name": "accessibility_approach", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "instrumentation",
+      "fields": [
+        {"name": "events", "value": null, "evidence": null},
+        {"name": "metric_link", "value": null, "evidence": null},
+        {"name": "operational_signals", "value": null, "evidence": null}
       ]
     },
     {
       "criterion_id": "dependencies",
       "fields": [
         {"name": "dependencies", "value": ["N/A"], "evidence": {"quote": "N/A"}},
+        {"name": "dependency_readiness", "value": null, "evidence": null},
         {"name": "constraints", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "risk_compliance",
+      "fields": [
+        {"name": "data_handled", "value": null, "evidence": null},
+        {"name": "purpose_and_minimisation", "value": null, "evidence": null},
+        {"name": "access_and_third_parties", "value": null, "evidence": null},
+        {"name": "review_status", "value": null, "evidence": null},
+        {"name": "data_lifecycle", "value": null, "evidence": null}
       ]
     },
     {
       "criterion_id": "rollout",
       "fields": [
         {"name": "rollout_mechanism", "value": "TBD", "evidence": {"quote": "TBD"}},
-        {"name": "rollback_plan", "value": "TBD", "evidence": {"quote": "TBD"}}
+        {"name": "launch_and_stop_criteria", "value": null, "evidence": null},
+        {"name": "rollback_plan", "value": "TBD", "evidence": {"quote": "TBD"}},
+        {"name": "rollout_owner", "value": null, "evidence": null},
+        {"name": "support_and_communications", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "open_questions_owned",
+      "fields": [
+        {"name": "open_questions", "value": null, "evidence": null},
+        {"name": "owners", "value": null, "evidence": null},
+        {"name": "target_dates", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "alternatives_considered",
+      "fields": [
+        {"name": "alternatives", "value": null, "evidence": null},
+        {"name": "rejection_reasons", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "assumptions_validation",
+      "fields": [
+        {"name": "assumptions", "value": null, "evidence": null},
+        {"name": "validation", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "operational_readiness",
+      "fields": [
+        {"name": "service_expectations", "value": null, "evidence": null},
+        {"name": "support_owner", "value": null, "evidence": null},
+        {"name": "recovery_plan", "value": null, "evidence": null}
+      ]
+    },
+    {
+      "criterion_id": "document_governance",
+      "fields": [
+        {"name": "document_owner", "value": null, "evidence": null},
+        {"name": "status_and_version", "value": null, "evidence": null}
       ]
     }
   ]

@@ -34,6 +34,7 @@ class VisualAsset(BaseModel):
 
 
 class SupplementalAnswer(BaseModel):
+    answer_id: str | None = Field(default=None, min_length=1)
     criterion_id: str = Field(min_length=1)
     answer: str = Field(min_length=1)
     # Optional identity for one cell in the edge-case coverage ledger. This
@@ -71,6 +72,11 @@ class NormalizedDocument(BaseModel):
     blocks: list[SourceBlock]
     visual_assets: list[VisualAsset] = Field(default_factory=list)
     product_context: list[ProductContextTerm] = Field(default_factory=list)
+    snapshot_id: str | None = None
+    source_sha256: str | None = None
+    parser_fingerprint: str | None = None
+    normalized_hash: str | None = None
+    normalized_schema_version: str | None = None
 
     @property
     def text(self) -> str:

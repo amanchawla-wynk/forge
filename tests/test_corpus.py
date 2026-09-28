@@ -37,6 +37,20 @@ def _assess(document: Path, case: str):
 
 
 @pytest.mark.parametrize("case", sorted(EXPECTATIONS))
+def test_corpus_extractions_match_the_current_rubric_exactly(case):
+    rubric = load_rubric("prd")
+    criteria = json.loads(_extraction(case))["criteria"]
+
+    assert [item["criterion_id"] for item in criteria] == [
+        criterion.id for criterion in rubric.criteria
+    ]
+    for item, criterion in zip(criteria, rubric.criteria, strict=True):
+        assert [field["name"] for field in item["fields"]] == [
+            field.name for field in criterion.fields
+        ]
+
+
+@pytest.mark.parametrize("case", sorted(EXPECTATIONS))
 def test_corpus_case_scores_as_expected(case):
     expected = EXPECTATIONS[case]
     response = _assess(CORPUS / f"{case}.md", case)

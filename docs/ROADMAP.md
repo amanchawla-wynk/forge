@@ -213,9 +213,149 @@
   machine field names expose array/scalar or other schema-type conflicts.
   Explicitly different product, variant, phase, surface, or fallback scopes and
   repeated compatible declarations are hard negatives.
+- Completed the architecture-audit Phase 0 hardening (D-052): direct and batched
+  extraction now share exact schema validation; per-item list evidence survives
+  session restart while remaining absent from model schemas; checkpoint output
+  uses one persisted evaluation revision and refreshed deterministic deep review;
+  uncovered edge-case cells are explicit queue entries; dashboard coverage uses
+  repeated pessimistic consolidation; and MCP revision writes are session-bound,
+  versioned, crash-recoverable, restricted to the exact previewed verified
+  answers, and completed only after a hash-bound full assessment of the generated
+  artifact. Durable answer ids now survive restart and version-1 pending sessions
+  are repaired safely on load.
+- Added immutable, parser-versioned source snapshots (D-053): acquisition is
+  byte-exact and source-neutral, canonical nodes and normalized content are
+  hashed, extraction and remediation fingerprints bind the snapshot plus rubric,
+  and SQLite sessions persist the complete parse for restart-safe checkpoints.
+  Discovery/resume fail closed on parser, normalized-content, snapshot, or rubric
+  drift; legacy sessions remain audit-only. Dashboard and MCP advisory operations
+  now reuse one prepared assessment instead of reparsing within an operation.
+- Added `spikes/parser_benchmark.py`, a dependency-free control harness that can
+  compare the current parser with optional Docling and PyMuPDF4LLM installs for
+  timing, determinism, text retention, structure, images, pages, and provenance.
+  Measured the two DOCX and one PDF files in `sampleDoc/`: Docling retained
+  98.26-99.41% of baseline tokens and recovered materially richer heading/table
+  structure, while PyMuPDF4LLM provided a faster PDF control. Results are in
+  `reports/parser benchmark 2026-09-26.md`; no candidate has been adopted pending
+  manual evidence/provenance review.
+- Added Phase 2 criterion evaluation in score-neutral shadow mode (D-054): strict
+  submissions retain multiple support/counterevidence sets, gaps, ambiguities,
+  and contradictions; Python verifies named blocks and exact spans, requires
+  exhaustive batches, mints authoritative ids, and consolidates repeated runs
+  conservatively. `prepare_prd_evaluation` / `apply_prd_evaluation` expose the
+  agent-driven flow. Legacy extraction has a reversible score-parity adapter,
+  and new durable reviews transactionally persist per-run evaluation artifacts
+  under state schema version `3`. The rubric is now
+  `0.7.0-evaluation-shadow`; scoring rules are unchanged.
+- Added criterion-evaluation shadow diagnostics and completed the first
+  three-run study (D-055). The authored corpus achieved 88% full status
+  agreement, 5.33% abstention, 100% quote verification, and 81.33% symmetric
+  native/legacy agreement; native evaluation preserved a real ambiguity in the
+  complete fixture and rejected many fluent-but-hollow gaming claims. The two
+  internal DOCX samples achieved only 56.67% full agreement, so Phase 3 was
+  blocked at that checkpoint. Full results are in
+  `reports/criterion evaluation shadow diagnostics 2026-09-26.md`.
+- Replaced whole-criterion shadow voting with assertion-level strict-majority
+  reconciliation (D-056), retaining minority evidence for audit. The unchanged
+  study now reports 95.29% full assertion agreement on the corpus and 74.51% on
+  internal PRDs, with internal abstention reduced to 16.67%. This improves the
+  representation but did not by itself clear the Phase 3 gate.
+- Normalized support and ambiguity identities so model paraphrases do not block
+  deterministic merging (D-057). Added prediction-free sheets for every
+  assertion in both internal PRDs and a strict agreement evaluator. The sheets
+  were initially blank, so Forge correctly reported no agreement or consensus
+  before the proxy reviews in D-058 were completed.
+- Completed three isolated synthetic AI proxy reviews because human reviewers
+  were unavailable (D-058). Agents unanimously agreed on 79/102 assertions,
+  produced strict-majority consensus for 100, and native shadow outcomes matched
+  81/100 consensus labels. This opens Phase 3 as a guarded score-neutral shadow
+  prototype only; it does not clear calibration or production-default gates.
+- Implemented the first Phase 3 shadow question slice (D-059). Exhaustive native
+  evaluations now expose one deterministically ranked strict-majority issue to a
+  bounded host prompt. Python re-verifies the evaluation batch, accepts only
+  lexically grounded wording and exact source quotations, and otherwise returns
+  the rubric-owned answer contract. The artifact has no score effect and is not
+  connected to live remediation or persisted sessions.
+- Added frozen question diagnostics and three isolated generation/reviewer runs
+  (D-060). Across 198 completions, no unsupported text reached output, fallback
+  was at most 4.55% per run, and wording was stable for 63/66 targets. The live
+  gate failed: synthetic proxy consensus rated only 29/71 unique questions as
+  single-decision scope and identified unsupported assumptions in 13/71. The
+  baseline is recorded in
+  `reports/question generation shadow diagnostics 2026-09-28.md`.
+- Fixed assertion-outcome issue references exposed by that study: selected
+  ambiguity and contradiction outcomes no longer carry lower-priority gap ids;
+  all minority issue records remain auditable.
+- Implemented and reran the D-060 corrective slice (D-061): bounded gap detail,
+  issue-variant grouping, sibling deduplication, first-gap deferral, and
+  evidence-rendered conflict fallback. Three fresh native evaluation runs
+  produced 90 verified artifacts and reduced active plans from 66 to 28. Proxy
+  relevance improved to 44/46 and answerability to 46/46, but only 15/46 were
+  single-decision scope, 8/46 retained unsupported assumptions, fallback rose to
+  39-46%, and wording stability was 14/28. Live integration remains blocked.
+- Added atomic evaluation contract infrastructure and the dependency-readiness
+  vertical slice (D-062). Contract `1.1` validates resolution contracts and a
+  prerequisite DAG; native outcomes now use assertion ids, while the reversible
+  legacy adapter fans one field witness into mapped atoms with exact score parity.
+  The rubric first advanced to `0.8.0-atomic-evaluation-shadow`; old 0.7 shadow
+  submissions remain historical and require fresh runs rather than silent
+  reinterpretation.
+- Added the operational-readiness atomic slice (D-063): applicable service-level
+  dimensions are gated by a required scope decision; monitoring, support, and
+  incident owners are separate; and recovery behavior depends on a diagnostic
+  method. All three legacy fields still round-trip with exact score parity.
+- Added the rollout atomic slice (D-064): mechanism gates thresholds and rollback
+  trigger, promotion waits for entry plus observation, rollback procedure waits
+  for its trigger, authority/execution are separate, and optional launch-channel
+  actions follow an impact-scope decision. All five legacy rollout fields retain
+  exact score parity.
+- Added the instrumentation atomic slice (D-065): event declarations gate
+  properties, events plus a local metric reference gate the formula, and scoped
+  operational signals separate detection from diagnosis. All three legacy
+  instrumentation fields retain exact score parity, including list evidence and
+  objective signal constraints.
+- Added the acceptance-coverage atomic slice (D-066): completion/pass/fail,
+  applicability-scoped failure categories, requirement inventory, mapping, and
+  completeness are separate ordered decisions. Dynamic requirement names remain
+  document data, while all three legacy fields and the acceptance gate retain
+  exact parity.
+- Reran the frozen question gate under rubric 0.8 with deterministic templates
+  and predeclared thresholds (D-067). Three fresh evaluation runs yielded 90
+  verified artifacts and 29 stable questions with zero unsupported output or
+  duplicates. The semantic gate failed: 82.76% relevant, 86.21% answerable,
+  58.62% smallest-scope, and 82.76% no-unsupported-assumption. Results are in
+  `reports/atomic question gate 2026-09-28.md`; live integration remains blocked.
+- Advanced to `0.8.1-atomic-question-corrections-shadow` (D-068), invalidated the
+  old fingerprint, and completed three fresh isolated runs. Canonical
+  issue-majority filtering removed the known false precedence question;
+  rubric-owned opportunity framing and corrected ordering raised relevance and
+  answerability to 92.59%, passing both gates. Smallest scope (59.26%), assumption
+  safety (88.89%), and consensus coverage (99.07%) still fail, so live integration
+  remains blocked.
+- Found and closed the orphan-claim integrity hole (D-069). Claims now require an
+  evidence-set relation that includes their assertion id. Fresh relation-complete
+  0.8.2 runs replaced the untrustworthy evaluation-recall baseline.
+- Atomized the remaining composite contracts and removed implicit same-field
+  subject context (D-070). Rubric 0.9.0 raised smallest-scope quality to 81.48%
+  but retained applicability failures.
+- Added applicability-first contracts and framing-aware problem evaluation in
+  `0.9.1-applicability-contracts-shadow` (D-071). Three fresh runs yielded 90
+  verified artifacts and 25 deterministic questions. The frozen synthetic gate
+  passes: 100% consensus coverage, 92% relevance, 92% answerability, 96%
+  smallest-scope, 100% assumption safety, zero unsupported output, zero
+  duplicates, and stable repeated preparation. This is not human validation or
+  calibration, so live integration remains blocked.
 
 ## Current Build
 
+- Run a blinded human review against the frozen 0.9.1 question set without
+  changing thresholds or wording based on those labels.
+- Define durable `question_id`/`issue_id` answer binding, same-answer multi-gap
+  closure, evaluation-revision behavior, and state migration before considering
+  any replacement of legacy field questions.
+- Compare legacy-parser and Docling shadow evaluations on the same snapshot
+  fixtures after the bounded Docling adapter exists, using evidence ids and
+  canonical spans rather than raw output text as the comparison unit.
 - Specify the deep-review finding, claim-ledger, and consistency-ledger schemas
   required by D-045, including exact quote provenance, scope, phase, modality,
   affected consumers, implementation consequence, and required author decision.
@@ -241,7 +381,9 @@
 - Resolve the documented Rush quality contradictions: Data Saver precedence,
   flag-off behavior, and the 360p fallback algorithm.
 - Evaluate local OCR output as separately provenanced, quote-verifiable evidence.
-- Harden extraction validation against duplicate or unknown criterion fields.
+- Manually label quote fidelity, table-cell order, repeated headers, OCR-only
+  text, and canonical provenance across the measured `sampleDoc/` outputs, then
+  compare corpus and proxy-diagnostic behavior before selecting a parser.
 
 ## Next
 
@@ -253,8 +395,9 @@
   whatever replaces it.
 - Test the dashboard's `dashboard` extra install and BYOK flow against real
   Anthropic, OpenAI, and Gemini keys on a clean machine.
-- Compare a direct Docling adapter with current PDF and DOCX normalization on
-  representative fixtures before expanding to multimodal document content.
+- Prototype a direct Docling adapter behind a new parser fingerprint, without
+  making it the production default, to measure corpus and proxy-diagnostic
+  behavior before expanding to multimodal content.
 - Add qualitative risk records only where source evidence or a rubric omission
   supports them; do not invent probability or numeric risk scores.
 

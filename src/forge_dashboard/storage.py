@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import sqlite3
 import uuid
 from contextlib import closing
@@ -152,19 +153,48 @@ class DocumentStore:
                     (stored.document_id, stored.filename, relative_path),
                 )
             except sqlite3.IntegrityError as error:
-                raise ValueError(
-                    f"document_id already registered: {stored.document_id}"
-                ) from error
+                existing = self.get(stored.document_id)
+                if existing != stored:
+                    raise ValueError(
+                        f"document_id already registered: {stored.document_id}"
+                    ) from error
 
-    def save_revision_plan(self, document_id: str, plan: RevisionPlan) -> str:
-        self.get(document_id)
-        plan_id = uuid.uuid4().hex
+    def discard_generated(self, stored: StoredDocument) -> None:
+        """Best-effort cleanup for an allocated or registered generated copy."""
         with self._lock, closing(self._connect()) as connection:
             connection.execute(
-                "INSERT INTO dashboard_revision_plans(plan_id, document_id, plan_json) "
+                "DELETE FROM dashboard_documents WHERE document_id = ?",
+                (stored.document_id,),
+            )
+        stored.path.unlink(missing_ok=True)
+
+    @staticmethod
+    def revision_plan_id(review_session_id: str, operation_id: str) -> str:
+        digest = hashlib.sha256(
+            f"{review_session_id}\x00{operation_id}".encode("utf-8")
+        ).hexdigest()
+        return f"plan_{digest[:32]}"
+
+    def save_revision_plan(
+        self, document_id: str, plan: RevisionPlan, *, plan_id: str
+    ) -> str:
+        self.get(document_id)
+        with self._lock, closing(self._connect()) as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO dashboard_revision_plans"
+                "(plan_id, document_id, plan_json) "
                 "VALUES (?, ?, ?)",
                 (plan_id, document_id, plan.model_dump_json()),
             )
+            row = connection.execute(
+                "SELECT document_id, plan_json FROM dashboard_revision_plans "
+                "WHERE plan_id = ?",
+                (plan_id,),
+            ).fetchone()
+        if row is None or row["document_id"] != document_id:
+            raise ValueError("revision plan id conflicts with a different document")
+        if RevisionPlan.model_validate_json(row["plan_json"]) != plan:
+            raise ValueError("revision plan id conflicts with different plan content")
         return plan_id
 
     def get_revision_plan(self, plan_id: str) -> tuple[str, RevisionPlan]:
@@ -198,7 +228,7 @@ class DocumentStore:
     ) -> None:
         with self._lock, closing(self._connect()) as connection:
             connection.execute(
-                "INSERT INTO dashboard_review_artifacts "
+                "INSERT OR IGNORE INTO dashboard_review_artifacts "
                 "(review_session_id, plan_id, source_document_id, "
                 "generated_document_id, final_review_session_id) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -209,6 +239,27 @@ class DocumentStore:
                     generated_document_id,
                     final_review_session_id,
                 ),
+            )
+            row = connection.execute(
+                "SELECT source_document_id, generated_document_id, "
+                "final_review_session_id FROM dashboard_review_artifacts "
+                "WHERE review_session_id = ? AND plan_id = ?",
+                (review_session_id, plan_id),
+            ).fetchone()
+        expected = (
+            source_document_id,
+            generated_document_id,
+            final_review_session_id,
+        )
+        if row is None or tuple(row) != expected:
+            raise ValueError("revision artifact link conflicts with an existing link")
+
+    def unlink_review_artifact(self, review_session_id: str, plan_id: str) -> None:
+        with self._lock, closing(self._connect()) as connection:
+            connection.execute(
+                "DELETE FROM dashboard_review_artifacts "
+                "WHERE review_session_id = ? AND plan_id = ?",
+                (review_session_id, plan_id),
             )
 
     def review_artifacts(self, review_session_id: str) -> list[dict[str, str | None]]:

@@ -32,6 +32,7 @@ forge-setup-opencode = "forge.setup_opencode:main"
 forge-calibration = "forge.calibration:main"
 forge-review-eval = "forge.review_eval:main"
 forge-proxy-diagnostics = "forge.proxy_diagnostics:main"
+forge-evaluation-diagnostics = "forge.evaluate.diagnostics:main"
 
 [build-system]
 requires = ["hatchling"]

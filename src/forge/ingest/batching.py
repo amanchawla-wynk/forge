@@ -94,19 +94,40 @@ def _with_blocks(
     return document.model_copy(update={"blocks": blocks})
 
 
-def plan_fingerprint(batches: list[DocumentBatch], rubric_version: str) -> str:
+def plan_fingerprint(
+    batches: list[DocumentBatch], rubric_id: str, rubric_version: str
+) -> str:
     """Identify the exact inputs a batch plan was derived from.
 
     Supplemental answers change the normalized document, and therefore the
     batch boundaries. Binding fragments to this value stops a stale extraction
     from being scored as if it had seen the current evidence.
     """
+    if not batches:
+        raise ValueError("an extraction plan needs at least one batch")
+    document = batches[0].document
+    identity = (
+        document.snapshot_id,
+        document.parser_fingerprint,
+        document.normalized_hash,
+    )
+    if any(value is None for value in identity):
+        raise ValueError("extraction plan requires exact snapshot identity")
     digest = hashlib.sha256()
+    digest.update(b"forge-extraction-plan/v2")
+    digest.update(b"\x00")
+    digest.update(document.snapshot_id.encode("utf-8"))
+    digest.update(b"\x00")
+    digest.update(document.parser_fingerprint.encode("utf-8"))
+    digest.update(b"\x00")
+    digest.update(document.normalized_hash.encode("utf-8"))
+    digest.update(b"\x00")
+    digest.update(rubric_id.encode("utf-8"))
+    digest.update(b"\x00")
     digest.update(rubric_version.encode("utf-8"))
-    if batches:
-        for term in batches[0].document.product_context:
-            digest.update(b"\x00context\x00")
-            digest.update(term.model_dump_json().encode("utf-8"))
+    for term in document.product_context:
+        digest.update(b"\x00context\x00")
+        digest.update(term.model_dump_json().encode("utf-8"))
     for batch in batches:
         digest.update(b"\x00")
         digest.update(batch.id.encode("utf-8"))

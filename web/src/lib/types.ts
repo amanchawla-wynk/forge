@@ -81,6 +81,7 @@ export const CONSUMER_LABELS: Record<Consumer, string> = {
 };
 
 export interface SupplementalAnswer {
+  answer_id?: string | null;
   criterion_id: string;
   answer: string;
   requirement_quote?: string | null;
@@ -140,6 +141,7 @@ export interface Assessment {
   remediation_delta_count: number;
   criteria: CriterionResult[];
   consumers: ConsumerReadiness[];
+  evaluation_revision: number;
 }
 
 export interface Question {
@@ -160,6 +162,7 @@ export interface Question {
   requirement_quote: string | null;
   edge_case_id: string | null;
   taxonomy_version: string | null;
+  evaluation_revision: number;
 }
 
 export type CoverageStatus =
@@ -203,6 +206,7 @@ export interface NarrativeReport {
   blocked_consumers: string[];
   next_step: string | null;
   confidence_note: string;
+  evaluation_revision: number;
 }
 
 export interface ClaimOccurrence {
@@ -295,6 +299,7 @@ export interface DeepReviewReport {
   graph: RequirementGraph;
   candidate_count: number;
   advisory: boolean;
+  evaluation_revision: number;
 }
 
 export interface AssessmentResponse {
@@ -346,6 +351,8 @@ export interface ReviewSessionSummary {
   pending_answer_count: number;
   client_name: string | null;
   updated_at: number;
+  compatible: boolean;
+  incompatibility_reasons: string[];
 }
 
 export interface ReviewDiscovery {
@@ -358,6 +365,7 @@ export interface RemediationState {
   assessment: Assessment;
   report: NarrativeReport;
   deep_review: DeepReviewReport | null;
+  evaluation_revision: number;
   question_queue: Question[];
   verified_answers: SupplementalAnswer[];
   pending_answers: unknown[];

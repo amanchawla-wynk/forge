@@ -77,6 +77,7 @@ class Assessment(BaseModel):
     confidence_basis: str = "independent_extraction_runs"
     remediated_criteria: list[str] = Field(default_factory=list)
     remediation_delta_count: int = 0
+    evaluation_revision: int = 0
     criteria: list[CriterionResult]
     consumers: list[ConsumerReadiness]
 

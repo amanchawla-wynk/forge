@@ -1,5 +1,5 @@
 id: prd
-version: "0.6.0-expert-baseline"
+version: "0.9.1-applicability-contracts-shadow"
 doc_type: prd
 description: >
   Source-backed cross-industry PRD completeness and actionability baseline.
@@ -111,8 +111,7 @@ criteria:
         remediation_question: "What goes wrong for users today that this feature should fix?"
         framing_questions:
           opportunity_bet: >-
-            What opportunity is this going after, and what does the business
-            lose by not taking it now?
+            What specific opportunity is this pursuing?
           compliance_mandate: >-
             Which obligation requires this, and what is the exposure if it is
             not met?
@@ -150,6 +149,47 @@ criteria:
     remediation_prompt: >
       What is the evidence that this problem is real, and who specifically
       experiences it?
+    evaluation:
+      version: "1.1"
+      evidence_roles:
+        - id: supporting
+          description: "Exact source spans that support the assertion."
+        - id: counterevidence
+          description: "Exact source spans that conflict with the assertion."
+        - id: context
+          description: "Exact source spans needed to interpret scope or applicability."
+      assertions:
+        - id: problem
+          description: "The current problem or framing-appropriate opportunity, mandate, or migration driver is explicit."
+          legacy_field: problem
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What problem or framing-appropriate driver justifies this work?"
+          resolution_contract: "State the problem or framing-appropriate driver for this work."
+        - id: affected_users
+          description: "The audience affected by the problem or driver is explicit."
+          legacy_field: affected_users
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Who is affected by this problem or driver?"
+          resolution_contract: "Name the affected audience."
+        - id: evidence
+          description: "Source evidence supports the problem or framing-appropriate driver."
+          legacy_field: evidence
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What evidence shows this problem or driver is real?"
+          resolution_contract: "Cite the evidence for the problem or framing-appropriate driver."
+        - id: cost_of_inaction
+          description: "The consequence of not acting is explicit when applicable."
+          required: false
+          legacy_field: cost_of_inaction
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What happens if this work is not pursued?"
+          resolution_contract: "State the consequence of not pursuing this work."
+      semantic_statuses: [supported, partial, unsupported, contradictory, unclear, not_applicable]
+      hard_negatives:
+        - "A solution description without a problem, opportunity, mandate, or migration driver is not support."
+        - "A generic market trend without a specific audience or evidence is not a resolved driver."
+        - "A heading or placeholder is not a resolved problem decision."
+      fallback_question_template: "Which problem, audience, evidence, or inaction decision is unresolved?"
 
   - id: success_metrics
     name: "Success is measurable"
@@ -251,6 +291,61 @@ criteria:
     remediation_prompt: >
       Can you list the required behaviours as discrete, individually testable
       statements, and mark which are must-have for launch?
+    evaluation:
+      version: "1.1"
+      evidence_roles:
+        - id: supporting
+          description: "Exact source spans that support the assertion."
+        - id: counterevidence
+          description: "Exact source spans that conflict with the assertion."
+        - id: context
+          description: "Exact source spans needed to interpret scope or applicability."
+      assertions:
+        - id: primary_flow
+          description: "The main actor or system flow runs from trigger to observable outcome."
+          legacy_field: primary_flow
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What is the main flow from trigger to observable outcome?"
+          resolution_contract: "State the main flow from trigger to observable outcome."
+        - id: preconditions
+          description: "Eligibility, permission, input, or system-state preconditions are explicit."
+          legacy_field: preconditions
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What must be true before the main flow starts?"
+          resolution_contract: "State the precondition for the main flow."
+        - id: requirements
+          description: "Discrete individually testable behavior statements are present."
+          legacy_field: requirements
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What is one discrete testable behavior the product must implement?"
+          resolution_contract: "State one discrete testable product behavior."
+        - id: must_have_requirement
+          description: "At least one launch-critical must-have requirement is identified."
+          legacy_field: prioritisation
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which one requirement is a must-have for launch?"
+          resolution_contract: "Name one launch-critical must-have requirement."
+        - id: deferred_requirement
+          description: "A requirement that may wait is identified or explicitly declared absent."
+          required: false
+          legacy_field: prioritisation
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which one requirement can wait, or can none wait?"
+          resolution_contract: "Name one requirement that can wait or explicitly state that none can wait."
+          prerequisite_assertion_ids: [must_have_requirement]
+        - id: decision_rules_and_precedence
+          description: "Rule precedence, tie-break, default, and fallback are explicit, or no collision applies."
+          legacy_field: decision_rules_and_precedence
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which rule wins when behaviors overlap, and what default applies?"
+          resolution_contract: "State the authoritative precedence rule and default for one overlap."
+      semantic_statuses: [supported, partial, unsupported, contradictory, unclear, not_applicable]
+      hard_negatives:
+        - "Narrative prose without a discrete observable behavior is not a testable requirement."
+        - "A phase name without a named must-have requirement is not prioritisation evidence."
+        - "Two rules listed together without precedence are not a resolved decision rule."
+        - "A heading or placeholder is not a resolved functional decision."
+      fallback_question_template: "Which flow, behavior, priority, or precedence decision is unresolved?"
 
   - id: acceptance_criteria
     name: "Acceptance criteria exist"
@@ -276,6 +371,124 @@ criteria:
         remediation_question: "Which pass/fail case covers each must-have requirement and each boundary where behavior changes?"
     remediation_prompt: >
       What are the observable pass/fail conditions that mean this is done?
+    evaluation:
+      version: "1.1"
+      evidence_roles:
+        - id: supporting
+          description: "Exact source spans that support the assertion."
+        - id: counterevidence
+          description: "Exact source spans that conflict with the assertion."
+        - id: context
+          description: "Exact source spans needed to interpret scope or applicability."
+      assertions:
+        - id: acceptance_subject
+          description: "The feature, flow, or release governed by these acceptance criteria is identifiable; an exact title or overview naming it is sufficient."
+          legacy_field: criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which feature, flow, or release do these acceptance criteria evaluate?"
+          resolution_contract: "Name the feature, flow, or release whose completion is being judged."
+        - id: completion_outcome
+          description: "The observable outcome that constitutes feature completion is explicit."
+          legacy_field: criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What observable outcome means the feature is complete?"
+          resolution_contract: "State the observable completion outcome."
+          prerequisite_assertion_ids: [acceptance_subject]
+        - id: pass_condition
+          description: "An observable condition determines when the feature passes acceptance."
+          legacy_field: criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What observable condition makes acceptance pass?"
+          resolution_contract: "State the observable acceptance pass condition."
+          prerequisite_assertion_ids: [acceptance_subject]
+        - id: fail_condition
+          description: "An observable condition determines when the feature fails acceptance."
+          legacy_field: criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What observable condition makes acceptance fail?"
+          resolution_contract: "State the observable acceptance fail condition."
+          prerequisite_assertion_ids: [acceptance_subject]
+        - id: failure_boundary_scope
+          description: "Applicable failure, invalid-input, permission, and boundary categories are selected."
+          legacy_field: failure_and_boundary_criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which failure, invalid-input, permission, or boundary categories apply?"
+          resolution_contract: "State which failure and boundary categories apply."
+        - id: failure_case_criteria
+          description: "Observable failure-case acceptance criteria are defined when applicable."
+          required: false
+          legacy_field: failure_and_boundary_criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What observable result must each applicable failure case produce?"
+          resolution_contract: "State the observable result for the applicable failure case."
+          prerequisite_assertion_ids: [failure_boundary_scope]
+        - id: invalid_input_criteria
+          description: "Observable invalid-input acceptance criteria are defined when applicable."
+          required: false
+          legacy_field: failure_and_boundary_criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What observable result must invalid input produce?"
+          resolution_contract: "State the observable invalid-input result."
+          prerequisite_assertion_ids: [failure_boundary_scope]
+        - id: permission_criteria
+          description: "Observable permission-denial acceptance criteria are defined when applicable."
+          required: false
+          legacy_field: failure_and_boundary_criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What observable result must a permission denial produce?"
+          resolution_contract: "State the observable permission-denial result."
+          prerequisite_assertion_ids: [failure_boundary_scope]
+        - id: boundary_value_criteria
+          description: "Observable boundary-value acceptance criteria are defined when applicable."
+          required: false
+          legacy_field: failure_and_boundary_criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What observable result applies at the relevant boundary value?"
+          resolution_contract: "State the observable result at the applicable boundary."
+          prerequisite_assertion_ids: [failure_boundary_scope]
+        - id: launch_critical_requirement_set
+          description: "The launch-critical functional requirements requiring acceptance coverage are identified."
+          legacy_field: requirement_coverage
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which functional requirements are launch-critical and require acceptance coverage?"
+          resolution_contract: "Identify the launch-critical requirement requiring acceptance coverage."
+        - id: decision_rule_boundary_set
+          description: "Decision-rule boundaries requiring acceptance coverage are identified when applicable."
+          required: false
+          legacy_field: requirement_coverage
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which decision-rule boundaries require acceptance coverage?"
+          resolution_contract: "Identify the applicable decision-rule boundary requiring acceptance coverage."
+        - id: requirement_case_mapping
+          description: "Every launch-critical requirement maps to an observable pass/fail case."
+          legacy_field: requirement_coverage
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which observable pass/fail case covers each launch-critical requirement?"
+          resolution_contract: "Map the launch-critical requirement to its observable pass/fail case."
+          prerequisite_assertion_ids: [launch_critical_requirement_set, pass_condition, fail_condition]
+        - id: boundary_case_mapping
+          description: "Every applicable decision-rule boundary maps to an observable boundary case."
+          required: false
+          legacy_field: requirement_coverage
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which observable case covers each applicable decision-rule boundary?"
+          resolution_contract: "Map the applicable decision-rule boundary to its observable case."
+          prerequisite_assertion_ids: [decision_rule_boundary_set, failure_boundary_scope]
+        - id: coverage_completeness
+          description: "No launch-critical requirement remains without an observable pass/fail case."
+          legacy_field: requirement_coverage
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which launch-critical requirement, if any, still lacks a pass/fail case?"
+          resolution_contract: "Confirm that every launch-critical requirement has a pass/fail case or name the uncovered requirement."
+          prerequisite_assertion_ids: [requirement_case_mapping]
+      semantic_statuses: [supported, partial, unsupported, contradictory, unclear, not_applicable]
+      hard_negatives:
+        - "A desired outcome without observable pass and fail conditions is not acceptance evidence."
+        - "A generic error statement without an observable result is not failure-case acceptance criteria."
+        - "A list of tests without requirement identifiers is not requirement-to-case coverage."
+        - "Coverage of examples does not prove every launch-critical requirement is covered."
+        - "A heading or placeholder is not a resolved acceptance decision."
+      fallback_question_template: "Which observable acceptance or requirement-coverage decision is still unresolved?"
 
   - id: edge_cases_and_states
     name: "Edge cases, error and empty states"
@@ -307,6 +520,124 @@ criteria:
     remediation_prompt: >
       What should happen on error, loading, empty, offline, partial-completion,
       and recovery paths, and which platforms and accessibility standard apply?
+    evaluation:
+      version: "1.1"
+      evidence_roles:
+        - id: supporting
+          description: "Exact source spans that support the assertion."
+        - id: counterevidence
+          description: "Exact source spans that conflict with the assertion."
+        - id: context
+          description: "Exact source spans needed to interpret scope or applicability."
+      assertions:
+        - id: error_states
+          description: "Observable behavior on one applicable failure is defined."
+          legacy_field: error_states
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What happens on an applicable failure?"
+          resolution_contract: "State the observable behavior for one applicable failure."
+        - id: empty_or_edge_states
+          description: "Observable behavior for an applicable empty, first-run, or boundary state is defined."
+          legacy_field: empty_or_edge_states
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What happens in one applicable empty, first-run, or boundary state?"
+          resolution_contract: "State the behavior for one applicable empty, first-run, or boundary state."
+        - id: loading_applicability
+          description: "The document states whether the flow has a distinct loading state."
+          legacy_field: transitional_or_degraded_states
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Does this flow have a distinct loading state?"
+          resolution_contract: "State whether this flow has a distinct loading state."
+        - id: loading_behavior
+          description: "Loading behavior is defined when a loading state applies."
+          required: false
+          legacy_field: transitional_or_degraded_states
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What happens while the flow is loading?"
+          resolution_contract: "State the behavior while the flow is loading."
+          prerequisite_assertion_ids: [loading_applicability]
+        - id: offline_applicability
+          description: "The document states whether offline operation applies."
+          legacy_field: transitional_or_degraded_states
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Does this flow support offline operation?"
+          resolution_contract: "State whether this flow supports offline operation."
+        - id: offline_behavior
+          description: "Offline behavior is defined when offline operation applies."
+          required: false
+          legacy_field: transitional_or_degraded_states
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What happens while the flow is offline?"
+          resolution_contract: "State the behavior while the flow is offline."
+          prerequisite_assertion_ids: [offline_applicability]
+        - id: interruption_applicability
+          description: "The document states whether the flow can be interrupted."
+          legacy_field: transitional_or_degraded_states
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Can this flow be interrupted before completion?"
+          resolution_contract: "State whether this flow can be interrupted before completion."
+        - id: interruption_behavior
+          description: "Interruption behavior is defined when interruption applies."
+          required: false
+          legacy_field: transitional_or_degraded_states
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What happens when the flow is interrupted?"
+          resolution_contract: "State the behavior when the flow is interrupted."
+          prerequisite_assertion_ids: [interruption_applicability]
+        - id: partial_completion_applicability
+          description: "The document states whether partial completion is possible."
+          legacy_field: transitional_or_degraded_states
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Can this flow be partially completed?"
+          resolution_contract: "State whether this flow can be partially completed."
+        - id: partial_completion_behavior
+          description: "Partial-completion behavior is defined when partial completion applies."
+          required: false
+          legacy_field: transitional_or_degraded_states
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What happens after partial completion?"
+          resolution_contract: "State the behavior after partial completion."
+          prerequisite_assertion_ids: [partial_completion_applicability]
+        - id: recovery_transition_applicability
+          description: "The document states whether a recovery transition applies."
+          legacy_field: transitional_or_degraded_states
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Can this flow enter a recovery transition?"
+          resolution_contract: "State whether this flow can enter a recovery transition."
+        - id: recovery_transition_behavior
+          description: "Behavior while returning to normal is defined when recovery applies."
+          required: false
+          legacy_field: transitional_or_degraded_states
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What happens while returning to normal operation?"
+          resolution_contract: "State the behavior while returning to normal operation."
+          prerequisite_assertion_ids: [recovery_transition_applicability]
+        - id: supported_platforms
+          description: "Supported platforms, devices, channels, or exclusions are explicit."
+          legacy_field: supported_platforms
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which platforms, devices, or channels must this support?"
+          resolution_contract: "State the supported platform, device, or channel scope."
+        - id: accessibility_standard
+          description: "The applicable accessibility standard or explicit applicability decision is stated."
+          legacy_field: accessibility_approach
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which accessibility standard applies, or is no standard applicable?"
+          resolution_contract: "Name the applicable accessibility standard or explicitly state that none applies."
+        - id: accessibility_verification
+          description: "The method for checking accessibility conformance is explicit."
+          legacy_field: accessibility_approach
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "How will accessibility conformance be checked?"
+          resolution_contract: "State how accessibility conformance will be checked."
+          prerequisite_assertion_ids: [accessibility_standard]
+      semantic_statuses: [supported, partial, unsupported, contradictory, unclear, not_applicable]
+      hard_negatives:
+        - "A generic error message without a triggering failure is not complete failure-state behavior."
+        - "A platform name without an inclusion or exclusion decision is not platform scope."
+        - "A generic quality aspiration is not an accessibility standard or verification method."
+        - "A heading or placeholder is not a resolved state decision."
+      fallback_question_template: "Which edge-state, platform, or accessibility decision is still unresolved?"
 
   - id: instrumentation
     name: "Instrumentation is specified"
@@ -333,6 +664,127 @@ criteria:
     remediation_prompt: >
       Which analytics events compute the success metric, and which production
       logs, dashboards, alerts, or support signals detect failure?
+    evaluation:
+      version: "1.1"
+      evidence_roles:
+        - id: supporting
+          description: "Exact source spans that support the assertion."
+        - id: counterevidence
+          description: "Exact source spans that conflict with the assertion."
+        - id: context
+          description: "Exact source spans needed to interpret scope or applicability."
+      assertions:
+        - id: instrumentation_applicability
+          description: "The document states whether product-outcome instrumentation is required."
+          legacy_field: metric_link
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Does this feature require product-outcome instrumentation?"
+          resolution_contract: "State whether this feature requires product-outcome instrumentation."
+        - id: event_declarations
+          description: "The analytics events needed for the primary product flows are named."
+          legacy_field: events
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which analytics events must be emitted?"
+          resolution_contract: "Name the analytics event to emit."
+          prerequisite_assertion_ids: [metric_definition_reference]
+        - id: event_properties
+          description: "Required event properties are defined where event context is needed."
+          required: false
+          legacy_field: events
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which properties must accompany each applicable event?"
+          resolution_contract: "State the required property for the applicable event."
+          prerequisite_assertion_ids: [event_declarations]
+        - id: metric_definition_reference
+          description: "The success metric computed by the instrumentation is explicitly named."
+          legacy_field: metric_link
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which success metric must this instrumentation measure?"
+          resolution_contract: "Name the success metric this instrumentation must measure."
+          prerequisite_assertion_ids: [instrumentation_applicability]
+        - id: metric_formula
+          description: "The event operands and calculation for the named success metric are explicit."
+          legacy_field: metric_link
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What event-based formula computes the named success metric?"
+          resolution_contract: "State the event operands and formula for the named success metric."
+          prerequisite_assertion_ids: [event_declarations, metric_definition_reference]
+        - id: metric_filters_or_dimensions
+          description: "Required filters, dimensions, or exclusions for the metric are explicit when applicable."
+          required: false
+          legacy_field: metric_link
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which filters, dimensions, or exclusions apply to the metric calculation?"
+          resolution_contract: "State the applicable metric filter, dimension, or exclusion."
+          prerequisite_assertion_ids: [metric_formula]
+        - id: operational_signal_scope
+          description: "The applicable operational signal channels are selected."
+          legacy_field: operational_signals
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which logs, dashboards, alerts, monitoring checks, or support signals apply?"
+          resolution_contract: "State which operational signal channels apply."
+        - id: failure_detection_signal
+          description: "At least one named production signal detects failure."
+          legacy_field: operational_signals
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which named production signal detects failure?"
+          resolution_contract: "Name the production signal that detects failure."
+          prerequisite_assertion_ids: [operational_signal_scope]
+        - id: diagnostic_signal_use
+          description: "The diagnostic meaning or response for the failure signal is explicit."
+          legacy_field: operational_signals
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "How will the named signal be used to diagnose the failure?"
+          resolution_contract: "State how the failure signal supports diagnosis."
+          prerequisite_assertion_ids: [failure_detection_signal]
+        - id: production_logs
+          description: "Named production logs are defined when logs are an applicable signal channel."
+          required: false
+          legacy_field: operational_signals
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which production log is required?"
+          resolution_contract: "Name the required production log."
+          prerequisite_assertion_ids: [operational_signal_scope]
+        - id: operational_dashboards
+          description: "Named dashboards are defined when dashboards are an applicable signal channel."
+          required: false
+          legacy_field: operational_signals
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which operational dashboard is required?"
+          resolution_contract: "Name the required operational dashboard."
+          prerequisite_assertion_ids: [operational_signal_scope]
+        - id: operational_alerts
+          description: "Named alerts are defined when alerts are an applicable signal channel."
+          required: false
+          legacy_field: operational_signals
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which operational alert is required?"
+          resolution_contract: "Name the required operational alert."
+          prerequisite_assertion_ids: [operational_signal_scope]
+        - id: monitoring_checks
+          description: "Named monitoring checks are defined when monitoring is an applicable signal channel."
+          required: false
+          legacy_field: operational_signals
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which monitoring check is required?"
+          resolution_contract: "Name the required monitoring check."
+          prerequisite_assertion_ids: [operational_signal_scope]
+        - id: support_signals
+          description: "Named support signals are defined when support is an applicable signal channel."
+          required: false
+          legacy_field: operational_signals
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which support signal is required?"
+          resolution_contract: "Name the required support signal."
+          prerequisite_assertion_ids: [operational_signal_scope]
+      semantic_statuses: [supported, partial, unsupported, contradictory, unclear, not_applicable]
+      hard_negatives:
+        - "A metric name without declared events and a formula is not an instrumentation plan."
+        - "An event name without required properties is incomplete when the calculation needs those properties."
+        - "A generic monitoring statement without a named signal is not operational evidence."
+        - "A named tool without detection or diagnostic use is not a resolved operational signal."
+        - "A heading or placeholder is not a resolved instrumentation decision."
+      fallback_question_template: "Which event, metric calculation, or operational signal decision is still unresolved?"
 
   - id: dependencies
     name: "Dependencies and constraints named"
@@ -360,6 +812,63 @@ criteria:
         remediation_question: "What technical, performance, capacity, legal, vendor, or timing limits constrain the solution?"
     remediation_prompt: >
       What other teams, systems or vendors does this depend on?
+    evaluation:
+      version: "1.1"
+      evidence_roles:
+        - id: supporting
+          description: "Exact source spans that support the assertion."
+        - id: counterevidence
+          description: "Exact source spans that conflict with the assertion."
+        - id: context
+          description: "Exact source spans needed to interpret scope or applicability."
+      assertions:
+        - id: dependencies
+          description: "The material teams, services, vendors, models, or data sources are named."
+          legacy_field: dependencies
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which teams, services, vendors, models, or data sources does this depend on?"
+          resolution_contract: "Name the material dependency."
+        - id: dependency_owner
+          description: "Each material dependency has one accountable owner."
+          legacy_field: dependency_readiness
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Who owns each material dependency?"
+          resolution_contract: "Name the accountable owner for the material dependency."
+          prerequisite_assertion_ids: [dependencies]
+        - id: readiness_proof
+          description: "Each material dependency has an interface and observable readiness proof."
+          legacy_field: dependency_readiness
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What interface and evidence prove each material dependency is ready?"
+          resolution_contract: "State the interface and observable readiness proof for the material dependency."
+          prerequisite_assertion_ids: [dependencies]
+        - id: freshness_or_availability
+          description: "Each applicable material dependency has a freshness or availability expectation."
+          legacy_field: dependency_readiness
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What freshness or availability expectation applies to each material dependency?"
+          resolution_contract: "State the applicable freshness or availability expectation."
+          prerequisite_assertion_ids: [dependencies]
+        - id: unavailable_fallback
+          description: "Each material dependency has a defined impact and fallback when stale or unavailable."
+          legacy_field: dependency_readiness
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What happens when each material dependency is stale or unavailable?"
+          resolution_contract: "State the impact and fallback when the material dependency is stale or unavailable."
+          prerequisite_assertion_ids: [dependencies]
+        - id: constraints
+          description: "Material technical, performance, capacity, vendor, market, legal, or timing constraints are named."
+          legacy_field: constraints
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What technical, performance, capacity, legal, vendor, or timing limit constrains the solution?"
+          resolution_contract: "State one material constraint on the solution."
+      semantic_statuses: [supported, partial, unsupported, contradictory, unclear, not_applicable]
+      hard_negatives:
+        - "A named dependency without an owner is not ownership evidence."
+        - "A planned integration without observable proof is not readiness evidence."
+        - "A happy-path dependency description is not an unavailable fallback."
+        - "A heading or placeholder is not a resolved dependency decision."
+      fallback_question_template: "Which material dependency decision is still unresolved?"
 
   - id: risk_compliance
     name: "Privacy / security / compliance surface"
@@ -395,6 +904,91 @@ criteria:
       What personal, financial, or regulated data is involved; what retention,
       deletion, consent, or audit controls apply; and which risk reviews are
       needed?
+    evaluation:
+      version: "1.1"
+      evidence_roles:
+        - id: supporting
+          description: "Exact source spans that support the assertion."
+        - id: counterevidence
+          description: "Exact source spans that conflict with the assertion."
+        - id: context
+          description: "Exact source spans needed to interpret scope or applicability."
+      assertions:
+        - id: sensitive_data_scope
+          description: "The document states whether personal, financial, or regulated data is handled."
+          legacy_field: data_handled
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Does this feature handle personal, financial, or regulated data?"
+          resolution_contract: "State whether this feature handles personal, financial, or regulated data."
+        - id: sensitive_data_category
+          description: "One sensitive data category is named when sensitive data is handled."
+          required: false
+          legacy_field: data_handled
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which sensitive data category is handled?"
+          resolution_contract: "Name one personal, financial, or regulated data category handled."
+          prerequisite_assertion_ids: [sensitive_data_scope]
+        - id: data_purpose
+          description: "The purpose for using the named sensitive data is explicit."
+          required: false
+          legacy_field: purpose_and_minimisation
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Why is the named sensitive data needed?"
+          resolution_contract: "State why the named sensitive data is needed."
+          prerequisite_assertion_ids: [sensitive_data_category]
+        - id: data_minimisation
+          description: "The minimum sensitive data required for that purpose is explicit."
+          required: false
+          legacy_field: purpose_and_minimisation
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What is the minimum sensitive data needed for that purpose?"
+          resolution_contract: "State the minimum sensitive data needed for the named purpose."
+          prerequisite_assertion_ids: [sensitive_data_category]
+        - id: access_owner
+          description: "The role or team allowed to access the named sensitive data is explicit."
+          required: false
+          legacy_field: access_and_third_parties
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Who may access the named sensitive data?"
+          resolution_contract: "Name the role or team allowed to access the sensitive data."
+          prerequisite_assertion_ids: [sensitive_data_category]
+        - id: third_party_processing
+          description: "Third-party receipt or processing is explicit, including none."
+          required: false
+          legacy_field: access_and_third_parties
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which third party receives or processes the named sensitive data, or is there none?"
+          resolution_contract: "Name the third party that receives or processes the sensitive data or explicitly state none."
+          prerequisite_assertion_ids: [sensitive_data_category]
+        - id: risk_review_scope
+          description: "The document states which privacy, security, legal, compliance, or accessibility reviews apply."
+          legacy_field: review_status
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which one risk review applies, or do none apply?"
+          resolution_contract: "Name one applicable risk review or explicitly state that none apply."
+        - id: risk_review_status
+          description: "The status of an applicable risk review is explicit."
+          required: false
+          legacy_field: review_status
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What is the status of the named risk review?"
+          resolution_contract: "State the status of the named risk review."
+          prerequisite_assertion_ids: [risk_review_scope]
+        - id: data_lifecycle
+          description: "Retention, deletion, consent, or audit controls are explicit when sensitive data is handled."
+          required: false
+          legacy_field: data_lifecycle
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What one lifecycle control applies to the named sensitive data?"
+          resolution_contract: "State one retention, deletion, consent, or audit control for the sensitive data."
+          prerequisite_assertion_ids: [sensitive_data_category]
+      semantic_statuses: [supported, partial, unsupported, contradictory, unclear, not_applicable]
+      hard_negatives:
+        - "A generic preference without evidence that it is personal, financial, or regulated is not sensitive-data evidence."
+        - "A data category without a stated purpose is not minimisation evidence."
+        - "A team mention without access authority is not data-access evidence."
+        - "A heading or placeholder is not a resolved risk decision."
+      fallback_question_template: "Which sensitive-data or risk-review decision is unresolved?"
 
   - id: rollout
     name: "Rollout and reversibility"
@@ -421,6 +1015,135 @@ criteria:
         remediation_question: "What must customers, support, documentation, sales, or marketing know before launch?"
     remediation_prompt: >
       How will this be rolled out, and how do you turn it off if it goes wrong?
+    evaluation:
+      version: "1.1"
+      evidence_roles:
+        - id: supporting
+          description: "Exact source spans that support the assertion."
+        - id: counterevidence
+          description: "Exact source spans that conflict with the assertion."
+        - id: context
+          description: "Exact source spans needed to interpret scope or applicability."
+      assertions:
+        - id: rollout_mechanism
+          description: "The release mechanism and initial exposure are explicit."
+          legacy_field: rollout_mechanism
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What release mechanism and initial exposure will be used?"
+          resolution_contract: "State the release mechanism and initial exposure."
+        - id: entry_criteria
+          description: "Observable criteria determine when rollout may begin."
+          legacy_field: launch_and_stop_criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What observable result permits rollout to begin?"
+          resolution_contract: "State the observable rollout entry criterion."
+          prerequisite_assertion_ids: [rollout_mechanism]
+        - id: observation_window
+          description: "A duration or named review window is defined before promotion decisions."
+          legacy_field: launch_and_stop_criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "How long or until what milestone will the initial rollout be observed?"
+          resolution_contract: "State the rollout observation window or review milestone."
+          prerequisite_assertion_ids: [rollout_mechanism]
+        - id: promotion_criteria
+          description: "Observable criteria determine when exposure may expand."
+          legacy_field: launch_and_stop_criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What observable result permits rollout expansion?"
+          resolution_contract: "State the observable rollout promotion criterion."
+          prerequisite_assertion_ids: [entry_criteria, observation_window]
+        - id: pause_criteria
+          description: "Observable criteria determine when rollout must pause."
+          legacy_field: launch_and_stop_criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What observable result requires rollout to pause?"
+          resolution_contract: "State the observable rollout pause criterion."
+          prerequisite_assertion_ids: [rollout_mechanism]
+        - id: stop_criteria
+          description: "Observable criteria determine when rollout must stop."
+          legacy_field: launch_and_stop_criteria
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What observable result requires rollout to stop?"
+          resolution_contract: "State the observable rollout stop criterion."
+          prerequisite_assertion_ids: [rollout_mechanism]
+        - id: rollback_trigger
+          description: "A specific condition triggers rollback or disablement."
+          legacy_field: rollback_plan
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What condition triggers rollback or disablement?"
+          resolution_contract: "State the condition that triggers rollback or disablement."
+          prerequisite_assertion_ids: [rollout_mechanism]
+        - id: rollback_procedure
+          description: "The executable procedure for rollback or disablement is defined."
+          legacy_field: rollback_plan
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What procedure turns off or reverts the rollout?"
+          resolution_contract: "State the executable rollback or disablement procedure."
+          prerequisite_assertion_ids: [rollback_trigger]
+        - id: rollout_decision_owner
+          description: "One named team or role owns rollout decisions."
+          legacy_field: rollout_owner
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Who owns rollout decisions?"
+          resolution_contract: "Name the team or role accountable for rollout decisions."
+        - id: pause_stop_authority
+          description: "One named team or role has authority to pause or stop rollout."
+          legacy_field: rollout_owner
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Who has authority to pause or stop rollout?"
+          resolution_contract: "Name the team or role authorized to pause or stop rollout."
+        - id: rollback_execution_owner
+          description: "One named team or role owns rollback execution."
+          legacy_field: rollout_owner
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Who executes rollback?"
+          resolution_contract: "Name the team or role accountable for rollback execution."
+        - id: communication_impact_scope
+          description: "Affected launch audiences are selected, or no communication impact is explicit."
+          legacy_field: support_and_communications
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which customer, support, documentation, migration, sales, or marketing audiences are affected, or are none affected?"
+          resolution_contract: "State which launch audiences are affected or explicitly state none."
+        - id: customer_communication
+          description: "Customer communication is defined when customers are affected."
+          required: false
+          legacy_field: support_and_communications
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What must affected customers be told before launch?"
+          resolution_contract: "State the required customer communication."
+          prerequisite_assertion_ids: [communication_impact_scope]
+        - id: support_readiness
+          description: "Support readiness is defined when support is affected."
+          required: false
+          legacy_field: support_and_communications
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What must support know or prepare before launch?"
+          resolution_contract: "State the required support readiness action."
+          prerequisite_assertion_ids: [communication_impact_scope]
+        - id: documentation_or_migration
+          description: "Documentation or migration action is defined when applicable."
+          required: false
+          legacy_field: support_and_communications
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What documentation or migration action is required before launch?"
+          resolution_contract: "State the required documentation or migration action."
+          prerequisite_assertion_ids: [communication_impact_scope]
+        - id: gtm_readiness
+          description: "Sales or marketing readiness is defined when go-to-market teams are affected."
+          required: false
+          legacy_field: support_and_communications
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What must sales or marketing prepare before launch?"
+          resolution_contract: "State the required sales or marketing readiness action."
+          prerequisite_assertion_ids: [communication_impact_scope]
+      semantic_statuses: [supported, partial, unsupported, contradictory, unclear, not_applicable]
+      hard_negatives:
+        - "A release mechanism without initial exposure is not a rollout plan."
+        - "A metric name without a threshold or decision direction is not a rollout criterion."
+        - "A rollback capability without a trigger and executable procedure is not a rollback plan."
+        - "A team mention without decision authority is not rollout ownership."
+        - "A heading or placeholder is not a resolved rollout decision."
+      fallback_question_template: "Which rollout, rollback, ownership, or communication decision is still unresolved?"
 
   - id: open_questions_owned
     name: "Open questions have owners and dates"
@@ -446,6 +1169,53 @@ criteria:
         remediation_question: "By what date or milestone must each open question be resolved?"
     remediation_prompt: >
       What is still unresolved, and who owns closing each one?
+    evaluation:
+      version: "1.1"
+      evidence_roles:
+        - id: supporting
+          description: "Exact source spans that support the assertion."
+        - id: counterevidence
+          description: "Exact source spans that conflict with the assertion."
+        - id: context
+          description: "Exact source spans needed to interpret scope or applicability."
+      assertions:
+        - id: unresolved_decision_scope
+          description: "The document states whether unresolved product decisions remain."
+          legacy_field: open_questions
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Do any unresolved product decisions remain?"
+          resolution_contract: "State whether any unresolved product decisions remain."
+        - id: open_question
+          description: "One unresolved product decision is explicitly stated when any remain."
+          required: false
+          legacy_field: open_questions
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What is the highest-priority unresolved product decision?"
+          resolution_contract: "State the highest-priority unresolved product decision."
+          prerequisite_assertion_ids: [unresolved_decision_scope]
+        - id: open_question_owner
+          description: "One owner is accountable for the named unresolved decision."
+          required: false
+          legacy_field: owners
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Who owns the named unresolved decision?"
+          resolution_contract: "Name the owner of the unresolved decision."
+          prerequisite_assertion_ids: [open_question]
+        - id: open_question_deadline
+          description: "The named unresolved decision has a date or blocking milestone."
+          required: false
+          legacy_field: target_dates
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "When must the named unresolved decision be resolved?"
+          resolution_contract: "State the decision date or blocking milestone for the unresolved decision."
+          prerequisite_assertion_ids: [open_question]
+      semantic_statuses: [supported, partial, unsupported, contradictory, unclear, not_applicable]
+      hard_negatives:
+        - "A reviewer-inferred conflict is not an explicitly unresolved product decision."
+        - "A team mention without accountability for the named decision is not ownership."
+        - "A vague future phase without a date or blocking milestone is not a deadline."
+        - "A heading or placeholder is not a resolved open-question decision."
+      fallback_question_template: "Which open-question scope, identity, owner, or deadline decision is unresolved?"
 
   - id: alternatives_considered
     name: "Alternatives and why rejected"
@@ -465,6 +1235,52 @@ criteria:
         remediation_question: "Why did you decide against each alternative?"
     remediation_prompt: >
       What other approaches did you consider, and why were they rejected?
+    evaluation:
+      version: "1.1"
+      evidence_roles:
+        - id: supporting
+          description: "Exact source spans that support the assertion."
+        - id: counterevidence
+          description: "Exact source spans that conflict with the assertion."
+        - id: context
+          description: "Exact source spans needed to interpret scope or applicability."
+      assertions:
+        - id: alternative_scope
+          description: "The document states whether another viable approach was considered."
+          legacy_field: alternatives
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Was another viable approach considered?"
+          resolution_contract: "State whether another viable approach was considered."
+        - id: considered_alternative
+          description: "One viable alternative is named when alternatives were considered."
+          required: false
+          legacy_field: alternatives
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Which other viable approach was considered?"
+          resolution_contract: "Name one viable alternative that was considered."
+          prerequisite_assertion_ids: [alternative_scope]
+        - id: alternative_disposition
+          description: "The named alternative is identified as rejected, selected, or left for testing."
+          required: false
+          legacy_field: alternatives
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Was the named alternative rejected, selected, or left for testing?"
+          resolution_contract: "State whether the named alternative was rejected, selected, or left for testing."
+          prerequisite_assertion_ids: [considered_alternative]
+        - id: rejection_reason
+          description: "A reason is stated when the named alternative was rejected."
+          required: false
+          legacy_field: rejection_reasons
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Why was the named rejected alternative not chosen?"
+          resolution_contract: "State why the named rejected alternative was not chosen."
+          prerequisite_assertion_ids: [alternative_disposition]
+      semantic_statuses: [supported, partial, unsupported, contradictory, unclear, not_applicable]
+      hard_negatives:
+        - "A supported mode or experiment arm is not a rejected alternative without an explicit disposition."
+        - "Multiple implementation values are not evidence that another viable approach was considered."
+        - "A heading or placeholder is not a resolved alternative decision."
+      fallback_question_template: "Which alternative scope, identity, disposition, or rationale decision is unresolved?"
 
   - id: assumptions_validation
     name: "Assumptions are explicit and testable"
@@ -483,6 +1299,68 @@ criteria:
         remediation_question: "How will we test the riskiest assumption, who owns that test, and when will we know the result?"
     remediation_prompt: >
       What are the material assumptions, and how will the riskiest ones be tested?
+    evaluation:
+      version: "1.1"
+      evidence_roles:
+        - id: supporting
+          description: "Exact source spans that support the assertion."
+        - id: counterevidence
+          description: "Exact source spans that conflict with the assertion."
+        - id: context
+          description: "Exact source spans needed to interpret scope or applicability."
+      assertions:
+        - id: material_assumption
+          description: "The highest-risk material user, business, technical, or delivery assumption is explicit."
+          legacy_field: assumptions
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What is the highest-risk material assumption?"
+          resolution_contract: "State the highest-risk material assumption underlying this PRD."
+        - id: validation_path
+          description: "The assumption is identified as already evidenced or requiring a test."
+          legacy_field: validation
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Is the named assumption already evidenced or does it require a test?"
+          resolution_contract: "State whether the named assumption is already evidenced or requires a test."
+          prerequisite_assertion_ids: [material_assumption]
+        - id: existing_validation_evidence
+          description: "Existing evidence is identified when the assumption is already validated."
+          required: false
+          legacy_field: validation
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What existing evidence validates the named assumption?"
+          resolution_contract: "Identify the existing evidence that validates the named assumption."
+          prerequisite_assertion_ids: [validation_path]
+        - id: validation_method
+          description: "A test method is stated when the assumption requires validation."
+          required: false
+          legacy_field: validation
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "How will the named assumption be tested?"
+          resolution_contract: "State the test method for the named assumption."
+          prerequisite_assertion_ids: [validation_path]
+        - id: validation_owner
+          description: "One owner is accountable for the planned assumption test."
+          required: false
+          legacy_field: validation
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Who owns the planned assumption test?"
+          resolution_contract: "Name the owner of the planned assumption test."
+          prerequisite_assertion_ids: [validation_method]
+        - id: validation_timing
+          description: "The planned assumption test has a result date or decision milestone."
+          required: false
+          legacy_field: validation
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "When will the assumption-test result be known?"
+          resolution_contract: "State when the assumption-test result will be known."
+          prerequisite_assertion_ids: [validation_method]
+      semantic_statuses: [supported, partial, unsupported, contradictory, unclear, not_applicable]
+      hard_negatives:
+        - "A committed requirement is not automatically an assumption."
+        - "A generic plan to monitor data is not a validation method without a decision use."
+        - "A test without an owner or result milestone is not a complete validation plan."
+        - "A heading or placeholder is not a resolved assumption decision."
+      fallback_question_template: "Which assumption or validation decision is still unresolved?"
 
   - id: operational_readiness
     name: "Production ownership and recovery are defined"
@@ -503,6 +1381,92 @@ criteria:
         remediation_question: "How will the team diagnose and recover from a production failure?"
     remediation_prompt: >
       What production expectations apply, who owns them, and how will the team recover from failure?
+    evaluation:
+      version: "1.1"
+      evidence_roles:
+        - id: supporting
+          description: "Exact source spans that support the assertion."
+        - id: counterevidence
+          description: "Exact source spans that conflict with the assertion."
+        - id: context
+          description: "Exact source spans needed to interpret scope or applicability."
+      assertions:
+        - id: availability_expectation
+          description: "An availability target or explicit non-materiality decision is stated."
+          legacy_field: service_expectations
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What availability target applies, or is availability not material?"
+          resolution_contract: "State the availability target or explicitly state that availability is not material."
+        - id: latency_expectation
+          description: "A latency target or explicit non-materiality decision is stated."
+          legacy_field: service_expectations
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What latency target applies, or is latency not material?"
+          resolution_contract: "State the latency target or explicitly state that latency is not material."
+        - id: capacity_expectation
+          description: "A capacity target or explicit non-materiality decision is stated."
+          legacy_field: service_expectations
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What capacity target applies, or is capacity not material?"
+          resolution_contract: "State the capacity target or explicitly state that capacity is not material."
+        - id: data_integrity_expectation
+          description: "A data-integrity expectation or explicit non-materiality decision is stated."
+          legacy_field: service_expectations
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What data-integrity expectation applies, or is integrity not material?"
+          resolution_contract: "State the data-integrity expectation or explicitly state that integrity is not material."
+        - id: recovery_expectation
+          description: "A recovery objective or explicit non-materiality decision is stated."
+          legacy_field: service_expectations
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What recovery objective applies, or is recovery timing not material?"
+          resolution_contract: "State the recovery objective or explicitly state that recovery timing is not material."
+        - id: monitoring_owner
+          description: "One team or role owns production monitoring."
+          legacy_field: support_owner
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Who owns production monitoring?"
+          resolution_contract: "Name the team or role accountable for production monitoring."
+        - id: support_owner
+          description: "One team or role owns production support."
+          legacy_field: support_owner
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Who owns production support?"
+          resolution_contract: "Name the team or role accountable for production support."
+        - id: incident_response_owner
+          description: "One team or role owns incident response."
+          legacy_field: support_owner
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "Who owns incident response?"
+          resolution_contract: "Name the team or role accountable for incident response."
+        - id: diagnostic_method
+          description: "The team has a defined method or signal set for diagnosing production failure."
+          legacy_field: recovery_plan
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "How will the team diagnose a production failure?"
+          resolution_contract: "State the diagnostic method or signals used for production failure."
+        - id: recovery_procedure
+          description: "The team has a defined procedure for recovering service after production failure."
+          legacy_field: recovery_plan
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "How will the team recover service after diagnosing a production failure?"
+          resolution_contract: "State the procedure for recovering service after production failure."
+          prerequisite_assertion_ids: [diagnostic_method]
+        - id: degraded_mode_or_restore
+          description: "A degraded mode, backup, restore, or equivalent contingency is defined when applicable."
+          required: false
+          legacy_field: recovery_plan
+          evidence_roles: [supporting, counterevidence, context]
+          answer_contract: "What degraded mode, backup, or restore contingency applies?"
+          resolution_contract: "State the applicable degraded mode, backup, or restore contingency."
+          prerequisite_assertion_ids: [diagnostic_method]
+      semantic_statuses: [supported, partial, unsupported, contradictory, unclear, not_applicable]
+      hard_negatives:
+        - "A generic goal such as reliable or fast is not a measurable service expectation."
+        - "A monitoring tool without an accountable team or role is not ownership evidence."
+        - "Detection without a diagnosis or recovery procedure is not a recovery plan."
+        - "A heading or placeholder is not a resolved operational decision."
+      fallback_question_template: "Which production expectation, owner, or recovery decision is still unresolved?"
 
   - id: document_governance
     name: "Document ownership and status are current"

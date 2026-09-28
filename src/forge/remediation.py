@@ -3,15 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from forge.deep_review import (
+    ClaimOccurrence,
     DeepReviewReport,
     build_deep_review,
+    claim_occurrences,
     mechanical_claim_occurrences,
 )
+from forge.evaluate.models import CriterionEvaluation
 from forge.extract.batch import (
     ExtractionBatch,
     verify_extraction_batch_with_claims,
@@ -25,30 +27,57 @@ from forge.extract.delta import (
     verify_delta_extraction,
 )
 from forge.extract.models import CriterionExtraction
-from forge.ingest.batching import batch_document
+from forge.ingest.adapters import LocalFileSourceAdapter, SourceRef
 from forge.ingest.models import ProductContextTerm, SupplementalAnswer
+from forge.ingest.snapshot import DocumentSnapshot
 from forge.rubric.loader import load_rubric
+from forge.revise import RevisionPlan
 from forge.score.edge_coverage import (
+    CoverageStatus,
     EdgeCaseCoverageLedger,
     apply_coverage_answers,
     edge_case_type,
-    next_uncovered_item,
     render_coverage_question,
     verify_coverage_ledger,
 )
 from forge.score.engine import Assessment, score
 from forge.score.planner import Question, document_display_name, plan_question_queue
 from forge.score.report import NarrativeReport, build_narrative_report
-from forge.service import prepare_assessment_input
+from forge.service import (
+    AssessmentResponse,
+    PreparedAssessmentInput,
+    build_legacy_criterion_evaluations,
+    prepare_assessment,
+    prepare_assessment_input,
+)
 
 
 class CheckpointPolicy(BaseModel):
     max_pending_answers: int = Field(default=5, ge=1, le=20)
 
 
+class FinalVerification(BaseModel):
+    artifact_path: str
+    artifact_sha256: str
+    operation_id: str
+    rubric_id: str
+    rubric_version: str
+    supplemental_answer_count: int = 0
+    assessment: AssessmentResponse
+
+
 class RemediationState(BaseModel):
+    state_schema_version: int = 3
     source_path: str
     source_sha256: str
+    snapshot_id: str | None = None
+    parser_fingerprint: str | None = None
+    normalized_hash: str | None = None
+    plan_fingerprint: str | None = None
+    source_snapshot: DocumentSnapshot | None = Field(default=None, exclude=True)
+    criterion_evaluations: list[CriterionEvaluation] = Field(
+        default_factory=list, exclude=True
+    )
     rubric_name: str = "prd"
     rubric_id: str
     rubric_version: str
@@ -69,9 +98,14 @@ class RemediationState(BaseModel):
     expected_run_count: int
     client_models: list[str] = Field(default_factory=list)
     revision: int = 0
+    evaluation_revision: int = 0
     delta_extraction_count: int = 0
     delta_input_characters: int = 0
     checkpoint_policy: CheckpointPolicy = Field(default_factory=CheckpointPolicy)
+    revision_plan: RevisionPlan | None = None
+    revision_output_path: str | None = None
+    revision_output_sha256: str | None = None
+    final_verification: FinalVerification | None = None
 
 
 class RemediationTurn(BaseModel):
@@ -93,21 +127,25 @@ class RemediationCheckpointResult(BaseModel):
     current_band: str
 
 
-def _source_digest(source_path: str) -> str:
-    path = Path(source_path).expanduser().resolve()
-    if not path.exists() or not path.is_file():
-        raise FileNotFoundError(f"document not found: {path}")
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def _baseline_fingerprint(
     source_sha256: str,
+    snapshot_id: str,
+    parser_fingerprint: str,
+    normalized_hash: str,
     rubric_id: str,
     rubric_version: str,
     product_context: list[ProductContextTerm],
 ) -> str:
     digest = hashlib.sha256()
+    digest.update(b"forge-remediation-baseline/v2")
+    digest.update(b"\x00")
     digest.update(source_sha256.encode("utf-8"))
+    digest.update(b"\x00")
+    digest.update(snapshot_id.encode("utf-8"))
+    digest.update(b"\x00")
+    digest.update(parser_fingerprint.encode("utf-8"))
+    digest.update(b"\x00")
+    digest.update(normalized_hash.encode("utf-8"))
     digest.update(b"\x00")
     digest.update(rubric_id.encode("utf-8"))
     digest.update(b"\x00")
@@ -118,12 +156,28 @@ def _baseline_fingerprint(
     return digest.hexdigest()[:32]
 
 
-def _assert_current_source(state: RemediationState) -> None:
-    current = _source_digest(state.source_path)
-    if current != state.source_sha256:
+def assert_current_source(
+    state: RemediationState, source_path: str | None = None
+) -> None:
+    path = source_path or state.source_path
+    artifact = LocalFileSourceAdapter().acquire(SourceRef.local_file(path))
+    if artifact.sha256 != state.source_sha256:
         raise ValueError(
             "the source PRD changed after remediation began; start a new assessment"
         )
+    snapshot = state.source_snapshot
+    identity = (state.snapshot_id, state.parser_fingerprint, state.normalized_hash)
+    if any(value is not None for value in identity):
+        if snapshot is None:
+            raise ValueError("review session is missing its exact source snapshot")
+        if (
+            snapshot.snapshot_id != state.snapshot_id
+            or snapshot.parser_fingerprint != state.parser_fingerprint
+            or snapshot.normalized_hash != state.normalized_hash
+            or snapshot.source.sha256 != state.source_sha256
+            or snapshot.source.source_type != artifact.source_type
+        ):
+            raise ValueError("review session source snapshot identity does not match")
     rubric = load_rubric(state.rubric_name)
     if rubric.id != state.rubric_id or rubric.version != state.rubric_version:
         raise ValueError(
@@ -131,7 +185,7 @@ def _assert_current_source(state: RemediationState) -> None:
         )
 
 
-def _decorate_edge_question(
+def _decorate_edge_questions(
     queue: list[Question],
     assessment: Assessment,
     display_name: str,
@@ -139,31 +193,92 @@ def _decorate_edge_question(
 ) -> None:
     if coverage is None:
         return
-    uncovered = next_uncovered_item(coverage)
-    if uncovered is None:
-        return
-    question = next(
-        (
-            item
-            for item in queue
-            if item.criterion_id == "edge_cases_and_states"
-        ),
-        None,
-    )
-    if question is None:
-        return
-    edge = edge_case_type(uncovered.edge_case_id)
-    question.target_field = "edge_case_coverage"
-    question.question = render_coverage_question(display_name, uncovered)
-    question.base_question = edge.question
-    question.answer_requirements = [
-        "State the expected behavior for this requirement and edge case, "
-        "including the user-visible result and recovery path."
+    uncovered = [
+        item
+        for status in (CoverageStatus.MISSING, CoverageStatus.UNCLEAR)
+        for item in coverage.items
+        if item.status is status
     ]
-    question.band_if_answered = assessment.band
-    question.requirement_quote = uncovered.requirement_quote
-    question.edge_case_id = uncovered.edge_case_id
-    question.taxonomy_version = coverage.taxonomy_version
+    if not uncovered:
+        return
+    result = next(
+        item
+        for item in assessment.criteria
+        if item.criterion_id == "edge_cases_and_states"
+    )
+    existing_indexes = [
+        index
+        for index, question in enumerate(queue)
+        if question.criterion_id == result.criterion_id
+    ]
+    insertion_index = existing_indexes[0] if existing_indexes else len(queue)
+    queue[:] = [
+        question
+        for question in queue
+        if question.criterion_id != result.criterion_id
+    ]
+    coverage_questions: list[Question] = []
+    for item in uncovered:
+        edge = edge_case_type(item.edge_case_id)
+        coverage_questions.append(
+            Question(
+                criterion_id=result.criterion_id,
+                criterion_name=result.name,
+                target_field="edge_case_coverage",
+                question=render_coverage_question(display_name, item),
+                base_question=edge.question,
+                missing_fields=result.missing,
+                answer_requirements=[
+                    "State the expected behavior for this requirement and edge case, "
+                    "including the user-visible result and recovery path."
+                ],
+                is_gate=result.gate_triggered,
+                band_if_answered=assessment.band,
+                unblocks_consumers=[consumer.value for consumer in result.consumers],
+                requirement_quote=item.requirement_quote,
+                edge_case_id=item.edge_case_id,
+                taxonomy_version=coverage.taxonomy_version,
+                evaluation_revision=assessment.evaluation_revision,
+            )
+        )
+    queue[insertion_index:insertion_index] = coverage_questions
+    priority = {
+        result.criterion_id: index
+        for index, result in enumerate(
+            sorted(
+                (
+                    item
+                    for item in assessment.criteria
+                    if item.verdict.value in {"absent", "partial"}
+                ),
+                key=lambda item: (
+                    not item.gate_triggered,
+                    -item.weight,
+                    -len(item.consumers),
+                    item.criterion_id,
+                ),
+            )
+        )
+    }
+    queue.sort(key=lambda question: priority.get(question.criterion_id, len(priority)))
+
+
+def _current_claims(
+    state: RemediationState,
+    patches: list[CriterionExtraction],
+    document,
+) -> list[ClaimOccurrence]:
+    claims = list(state.deep_review.claims if state.deep_review else [])
+    delta_claims = claim_occurrences(
+        patches,
+        run_index=0,
+        batch_id=f"remediation-delta-{state.evaluation_revision + 1}",
+    )
+    for claim in delta_claims:
+        claim.run_indexes = []
+    claims.extend(delta_claims)
+    claims.extend(mechanical_claim_occurrences(document, claims))
+    return claims
 
 
 def _snapshot(
@@ -173,13 +288,21 @@ def _snapshot(
     coverage: EdgeCaseCoverageLedger | None,
     remediated_criteria: list[str],
     remediation_delta_count: int,
-) -> tuple[Assessment, NarrativeReport, list[Question], EdgeCaseCoverageLedger | None]:
+    delta_patches: list[CriterionExtraction],
+) -> tuple[
+    Assessment,
+    NarrativeReport,
+    DeepReviewReport,
+    list[Question],
+    EdgeCaseCoverageLedger | None,
+]:
     rubric = load_rubric(state.rubric_name)
     document, _ = prepare_assessment_input(
         state.source_path,
         state.rubric_name,
         verified_answers,
         state.product_context,
+        snapshot=state.source_snapshot,
     )
     verified_coverage = (
         verify_coverage_ledger(
@@ -190,6 +313,8 @@ def _snapshot(
         else None
     )
     assessment = score(rubric, runs, edge_case_coverage=verified_coverage)
+    evaluation_revision = state.evaluation_revision + 1
+    assessment.evaluation_revision = evaluation_revision
     previous_agreement = {
         result.criterion_id: result.agreement
         for result in state.assessment.criteria
@@ -212,14 +337,26 @@ def _snapshot(
         display_name=state.display_name,
         framing=state.framing,
     )
-    _decorate_edge_question(queue, assessment, state.display_name, verified_coverage)
+    for question in queue:
+        question.evaluation_revision = evaluation_revision
+    _decorate_edge_questions(queue, assessment, state.display_name, verified_coverage)
     report = build_narrative_report(
         assessment,
         queue[:1],
         run_count=len(runs),
         expected_run_count=rubric.extraction_runs,
     )
-    return assessment, report, queue, verified_coverage
+    report.evaluation_revision = evaluation_revision
+    deep_review = build_deep_review(
+        rubric,
+        _current_claims(
+            state,
+            delta_patches,
+            document,
+        ),
+    )
+    deep_review.evaluation_revision = evaluation_revision
+    return assessment, report, deep_review, queue, verified_coverage
 
 
 def begin_remediation(
@@ -234,24 +371,52 @@ def begin_remediation(
     display_name: str | None = None,
     checkpoint_policy: CheckpointPolicy | None = None,
 ) -> RemediationTurn:
-    terms = product_context or []
-    document, rubric = prepare_assessment_input(
-        source_path, rubric_name, [], terms
+    prepared = prepare_assessment(
+        source_path,
+        rubric_name,
+        [],
+        product_context,
     )
+    return begin_remediation_prepared(
+        prepared,
+        extraction_json,
+        framing=framing,
+        edge_case_coverage=edge_case_coverage,
+        client_models=client_models,
+        display_name=display_name,
+        checkpoint_policy=checkpoint_policy,
+    )
+
+
+def begin_remediation_prepared(
+    prepared: PreparedAssessmentInput,
+    extraction_json: str,
+    *,
+    framing: str | None = None,
+    edge_case_coverage: EdgeCaseCoverageLedger | None = None,
+    client_models: list[str] | None = None,
+    display_name: str | None = None,
+    checkpoint_policy: CheckpointPolicy | None = None,
+) -> RemediationTurn:
+    document = prepared.document
+    rubric = prepared.rubric
+    terms = list(prepared.product_context)
     payload = json.loads(extraction_json)
     if "runs" not in payload:
         payload = {"runs": [payload]}
     runs, claims = verify_extraction_batch_with_claims(
-        batch_document(document), ExtractionBatch.model_validate(payload), rubric
+        list(prepared.batches), ExtractionBatch.model_validate(payload), rubric
     )
-    source_sha = _source_digest(source_path)
-    resolved_display_name = display_name or document_display_name(source_path)
+    evaluation_artifacts, _ = build_legacy_criterion_evaluations(prepared, runs)
+    source_sha = prepared.snapshot.source.sha256
+    resolved_display_name = display_name or document_display_name(document.source_path)
     verified_coverage = (
         verify_coverage_ledger(document, edge_case_coverage)
         if edge_case_coverage is not None
         else None
     )
     assessment = score(rubric, runs, edge_case_coverage=verified_coverage)
+    assessment.evaluation_revision = 0
     claims.extend(mechanical_claim_occurrences(document, claims))
     queue = plan_question_queue(
         rubric,
@@ -259,27 +424,43 @@ def begin_remediation(
         display_name=resolved_display_name,
         framing=framing,
     )
-    _decorate_edge_question(queue, assessment, resolved_display_name, verified_coverage)
+    _decorate_edge_questions(queue, assessment, resolved_display_name, verified_coverage)
     report = build_narrative_report(
         assessment,
         queue[:1],
         run_count=len(runs),
         expected_run_count=rubric.extraction_runs,
     )
+    report.evaluation_revision = 0
+    deep_review = build_deep_review(rubric, claims)
+    deep_review.evaluation_revision = 0
     state = RemediationState(
-        source_path=str(Path(source_path).expanduser().resolve()),
+        source_path=document.source_path,
         source_sha256=source_sha,
-        rubric_name=rubric_name,
+        snapshot_id=prepared.snapshot.snapshot_id,
+        parser_fingerprint=prepared.snapshot.parser_fingerprint,
+        normalized_hash=prepared.snapshot.normalized_hash,
+        plan_fingerprint=prepared.plan_fingerprint,
+        source_snapshot=prepared.snapshot,
+        criterion_evaluations=evaluation_artifacts,
+        rubric_name=prepared.rubric_name,
         rubric_id=rubric.id,
         rubric_version=rubric.version,
         baseline_fingerprint=_baseline_fingerprint(
-            source_sha, rubric.id, rubric.version, terms
+            source_sha,
+            prepared.snapshot.snapshot_id,
+            prepared.snapshot.parser_fingerprint,
+            prepared.snapshot.normalized_hash,
+            rubric.id,
+            rubric.version,
+            terms,
         ),
         runs=runs,
         assessment=assessment,
-        deep_review=build_deep_review(rubric, claims),
+        deep_review=deep_review,
         report=report,
         question_queue=queue,
+        verified_answers=list(prepared.supplemental_answers),
         product_context=terms,
         framing=queue[0].framing if queue else rubric.default_framing,
         display_name=resolved_display_name,
@@ -346,11 +527,13 @@ def record_answer(
     *,
     force_checkpoint: bool = False,
 ) -> RemediationTurn:
-    _assert_current_source(state)
+    assert_current_source(state)
     if not state.question_queue:
         raise ValueError("no remediation question remains")
     question = state.question_queue[0]
+    answer_id = uuid.uuid4().hex
     supplemental = SupplementalAnswer(
+        answer_id=answer_id,
         criterion_id=question.criterion_id,
         answer=answer,
         requirement_quote=question.requirement_quote,
@@ -358,7 +541,7 @@ def record_answer(
         taxonomy_version=question.taxonomy_version,
     )
     pending = PendingDeltaAnswer(
-        answer_id=uuid.uuid4().hex,
+        answer_id=answer_id,
         target_field=question.target_field,
         answer=supplemental,
     )
@@ -369,7 +552,7 @@ def record_answer(
 
 
 def prepare_checkpoint(state: RemediationState) -> DeltaExtractionPlan:
-    _assert_current_source(state)
+    assert_current_source(state)
     rubric = load_rubric(state.rubric_name)
     return build_delta_extraction_plan(
         state.baseline_fingerprint,
@@ -383,7 +566,7 @@ def apply_checkpoint(
     state: RemediationState,
     delta_json: str,
 ) -> RemediationCheckpointResult:
-    _assert_current_source(state)
+    assert_current_source(state)
     plan = prepare_checkpoint(state)
     rubric = load_rubric(state.rubric_name)
     delta = parse_delta_extraction(delta_json)
@@ -411,25 +594,27 @@ def apply_checkpoint(
     uncredited = [
         pending
         for pending in state.pending_answers
-        if f"supplemental-answer-{pending.answer_id}" not in credited_block_ids
+        if pending not in credited
     ]
     verified_answers = [
         *state.verified_answers,
         *(pending.answer for pending in credited),
     ]
-    assessment, report, queue, coverage = _snapshot(
+    assessment, report, deep_review, queue, coverage = _snapshot(
         state,
         runs,
         verified_answers,
         state.edge_case_coverage,
         list(dict.fromkeys([*state.assessment.remediated_criteria, *affected_criteria])),
         state.delta_extraction_count + 1,
+        patches,
     )
     updated = state.model_copy(
         update={
             "runs": runs,
             "assessment": assessment,
             "report": report,
+            "deep_review": deep_review,
             "question_queue": queue,
             "verified_answers": verified_answers,
             "pending_answers": [],
@@ -439,6 +624,7 @@ def apply_checkpoint(
             ],
             "edge_case_coverage": coverage,
             "revision": state.revision + 1,
+            "evaluation_revision": state.evaluation_revision + 1,
             "delta_extraction_count": state.delta_extraction_count + 1,
             "delta_input_characters": (
                 state.delta_input_characters + plan.input_character_count

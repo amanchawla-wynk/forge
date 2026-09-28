@@ -33,6 +33,51 @@ derives one of four verdicts:
 
 This separation reduces verbosity bias, aesthetic bias, and model discretion.
 
+## Shadow Criterion Evaluation
+
+Field extraction remains the production scoring input. Rubric version
+`0.7.0-evaluation-shadow` additionally supports criterion evaluations that can
+retain multiple compatible evidence sets, counterevidence, gaps, ambiguities,
+and contradictions. These records address representation loss and are intended
+to test whether an exact quote actually supports a requirement rather than only
+whether the quote exists.
+
+The semantic support relation is still a bounded model judgment. Python proves
+the cited span, named block, offsets, snapshot identity, schema, exhaustive batch
+coverage, and repeated-run consolidation; it does not claim to prove arbitrary
+language entailment mechanically. A strict-majority relation may be retained,
+while ties and pluralities resolve to `unclear`. All alternatives remain in the
+audit so abstention does not erase source evidence.
+
+Native evaluations have no score authority. They cannot become
+`CriterionExtraction`, and the scoring engine does not read them. A reversible
+legacy adapter exists only to prove that projecting already-verified field
+extractions into the new representation and back produces identical verdicts,
+gates, bands, confidence, and consumer views. Changing score semantics requires
+a later documented decision and validation against independent labels.
+
+Phase 3 may derive one shadow question target from native evaluations only when
+the assertion has complete source coverage, at least three independent runs, a
+strict-majority `gap`, `ambiguous`, or `contradictory` outcome, and verified issue
+identities. Gate, criterion weight, consumer count, stable criterion id, issue
+status, and rubric assertion order determine the target without model input.
+The model returns only a plan id, one allowed issue id, and one question. Python
+rejects new substantive vocabulary and any quoted phrase not found verbatim in
+the target's verified evidence. Invalid output uses the assertion's rubric-owned
+answer contract. This artifact is a shadow diagnostic: it cannot replace the
+live remediation question, alter scoring, or become supplemental evidence.
+Offline diagnostics separately measure whether safe wording is useful. Synthetic
+proxy labels assess relevance, answerability, single-decision scope, and
+unsupported assumptions without affecting scores or establishing calibration.
+The first internal study passed lexical grounding but failed scope and assumption
+checks, so assertion-level shadow targets cannot yet replace field remediation.
+Gap descriptions are bounded audit content and do not participate in semantic
+identity or scoring. Repeated runs may retain different descriptions for the same
+gap id. The enriched internal rerun showed that this detail improves relevance
+but cannot make a composite assertion atomic. Future evaluation contracts may
+split one legacy field into several ordered shadow assertions; none may grant
+field credit or alter a verdict.
+
 ## Evidence Rule
 
 No quote means no credit. A quote that cannot be found in the normalized source
@@ -45,6 +90,23 @@ must be included in at least one extraction batch; relevance-ranked retrieval
 cannot decide which parts of a PRD are eligible to receive credit. Reused
 chunking libraries may choose safe text boundaries, but Forge retains the source
 offsets and verifies the resulting evidence against the complete document.
+
+Evidence eligibility is also parser-version-specific. One assessment operation
+uses an immutable snapshot of exact source bytes, source type, parser
+fingerprint, normalized-schema version, and normalized-content hash. Extraction
+fragments and durable remediation sessions are bound to that identity. A parser
+upgrade or a different normalized result requires a new extraction baseline; it
+cannot silently reinterpret old quotes or resume an old review as current.
+Supplemental answers are projected as separately provenanced blocks after the
+snapshot is loaded and do not mutate the source snapshot.
+
+Direct single-batch runs and multi-batch fragments must both contain every
+rubric criterion and every declared field exactly once. Empty, sparse,
+duplicated, and unknown schemas are rejected before scoring; omission is never
+silently interpreted as an absent field. For list-valued fields, the verifier's
+per-item evidence spans are durable review state rather than transient prompt
+data, so restart and resume cannot change which list items are eligible for
+claim or question construction.
 
 Text recovered from an image may receive credit only when it is represented in
 the normalized evidence corpus and the quoted text can be verified there.
@@ -238,6 +300,16 @@ Each answer is bound to the criterion that prompted it. A quote from a
 supplemental answer receives no credit for a different criterion. Verified
 evidence records whether it came from the source document or a supplemental
 answer so the two can never be presented as the same provenance.
+The pending answer id is retained on the durable supplemental answer and is used
+as its normalized source-block identity, preventing later checkpoints or process
+restarts from renumbering evidence that has already been credited.
+
+Every checkpoint increments one `evaluation_revision` shared by the assessment,
+narrative report, deep review, and rebuilt question queue. Deterministic deep
+review is rebuilt from the retained source claims and newly verified answer
+claims. Closed-set classified findings are not carried forward as if they had
+been re-evaluated; callers may rerun consistency classification against the new
+revision when needed.
 
 Questions expose plain-language requirements for each missing field. After the
 user approves the accumulated answers, Forge may propose an integrated revision
@@ -270,6 +342,44 @@ availability expectations, and stale/unavailable fallback. It leaves every
 weight, gate, band threshold, and deterministic verdict credit unchanged. The
 change is a public-guidance content-validity hypothesis supported by synthetic
 proxy labels, not calibration.
+The `0.7.0-evaluation-shadow` revision added score-neutral criterion evaluation.
+The `0.8.0-atomic-evaluation-shadow` revision added atomic shadow assertion
+contracts, resolution contracts, and validated prerequisite edges. One legacy
+field may map to several atomic assertions, but extraction fields, weights,
+gates, bands, and deterministic score semantics remain unchanged.
+The `0.8.1-atomic-question-corrections-shadow` revision adds question-only
+issue-level consensus, exact subject context, rubric-owned framing variants, and
+metric-first instrumentation ordering. These changes alter neither assertion
+status consensus nor numeric scoring.
+The `0.8.2-relation-complete-evaluation-shadow` revision rejects claims that lack
+an explicit evidence-set relation. The `0.9.0-remaining-atomic-contracts-shadow`
+and `0.9.1-applicability-contracts-shadow` revisions split remaining composite
+questions and place applicability decisions before conditional behavior. All are
+shadow semantic-contract changes: legacy fields, weights, gates, bands, and
+numeric credit remain unchanged.
+Operational-readiness evaluation uses a required applicability-scope assertion
+before optional service-level dimensions. Optional atomic assertions do not enter
+the required set merely because the generic rubric can name them; they become
+question targets only when native exhaustive evaluation reports a gap. This
+prevents the shadow model from treating every availability, latency, capacity,
+integrity, or recovery dimension as universally applicable.
+Rollout evaluation similarly separates entry, observation, promotion, pause,
+stop, trigger, procedure, authority, and execution. Promotion is ineligible until
+entry and observation are supported; rollback procedure is ineligible until a
+trigger is supported. Communication channels remain optional behind a required
+impact-scope assertion. These relations order shadow questions only and cannot
+change rollout scoring credit.
+Instrumentation evaluation keeps prerequisites criterion-local. The local metric
+reference precedes event-declaration questions; both must be supported before the
+metric formula becomes eligible. Optional properties, filters, dimensions, and
+signal channels follow their relevant parent decisions. A named failure-detection
+signal precedes its diagnostic use. These atoms do not replace the legacy events,
+metric-link, or operational-signal scoring fields.
+Acceptance evaluation keeps dynamic requirement names inside bounded mapping
+assertions. Completion, pass, fail, failure scope, requirement inventory,
+requirement mapping, optional boundary mapping, and completeness are separate
+shadow decisions. The production `acceptance_criteria` verdict and
+`caps_at_ready_with_gaps` gate still derive only from the three legacy fields.
 
 Implementation repositories may provide non-evidence terminology context. This
 can clarify that two names refer to the same product or explain internal domain

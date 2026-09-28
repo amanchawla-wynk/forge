@@ -1,15 +1,40 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import re
+
+import pytest
 from fastapi.testclient import TestClient
 
+from forge.rubric.loader import load_rubric
+from forge.ingest.models import SupplementalAnswer
 from forge_dashboard.app import app
 from forge_dashboard.llm import Completion
-from forge.sessions import WorkflowState
+from forge.sessions import WorkflowState, operation_digest
+
+
+def _empty_extraction() -> str:
+    rubric = load_rubric("prd")
+    return json.dumps(
+        {
+            "criteria": [
+                {
+                    "criterion_id": criterion.id,
+                    "fields": [
+                        {"name": field.name, "value": None, "evidence": None}
+                        for field in criterion.fields
+                    ],
+                }
+                for criterion in rubric.criteria
+            ]
+        }
+    )
 
 
 def _client(monkeypatch) -> TestClient:
     async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
-        return Completion(text='{"criteria": []}', model="claude-test")
+        return Completion(text=_empty_extraction(), model="claude-test")
 
     # runner.py and app.py each import `call_model` by reference, so both
     # bindings need patching independently.
@@ -18,15 +43,26 @@ def _client(monkeypatch) -> TestClient:
     return TestClient(app)
 
 
-def _mark_revision_ready(review_session_id: str, session_version: int) -> int:
+def _mark_revision_ready(
+    review_session_id: str,
+    session_version: int,
+    answer: SupplementalAnswer | None = None,
+) -> int:
     import forge_dashboard.app as dashboard
 
     session = dashboard._reviews().get(review_session_id)
+    verified = answer or SupplementalAnswer(
+        criterion_id="success_metrics",
+        answer="Repeat usage rises from 20% to 30% within 90 days.",
+    )
     updated = dashboard._reviews().update(
         review_session_id,
         expected_version=session_version,
         operation_id="test-revision-ready",
-        state=session.state,
+        state=session.state.model_copy(
+            update={"verified_answers": [verified], "question_queue": []},
+            deep=True,
+        ),
         workflow_state=WorkflowState.REVISION_READY,
         event_type="test_revision_ready",
         result_json="{}",
@@ -84,7 +120,7 @@ def test_recording_answer_does_not_call_model_until_checkpoint(monkeypatch) -> N
     async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
         nonlocal calls
         calls += 1
-        return Completion(text='{"criteria": []}', model="claude-test")
+        return Completion(text=_empty_extraction(), model="claude-test")
 
     monkeypatch.setattr("forge_dashboard.runner.call_model", fake_call_model)
     monkeypatch.setattr("forge_dashboard.app.call_model", fake_call_model)
@@ -214,12 +250,6 @@ def test_dashboard_documents_reviews_and_revision_plans_survive_restart(
             "review_session_id": assessment["review_session_id"],
             "session_version": revision_version,
             "operation_id": "preview-restart",
-            "supplemental_answers": [
-                {
-                    "criterion_id": "success_metrics",
-                    "answer": "Repeat usage rises from 20% to 30% within 90 days.",
-                }
-            ]
         },
     ).json()
 
@@ -241,6 +271,95 @@ def test_dashboard_documents_reviews_and_revision_plans_survive_restart(
     )
     assert planned_document_id == upload["document_id"]
     assert restored_plan.plan_digest == preview["plan_digest"]
+    restored_session = dashboard._reviews().get(assessment["review_session_id"])
+    assert restored_session.state.revision_plan == restored_plan
+
+
+def test_checkpoint_response_refreshes_deep_review_revision(monkeypatch) -> None:
+    answers = {
+        "problem": "GenZ viewers cannot find short-form stories.",
+        "affected_users": "Mobile-first GenZ viewers.",
+        "evidence": "Thirty-eight interviews identified the gap.",
+    }
+
+    async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
+        if "DELTA FINGERPRINT:" not in prompt:
+            return Completion(text=_empty_extraction(), model="claude-test")
+        fingerprint = re.search(
+            r"DELTA FINGERPRINT:\s*\n([0-9a-f]+)", prompt
+        ).group(1)
+        criterion = load_rubric("prd").criterion("problem_statement")
+        payload = {
+            "delta_fingerprint": fingerprint,
+            "criteria": [
+                {
+                    "criterion_id": criterion.id,
+                    "fields": [
+                        {
+                            "name": field.name,
+                            "value": answers.get(field.name),
+                            "evidence": (
+                                {"quote": answers[field.name]}
+                                if field.name in answers
+                                else None
+                            ),
+                        }
+                        for field in criterion.fields
+                    ],
+                }
+            ],
+        }
+        return Completion(text=json.dumps(payload), model="claude-test")
+
+    monkeypatch.setattr("forge_dashboard.runner.call_model", fake_call_model)
+    monkeypatch.setattr("forge_dashboard.app.call_model", fake_call_model)
+    client = TestClient(app)
+    upload = client.post(
+        "/api/documents",
+        files={"file": ("prd.md", b"An incomplete product note.", "text/markdown")},
+    ).json()
+    assessment = client.post(
+        "/api/assessments",
+        json={
+            "document_id": upload["document_id"],
+            "llm": {
+                "provider": "anthropic",
+                "model": "claude-test",
+                "api_key": "sk-test",
+            },
+        },
+    ).json()
+    session_id = assessment["review_session_id"]
+    version = assessment["session_version"]
+    for index, answer in enumerate(answers.values(), start=1):
+        recorded = client.post(
+            f"/api/remediation/{session_id}/answers",
+            json={
+                "session_version": version,
+                "operation_id": f"checkpoint-answer-{index}",
+                "answer": answer,
+            },
+        ).json()
+        version = recorded["session_version"]
+
+    checkpoint = client.post(
+        f"/api/remediation/{session_id}/checkpoint",
+        json={
+            "session_version": version,
+            "operation_id": "dashboard-checkpoint-refresh",
+            "llm": {
+                "provider": "anthropic",
+                "model": "claude-test",
+                "api_key": "sk-test",
+            },
+        },
+    )
+
+    assert checkpoint.status_code == 200
+    state = checkpoint.json()["result"]["state"]
+    assert state["evaluation_revision"] == 1
+    assert state["assessment"]["evaluation_revision"] == 1
+    assert state["deep_review"]["evaluation_revision"] == 1
 
 
 def test_dashboard_answer_retry_is_idempotent_and_stale_versions_fail(monkeypatch) -> None:
@@ -305,19 +424,18 @@ def test_revision_preview_materializes_copy_and_reassesses(monkeypatch) -> None:
             },
         },
     ).json()
-    revision_version = _mark_revision_ready(
-        assessment["review_session_id"], assessment["session_version"]
-    )
     answer = "Repeat usage should increase from 20% to 30% within 90 days."
+    revision_version = _mark_revision_ready(
+        assessment["review_session_id"],
+        assessment["session_version"],
+        SupplementalAnswer(criterion_id="success_metrics", answer=answer),
+    )
     preview = client.post(
         f"/api/documents/{upload['document_id']}/revisions/preview",
         json={
             "review_session_id": assessment["review_session_id"],
             "session_version": revision_version,
             "operation_id": "preview-final",
-            "supplemental_answers": [
-                {"criterion_id": "success_metrics", "answer": answer}
-            ]
         },
     )
     assert preview.status_code == 200
@@ -348,8 +466,18 @@ def test_revision_preview_materializes_copy_and_reassesses(monkeypatch) -> None:
     assert body["assessment"]["source_path"] == "prd - Forge Revision.md"
     import forge_dashboard.app as dashboard
 
+    download = client.get(f"/api/documents/{body['document_id']}/download")
+    assert download.status_code == 200
     original_review = dashboard._reviews().get(assessment["review_session_id"])
     assert original_review.workflow_state is WorkflowState.COMPLETE
+    assert original_review.state.revision_output_sha256 == hashlib.sha256(
+        download.content
+    ).hexdigest()
+    assert original_review.state.final_verification is not None
+    assert (
+        original_review.state.final_verification.assessment.supplemental_answers
+        == []
+    )
     artifacts = dashboard._store.review_artifacts(assessment["review_session_id"])
     assert artifacts == [
         {
@@ -360,12 +488,322 @@ def test_revision_preview_materializes_copy_and_reassesses(monkeypatch) -> None:
         }
     ]
 
-    download = client.get(f"/api/documents/{body['document_id']}/download")
-    assert download.status_code == 200
     assert answer.encode() in download.content
     assert original == client.get(
         f"/api/documents/{upload['document_id']}/download"
     ).content
+
+
+def test_revision_preview_uses_session_document_and_verified_answers(
+    monkeypatch,
+) -> None:
+    client = _client(monkeypatch)
+    first = client.post(
+        "/api/documents",
+        files={"file": ("first.md", b"# PRD\n\n## Problem\n", "text/markdown")},
+    ).json()
+    second = client.post(
+        "/api/documents",
+        files={"file": ("second.md", b"# Other PRD\n", "text/markdown")},
+    ).json()
+    assessed = client.post(
+        "/api/assessments",
+        json={
+            "document_id": first["document_id"],
+            "llm": {
+                "provider": "anthropic",
+                "model": "claude-test",
+                "api_key": "sk-test",
+            },
+        },
+    ).json()
+    authoritative = "Mobile viewers cannot find relevant short-form stories."
+    version = _mark_revision_ready(
+        assessed["review_session_id"],
+        assessed["session_version"],
+        SupplementalAnswer(
+            criterion_id="problem_statement", answer=authoritative
+        ),
+    )
+    request = {
+        "review_session_id": assessed["review_session_id"],
+        "session_version": version,
+        "operation_id": "authoritative-preview",
+        "supplemental_answers": [
+            {
+                "criterion_id": "problem_statement",
+                "answer": "Caller-controlled answer must not be used.",
+            }
+        ],
+    }
+
+    wrong_document = client.post(
+        f"/api/documents/{second['document_id']}/revisions/preview",
+        json=request,
+    )
+    assert wrong_document.status_code == 400
+    assert "different review source" in wrong_document.json()["detail"]
+
+    preview = client.post(
+        f"/api/documents/{first['document_id']}/revisions/preview",
+        json=request,
+    )
+    assert preview.status_code == 200
+    assert [edit["answer"] for edit in preview.json()["edits"]] == [authoritative]
+    preview_schema = app.openapi()["components"]["schemas"]["RevisionPreviewRequest"]
+    assert "supplemental_answers" not in preview_schema["properties"]
+
+
+def test_revision_preview_recovers_a_reserved_operation(monkeypatch) -> None:
+    import forge_dashboard.app as dashboard
+
+    client = _client(monkeypatch)
+    upload = client.post(
+        "/api/documents",
+        files={"file": ("prd.md", b"# PRD\n\n## Problem\n", "text/markdown")},
+    ).json()
+    assessed = client.post(
+        "/api/assessments",
+        json={
+            "document_id": upload["document_id"],
+            "llm": {
+                "provider": "anthropic",
+                "model": "claude-test",
+                "api_key": "sk-test",
+            },
+        },
+    ).json()
+    version = _mark_revision_ready(
+        assessed["review_session_id"], assessed["session_version"]
+    )
+    operation_id = "reserved-preview"
+    digest = operation_digest(
+        "preview_revision",
+        {"document_id": upload["document_id"], "section_overrides": {}},
+    )
+    dashboard._reviews().reserve_operation(
+        assessed["review_session_id"],
+        expected_version=version,
+        operation_id=operation_id,
+        operation_type="preview_revision",
+        request_digest=digest,
+        metadata={"stage": "reserved"},
+    )
+
+    preview = client.post(
+        f"/api/documents/{upload['document_id']}/revisions/preview",
+        json={
+            "review_session_id": assessed["review_session_id"],
+            "session_version": version,
+            "operation_id": operation_id,
+        },
+    )
+
+    assert preview.status_code == 200
+    record = dashboard._reviews().operation_record(
+        assessed["review_session_id"],
+        operation_id,
+        operation_type="preview_revision",
+        request_digest=digest,
+    )
+    assert record["status"] == "completed"
+
+
+def test_revision_preview_reuses_plan_after_crash_before_metadata_update(
+    monkeypatch,
+) -> None:
+    import forge_dashboard.app as dashboard
+
+    client = _client(monkeypatch)
+    upload = client.post(
+        "/api/documents",
+        files={"file": ("prd.md", b"# PRD\n\n## Problem\n", "text/markdown")},
+    ).json()
+    assessed = client.post(
+        "/api/assessments",
+        json={
+            "document_id": upload["document_id"],
+            "llm": {
+                "provider": "anthropic",
+                "model": "claude-test",
+                "api_key": "sk-test",
+            },
+        },
+    ).json()
+    version = _mark_revision_ready(
+        assessed["review_session_id"], assessed["session_version"]
+    )
+    operation_id = "preview-plan-insert-crash"
+    expected_plan_id = dashboard._store.revision_plan_id(
+        assessed["review_session_id"], operation_id
+    )
+    original_update_metadata = dashboard._reviews().update_operation_metadata
+
+    class SimulatedProcessExit(BaseException):
+        pass
+
+    def crash_before_metadata(*args, **kwargs):
+        raise SimulatedProcessExit()
+
+    monkeypatch.setattr(
+        dashboard._reviews(), "update_operation_metadata", crash_before_metadata
+    )
+    payload = {
+        "review_session_id": assessed["review_session_id"],
+        "session_version": version,
+        "operation_id": operation_id,
+    }
+    with pytest.raises(SimulatedProcessExit):
+        client.post(
+            f"/api/documents/{upload['document_id']}/revisions/preview",
+            json=payload,
+        )
+    assert dashboard._store.get_revision_plan(expected_plan_id)[0] == upload[
+        "document_id"
+    ]
+
+    monkeypatch.setattr(
+        dashboard._reviews(), "update_operation_metadata", original_update_metadata
+    )
+    retried = client.post(
+        f"/api/documents/{upload['document_id']}/revisions/preview", json=payload
+    )
+
+    assert retried.status_code == 200
+    assert retried.json()["plan_id"] == expected_plan_id
+
+
+def test_materialization_retry_reuses_persisted_assessment(monkeypatch) -> None:
+    import forge_dashboard.app as dashboard
+
+    calls = 0
+
+    async def fake_call_model(config, prompt, *, max_tokens, temperature=0):
+        nonlocal calls
+        calls += 1
+        return Completion(text=_empty_extraction(), model="claude-test")
+
+    monkeypatch.setattr("forge_dashboard.runner.call_model", fake_call_model)
+    monkeypatch.setattr("forge_dashboard.app.call_model", fake_call_model)
+    client = TestClient(app)
+    upload = client.post(
+        "/api/documents",
+        files={
+            "file": (
+                "prd.md",
+                b"# PRD\n\n## Success Metrics\n\nDAU is monitored.\n",
+                "text/markdown",
+            )
+        },
+    ).json()
+    assessed = client.post(
+        "/api/assessments",
+        json={
+            "document_id": upload["document_id"],
+            "llm": {
+                "provider": "anthropic",
+                "model": "claude-test",
+                "api_key": "sk-test",
+            },
+        },
+    ).json()
+    version = _mark_revision_ready(
+        assessed["review_session_id"], assessed["session_version"]
+    )
+    preview = client.post(
+        f"/api/documents/{upload['document_id']}/revisions/preview",
+        json={
+            "review_session_id": assessed["review_session_id"],
+            "session_version": version,
+            "operation_id": "preview-before-assessed-crash",
+        },
+    ).json()
+    edit = preview["edits"][0]
+    payload = {
+        "review_session_id": assessed["review_session_id"],
+        "session_version": preview["session_version"],
+        "operation_id": "materialize-assessed-crash",
+        "plan_id": preview["plan_id"],
+        "actions": {edit["edit_id"]: "integrate"},
+        "llm": {
+            "provider": "anthropic",
+            "model": "claude-test",
+            "api_key": "sk-test",
+        },
+    }
+
+    class SimulatedProcessExit(BaseException):
+        pass
+
+    original_assessment = dashboard.run_assessment_with_remediation
+
+    async def crash_after_materialization(*args, **kwargs):
+        raise SimulatedProcessExit()
+
+    monkeypatch.setattr(
+        dashboard,
+        "run_assessment_with_remediation",
+        crash_after_materialization,
+    )
+    with pytest.raises(SimulatedProcessExit):
+        client.post(
+            f"/api/documents/{upload['document_id']}/revisions", json=payload
+        )
+    request_digest = operation_digest(
+        "materialize_revision",
+        {
+            "document_id": upload["document_id"],
+            "plan_id": preview["plan_id"],
+            "actions": payload["actions"],
+            "provider": "anthropic",
+            "model": "claude-test",
+            "rubric_name": "prd",
+        },
+    )
+    materialized = dashboard._reviews().operation_record(
+        assessed["review_session_id"],
+        payload["operation_id"],
+        operation_type="materialize_revision",
+        request_digest=request_digest,
+    )
+    assert materialized["metadata"]["stage"] == "materialized"
+
+    monkeypatch.setattr(
+        dashboard,
+        "run_assessment_with_remediation",
+        original_assessment,
+    )
+    original_register = dashboard._store.register_generated
+
+    def crash_after_assessment(stored):
+        raise SimulatedProcessExit()
+
+    monkeypatch.setattr(dashboard._store, "register_generated", crash_after_assessment)
+    with pytest.raises(SimulatedProcessExit):
+        client.post(
+            f"/api/documents/{upload['document_id']}/revisions", json=payload
+        )
+    calls_after_persisted_assessment = calls
+    operation = dashboard._reviews().operation_record(
+        assessed["review_session_id"],
+        payload["operation_id"],
+        operation_type="materialize_revision",
+        request_digest=request_digest,
+    )
+    assert operation["metadata"]["stage"] == "assessed"
+
+    monkeypatch.setattr(dashboard._store, "register_generated", original_register)
+    retried = client.post(
+        f"/api/documents/{upload['document_id']}/revisions", json=payload
+    )
+
+    assert retried.status_code == 200
+    assert calls == calls_after_persisted_assessment
+    artifacts = dashboard._store.review_artifacts(assessed["review_session_id"])
+    assert len(artifacts) == 1
+    assert client.get(
+        f"/api/documents/{retried.json()['document_id']}/download"
+    ).status_code == 200
 
 
 def test_upload_rejects_unsupported_extension(monkeypatch) -> None:

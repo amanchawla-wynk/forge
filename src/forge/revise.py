@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 from typing import Literal
@@ -369,6 +370,54 @@ def _validate_paths(
 
 def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def revision_artifact_sha256(path: str | Path) -> str:
+    return _file_sha256(Path(path))
+
+
+def revision_operation_temp_path(
+    output_path: str | Path, review_session_id: str, operation_id: str
+) -> Path:
+    output = Path(output_path).expanduser().resolve()
+    identity = hashlib.sha256(
+        f"{review_session_id}\x00{operation_id}".encode("utf-8")
+    ).hexdigest()[:20]
+    return output.with_name(f".{output.stem}.forge-{identity}{output.suffix}")
+
+
+def is_revision_operation_temp_path(
+    temp_path: str | Path,
+    output_path: str | Path,
+    review_session_id: str,
+    operation_id: str,
+) -> bool:
+    """Return whether metadata names the exact safe temp for this operation."""
+    output = Path(output_path).expanduser().resolve()
+    temp = Path(temp_path).expanduser().resolve()
+    expected = revision_operation_temp_path(output, review_session_id, operation_id)
+    return (
+        temp == expected
+        and temp.parent == output.parent
+        and temp.name == expected.name
+        and temp.name.startswith(f".{output.stem}.forge-")
+        and temp.suffix == output.suffix
+    )
+
+
+def publish_revision_temp(temp_path: str | Path, output_path: str | Path) -> None:
+    """Atomically publish a complete same-filesystem temp without overwriting."""
+    temp = Path(temp_path)
+    output = Path(output_path)
+    try:
+        os.link(temp, output)
+    except FileExistsError as error:
+        raise ValueError(f"output already exists: {output}") from error
+    directory = os.open(output.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def _canonical_digest(payload: dict[str, object]) -> str:

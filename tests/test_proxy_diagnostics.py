@@ -1,13 +1,30 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from forge.proxy_diagnostics import run_proxy_diagnostics
+from forge.proxy_diagnostics import _null_extraction_json, run_proxy_diagnostics
+from forge.rubric.loader import load_rubric
 
 ROOT = Path(__file__).parents[1]
 ARTIFACT = (
     ROOT / "fixtures" / "proxy" / "microdrama-recommendations.proxy-panel.v1.json"
 )
+
+
+def test_proxy_diagnostics_null_extraction_matches_the_current_rubric():
+    rubric = load_rubric("prd")
+    extraction = json.loads(_null_extraction_json())
+
+    assert [item["criterion_id"] for item in extraction["criteria"]] == [
+        criterion.id for criterion in rubric.criteria
+    ]
+    for item, criterion in zip(extraction["criteria"], rubric.criteria, strict=True):
+        assert [field["name"] for field in item["fields"]] == [
+            field.name for field in criterion.fields
+        ]
+        assert all(field["value"] is None for field in item["fields"])
+        assert all(field["evidence"] is None for field in item["fields"])
 
 
 def test_proxy_diagnostics_measure_recall_without_claiming_calibration():

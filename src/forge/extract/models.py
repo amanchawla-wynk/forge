@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
 
 from forge.rubric.models import Criterion, FieldSpec, Verdict
 
@@ -38,9 +39,10 @@ class FieldExtraction(BaseModel):
     # Populated by `verify_run` for list-valued fields. The extractor still
     # submits one field-level citation, but each list item must independently
     # occur in the source before contextual question tools may reuse it.
-    # Excluded from serialized extraction payloads because it is verifier
-    # output, never model input.
-    item_evidence: list[Evidence] = Field(default_factory=list, exclude=True)
+    # Hidden from model-facing JSON schemas because it is verifier output, not
+    # model input. It remains serializable so verified remediation state can be
+    # persisted without losing per-item provenance.
+    item_evidence: SkipJsonSchema[list[Evidence]] = Field(default_factory=list)
 
     def is_satisfied(self, spec: FieldSpec) -> bool:
         """A field counts only if it has a real value AND a citation.

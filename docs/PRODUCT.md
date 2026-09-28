@@ -145,6 +145,13 @@ When available, the caller may supply product terminology derived from an
 implementation repository or other background. It helps the extractor resolve
 names and aliases but is never treated as PRD evidence or credited by scoring.
 
+An optional shadow semantic audit may evaluate each criterion against all source
+batches and retain multiple supporting, conflicting, ambiguous, or missing
+evidence sets. Forge verifies every cited block and span and reports conservative
+run agreement. This audit is deliberately separate from readiness scoring while
+its evidence alignment and hard-negative behavior are being validated; it cannot
+raise or lower a band or trigger a gate.
+
 ## Review Coverage
 
 The broader engineering-review prompt supplied during discovery is a useful

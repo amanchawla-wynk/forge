@@ -1,0 +1,516 @@
+{
+  "run_index": 1,
+  "cases": {
+    "complete": {
+      "source_path": "fixtures/corpus/complete.md",
+      "source_sha256": "d4802e7fafe0acf4be6be39d311713c3a4e3d62a316b19e572ff616f0355d1ae",
+      "rubric_version": "0.7.0-evaluation-shadow",
+      "batch_id": "batch-1",
+      "plan_fingerprint": "690aca99ef3887f74b5cbc0c086f60f8",
+      "criteria": [
+        {
+          "criterion_id": "problem_statement",
+          "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "ps-e1", "source_block_id": "text-1", "quote": "Small-business sellers wait 9 days on average for marketplace refunds to settle."},
+            {"ref_id": "ps-e2", "source_block_id": "text-1", "quote": "41% of surveyed sellers said delayed refunds forced them to pause restocking."},
+            {"ref_id": "ps-e3", "source_block_id": "text-1", "quote": "If we do nothing we expect to keep losing roughly 120 sellers per quarter to competing marketplaces."}
+          ],
+          "claims": [
+            {"claim_ref": "ps-c1", "assertion_id": "problem", "value": "Small-business sellers wait 9 days on average for marketplace refunds to settle.", "evidence_refs": ["ps-e1"]},
+            {"claim_ref": "ps-c2", "assertion_id": "affected_users", "value": "Small-business sellers", "evidence_refs": ["ps-e1"]},
+            {"claim_ref": "ps-c3", "assertion_id": "evidence", "value": "41% of surveyed sellers paused restocking because of delayed refunds.", "evidence_refs": ["ps-e2"]},
+            {"claim_ref": "ps-c4", "assertion_id": "cost_of_inaction", "value": "Roughly 120 sellers per quarter are expected to be lost.", "evidence_refs": ["ps-e3"]}
+          ],
+          "evidence_sets": [
+            {"evidence_set_ref": "ps-s1", "role": "supporting", "assertion_ids": ["problem", "affected_users", "evidence"], "claim_refs": ["ps-c1", "ps-c2", "ps-c3"], "evidence_refs": ["ps-e1", "ps-e2"], "relation": "supports"},
+            {"evidence_set_ref": "ps-s2", "role": "supporting", "assertion_ids": ["cost_of_inaction"], "claim_refs": ["ps-c4"], "evidence_refs": ["ps-e3"], "relation": "supports"}
+          ],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "success_metrics",
+          "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "sm-e1", "source_block_id": "text-1", "quote": "The primary metric is median refund settlement time.\nIt is currently 9 days.\nWe will reduce it to 2 days.\nSuccess is judged over the 90 days after general availability.\nDispute contact rate must not regress above 3%."}
+          ],
+          "claims": [
+            {"claim_ref": "sm-c1", "assertion_id": "primary_metric", "value": "median refund settlement time", "evidence_refs": ["sm-e1"]},
+            {"claim_ref": "sm-c2", "assertion_id": "baseline", "value": "9 days", "evidence_refs": ["sm-e1"]},
+            {"claim_ref": "sm-c3", "assertion_id": "target", "value": "2 days", "evidence_refs": ["sm-e1"]},
+            {"claim_ref": "sm-c4", "assertion_id": "measurement_window", "value": "90 days after general availability", "evidence_refs": ["sm-e1"]},
+            {"claim_ref": "sm-c5", "assertion_id": "guardrail_metric", "value": "Dispute contact rate must not exceed 3%.", "evidence_refs": ["sm-e1"]}
+          ],
+          "evidence_sets": [
+            {"evidence_set_ref": "sm-s1", "role": "supporting", "assertion_ids": ["primary_metric", "baseline", "target", "measurement_window", "guardrail_metric"], "claim_refs": ["sm-c1", "sm-c2", "sm-c3", "sm-c4", "sm-c5"], "evidence_refs": ["sm-e1"], "relation": "supports"}
+          ],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "non_goals", "applicability": "applicable",
+          "evidence": [{"ref_id": "ng-e1", "source_block_id": "text-1", "quote": "Cross-border refunds are explicitly out of scope for this release.\nWe will not change the chargeback process."}],
+          "claims": [{"claim_ref": "ng-c1", "assertion_id": "non_goals", "value": ["Cross-border refunds", "Changes to the chargeback process"], "evidence_refs": ["ng-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "ng-s1", "role": "supporting", "assertion_ids": ["non_goals"], "claim_refs": ["ng-c1"], "evidence_refs": ["ng-e1"], "relation": "supports"}],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "functional_requirements", "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "fr-e1", "source_block_id": "text-1", "quote": "The primary flow starts when an authenticated seller opens an eligible order, requests a refund, and ends when the seller sees the settlement status."},
+            {"ref_id": "fr-e2", "source_block_id": "text-1", "quote": "The seller must own the order, have refund permission, and provide an amount no greater than the captured payment."},
+            {"ref_id": "fr-e3", "source_block_id": "text-1", "quote": "Sellers can request a refund from the order detail screen.\nThe system validates that the order is eligible before submitting.\nA refund that exceeds 500 USD requires manager approval."},
+            {"ref_id": "fr-e4", "source_block_id": "text-1", "quote": "The request and validation flows are must-have for launch, and manager approval is a should-have."},
+            {"ref_id": "fr-e5", "source_block_id": "text-1", "quote": "If eligibility rejection and manager approval both apply, eligibility rejection wins; duplicate requests return the original result, and all other eligible requests use the standard settlement path."}
+          ],
+          "claims": [
+            {"claim_ref": "fr-c1", "assertion_id": "primary_flow", "value": "An authenticated seller opens an eligible order, requests a refund, and sees settlement status.", "evidence_refs": ["fr-e1"]},
+            {"claim_ref": "fr-c2", "assertion_id": "preconditions", "value": ["Seller owns the order", "Seller has refund permission", "Amount does not exceed captured payment"], "evidence_refs": ["fr-e2"]},
+            {"claim_ref": "fr-c3", "assertion_id": "requirements", "value": ["Request from order detail", "Validate eligibility before submission", "Require manager approval above 500 USD"], "evidence_refs": ["fr-e3"]},
+            {"claim_ref": "fr-c4", "assertion_id": "prioritisation", "value": "Request and validation are must-have; manager approval is should-have.", "evidence_refs": ["fr-e4"]},
+            {"claim_ref": "fr-c5", "assertion_id": "decision_rules_and_precedence", "value": "Eligibility rejection wins; duplicates return the original result; otherwise use standard settlement.", "evidence_refs": ["fr-e5"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "fr-s1", "role": "supporting", "assertion_ids": ["primary_flow", "preconditions", "requirements", "prioritisation", "decision_rules_and_precedence"], "claim_refs": ["fr-c1", "fr-c2", "fr-c3", "fr-c4", "fr-c5"], "evidence_refs": ["fr-e1", "fr-e2", "fr-e3", "fr-e4", "fr-e5"], "relation": "supports"}],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "acceptance_criteria", "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "ac-e1", "source_block_id": "text-1", "quote": "A refund request on an eligible order settles within 2 business days.\nAn ineligible order shows a rejection reason and does not create a refund record.\nRequests without permission, above the captured amount, or submitted twice must be rejected without creating a second refund."},
+            {"ref_id": "ac-e2", "source_block_id": "text-1", "quote": "AC-1 covers the must-have request flow, AC-2 covers eligibility validation, and AC-3 covers permission, amount, duplicate, and manager-approval boundaries."}
+          ],
+          "claims": [
+            {"claim_ref": "ac-c1", "assertion_id": "criteria", "value": ["Eligible refunds settle within 2 business days", "Ineligible orders show a reason and create no refund"], "evidence_refs": ["ac-e1"]},
+            {"claim_ref": "ac-c2", "assertion_id": "failure_and_boundary_criteria", "value": ["No-permission, excessive-amount, and duplicate requests are rejected without a second refund"], "evidence_refs": ["ac-e1"]},
+            {"claim_ref": "ac-c3", "assertion_id": "requirement_coverage", "value": "AC-1 through AC-3 map the request, validation, permission, amount, duplicate, and manager-approval boundaries.", "evidence_refs": ["ac-e2"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "ac-s1", "role": "supporting", "assertion_ids": ["criteria", "failure_and_boundary_criteria", "requirement_coverage"], "claim_refs": ["ac-c1", "ac-c2", "ac-c3"], "evidence_refs": ["ac-e1", "ac-e2"], "relation": "supports"}],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "edge_cases_and_states", "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "es-e1", "source_block_id": "text-1", "quote": "On payment provider failure the request is queued and the seller sees a retry banner.\nA seller with no refunds sees an empty state explaining eligibility rules.\nWhile eligibility is checked the seller sees a loading state, and an interrupted request can be resumed from the queued state."},
+            {"ref_id": "es-e2", "source_block_id": "text-1", "quote": "The supported platforms are responsive web, iOS, and Android; other channels are excluded from this release."},
+            {"ref_id": "es-e3", "source_block_id": "text-1", "quote": "The web and mobile flows must meet WCAG 2.1 AA, keyboard-navigation, and screen-reader checks before launch."}
+          ],
+          "claims": [
+            {"claim_ref": "es-c1", "assertion_id": "error_states", "value": "Provider failures queue the request and show a retry banner.", "evidence_refs": ["es-e1"]},
+            {"claim_ref": "es-c2", "assertion_id": "empty_or_edge_states", "value": "Sellers with no refunds see eligibility guidance.", "evidence_refs": ["es-e1"]},
+            {"claim_ref": "es-c3", "assertion_id": "transitional_or_degraded_states", "value": "Loading is shown during eligibility checks and interrupted requests resume from the queue.", "evidence_refs": ["es-e1"]},
+            {"claim_ref": "es-c4", "assertion_id": "supported_platforms", "value": ["responsive web", "iOS", "Android"], "evidence_refs": ["es-e2"]},
+            {"claim_ref": "es-c5", "assertion_id": "accessibility_approach", "value": "WCAG 2.1 AA with keyboard and screen-reader checks before launch.", "evidence_refs": ["es-e3"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "es-s1", "role": "supporting", "assertion_ids": ["error_states", "empty_or_edge_states", "transitional_or_degraded_states", "supported_platforms", "accessibility_approach"], "claim_refs": ["es-c1", "es-c2", "es-c3", "es-c4", "es-c5"], "evidence_refs": ["es-e1", "es-e2", "es-e3"], "relation": "supports"}],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "instrumentation", "applicability": "applicable",
+          "evidence": [{"ref_id": "in-e1", "source_block_id": "text-1", "quote": "We will log refund_requested, refund_settled, and refund_rejected events.\nMedian settlement time is computed from the interval between refund_requested and refund_settled.\nOperations monitors settlement queue depth on a dashboard and receives an alert when queued refunds exceed 100."}],
+          "claims": [
+            {"claim_ref": "in-c1", "assertion_id": "events", "value": ["refund_requested", "refund_settled", "refund_rejected"], "evidence_refs": ["in-e1"]},
+            {"claim_ref": "in-c2", "assertion_id": "metric_link", "value": "Median interval between refund_requested and refund_settled.", "evidence_refs": ["in-e1"]},
+            {"claim_ref": "in-c3", "assertion_id": "operational_signals", "value": "Queue-depth dashboard and alert above 100 queued refunds.", "evidence_refs": ["in-e1"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "in-s1", "role": "supporting", "assertion_ids": ["events", "metric_link", "operational_signals"], "claim_refs": ["in-c1", "in-c2", "in-c3"], "evidence_refs": ["in-e1"], "relation": "supports"}],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "dependencies", "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "dp-e1", "source_block_id": "text-1", "quote": "This depends on the Payments platform team, the Ledger service, and our payout vendor."},
+            {"ref_id": "dp-e2", "source_block_id": "text-1", "quote": "Payments owns the refund API and must pass its availability check by build start; Ledger owns the idempotency endpoint and must pass duplicate-request tests by QA; the payout vendor must confirm its daily file interface before pilot, and if it is stale or unavailable, requests remain queued on the legacy path."},
+            {"ref_id": "dp-e3", "source_block_id": "text-1", "quote": "Settlement cannot exceed the vendor daily cut-off of 18:00 UTC."}
+          ],
+          "claims": [
+            {"claim_ref": "dp-c1", "assertion_id": "dependencies", "value": ["Payments platform team", "Ledger service", "payout vendor"], "evidence_refs": ["dp-e1"]},
+            {"claim_ref": "dp-c2", "assertion_id": "dependency_readiness", "value": "Owners, interfaces, readiness checks, and stale/unavailable fallback are specified.", "evidence_refs": ["dp-e2"]},
+            {"claim_ref": "dp-c3", "assertion_id": "constraints", "value": "Vendor daily cut-off is 18:00 UTC.", "evidence_refs": ["dp-e3"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "dp-s1", "role": "supporting", "assertion_ids": ["dependencies", "dependency_readiness", "constraints"], "claim_refs": ["dp-c1", "dp-c2", "dp-c3"], "evidence_refs": ["dp-e1", "dp-e2", "dp-e3"], "relation": "supports"}],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "risk_compliance", "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "rc-e1", "source_block_id": "text-1", "quote": "The flow handles seller bank account identifiers and transaction records.\nBank identifiers are required only to route the refund; the flow stores the existing token rather than collecting new bank details."},
+            {"ref_id": "rc-e2", "source_block_id": "text-1", "quote": "Only Finance Operations and the Payments service can access the token; the payout vendor processes it under the existing data-processing agreement."},
+            {"ref_id": "rc-e3", "source_block_id": "text-1", "quote": "A privacy review has been requested and is scheduled before build starts."},
+            {"ref_id": "rc-e4", "source_block_id": "text-1", "quote": "Transaction audit records are retained for 7 years, while bank account identifiers are deleted 30 days after settlement."}
+          ],
+          "claims": [
+            {"claim_ref": "rc-c1", "assertion_id": "data_handled", "value": ["seller bank account identifiers", "transaction records"], "evidence_refs": ["rc-e1"]},
+            {"claim_ref": "rc-c2", "assertion_id": "purpose_and_minimisation", "value": "Bank identifiers route refunds; existing tokens are used rather than new bank details.", "evidence_refs": ["rc-e1"]},
+            {"claim_ref": "rc-c3", "assertion_id": "access_and_third_parties", "value": "Finance Operations and Payments access the token; the payout vendor processes it.", "evidence_refs": ["rc-e2"]},
+            {"claim_ref": "rc-c4", "assertion_id": "review_status", "value": "Privacy review requested before build.", "evidence_refs": ["rc-e3"]},
+            {"claim_ref": "rc-c5", "assertion_id": "data_lifecycle", "value": "Audit records retained 7 years; bank identifiers deleted 30 days after settlement.", "evidence_refs": ["rc-e4"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "rc-s1", "role": "supporting", "assertion_ids": ["data_handled", "purpose_and_minimisation", "access_and_third_parties", "review_status", "data_lifecycle"], "claim_refs": ["rc-c1", "rc-c2", "rc-c3", "rc-c4", "rc-c5"], "evidence_refs": ["rc-e1", "rc-e2", "rc-e3", "rc-e4"], "relation": "supports"}],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "rollout", "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "ro-e1", "source_block_id": "text-1", "quote": "We will release behind the rapid_refund feature flag to 5% of sellers first."},
+            {"ref_id": "ro-e2", "source_block_id": "text-1", "quote": "We expand after 7 days if median settlement is at most 2 days and dispute contacts stay below 3%; we pause if queue depth exceeds 100 or error rate exceeds 1%."},
+            {"ref_id": "ro-e3", "source_block_id": "text-1", "quote": "The flag can be disabled to revert all traffic to the legacy refund path."},
+            {"ref_id": "ro-e4", "source_block_id": "text-1", "quote": "Maya Chen owns rollout decisions and the Payments on-call lead can execute rollback."},
+            {"ref_id": "ro-e5", "source_block_id": "text-1", "quote": "Support receives a troubleshooting guide before pilot launch; affected sellers receive an in-product notice, while sales and marketing need no launch campaign."}
+          ],
+          "claims": [
+            {"claim_ref": "ro-c1", "assertion_id": "rollout_mechanism", "value": "Feature flag to 5% of sellers first.", "evidence_refs": ["ro-e1"]},
+            {"claim_ref": "ro-c2", "assertion_id": "launch_and_stop_criteria", "value": "Expand after 7 days on metric thresholds; pause on queue or error thresholds.", "evidence_refs": ["ro-e2"]},
+            {"claim_ref": "ro-c3", "assertion_id": "rollback_plan", "value": "Disable the flag and return traffic to legacy refunds.", "evidence_refs": ["ro-e3"]},
+            {"claim_ref": "ro-c4", "assertion_id": "rollout_owner", "value": "Maya Chen decides; Payments on-call executes rollback.", "evidence_refs": ["ro-e4"]},
+            {"claim_ref": "ro-c5", "assertion_id": "support_and_communications", "value": "Support guide and seller notice; no sales or marketing campaign.", "evidence_refs": ["ro-e5"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "ro-s1", "role": "supporting", "assertion_ids": ["rollout_mechanism", "launch_and_stop_criteria", "rollback_plan", "rollout_owner", "support_and_communications"], "claim_refs": ["ro-c1", "ro-c2", "ro-c3", "ro-c4", "ro-c5"], "evidence_refs": ["ro-e1", "ro-e2", "ro-e3", "ro-e4", "ro-e5"], "relation": "supports"}],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "open_questions_owned", "applicability": "applicable",
+          "evidence": [{"ref_id": "oq-e1", "source_block_id": "text-1", "quote": "Whether partial refunds are included is unresolved, owned by Priya Raman, and due before design sign-off on 2026-09-28.\nThe vendor contract renewal date is unconfirmed, owned by Daniel Okafor, and must be resolved before build starts on 2026-10-02."}],
+          "claims": [
+            {"claim_ref": "oq-c1", "assertion_id": "open_questions", "value": ["Whether partial refunds are included", "Vendor contract renewal date"], "evidence_refs": ["oq-e1"]},
+            {"claim_ref": "oq-c2", "assertion_id": "owners", "value": ["Priya Raman", "Daniel Okafor"], "evidence_refs": ["oq-e1"]},
+            {"claim_ref": "oq-c3", "assertion_id": "target_dates", "value": ["Design sign-off on 2026-09-28", "Build start on 2026-10-02"], "evidence_refs": ["oq-e1"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "oq-s1", "role": "supporting", "assertion_ids": ["open_questions", "owners", "target_dates"], "claim_refs": ["oq-c1", "oq-c2", "oq-c3"], "evidence_refs": ["oq-e1"], "relation": "supports"}],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "alternatives_considered", "applicability": "applicable",
+          "evidence": [{"ref_id": "al-e1", "source_block_id": "text-1", "quote": "We considered extending the existing batch settlement job.\nThat was rejected because it cannot meet a 2 day target.\nWe also considered a manual finance workflow.\nThat was rejected because it does not scale beyond 200 refunds per week."}],
+          "claims": [
+            {"claim_ref": "al-c1", "assertion_id": "alternatives", "value": ["Extend existing batch settlement job", "Manual finance workflow"], "evidence_refs": ["al-e1"]},
+            {"claim_ref": "al-c2", "assertion_id": "rejection_reasons", "value": ["Cannot meet 2-day target", "Does not scale beyond 200 refunds per week"], "evidence_refs": ["al-e1"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "al-s1", "role": "supporting", "assertion_ids": ["alternatives", "rejection_reasons"], "claim_refs": ["al-c1", "al-c2"], "evidence_refs": ["al-e1"], "relation": "supports"}],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "assumptions_validation", "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "av-e1", "source_block_id": "text-1", "quote": "We assume at least 70% of delayed refunds are eligible for the accelerated vendor route and that sellers understand the existing settlement-status language."},
+            {"ref_id": "av-e2", "source_block_id": "text-1", "quote": "Priya Raman will validate route eligibility against August transaction data by 2026-09-27, and Design Research will test the status language with five sellers before design sign-off."}
+          ],
+          "claims": [
+            {"claim_ref": "av-c1", "assertion_id": "assumptions", "value": ["At least 70% are route-eligible", "Sellers understand status language"], "evidence_refs": ["av-e1"]},
+            {"claim_ref": "av-c2", "assertion_id": "validation", "value": "Priya validates transaction data by 2026-09-27; Design Research tests with five sellers before sign-off.", "evidence_refs": ["av-e2"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "av-s1", "role": "supporting", "assertion_ids": ["assumptions", "validation"], "claim_refs": ["av-c1", "av-c2"], "evidence_refs": ["av-e1", "av-e2"], "relation": "supports"}],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "operational_readiness", "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "or-e1", "source_block_id": "text-1", "quote": "The service must sustain 40 refunds per second, keep refund API p95 latency below 500 ms, and recover queued requests within 30 minutes after a provider outage."},
+            {"ref_id": "or-e2", "source_block_id": "text-1", "quote": "The Payments on-call team owns monitoring, first-line incident response, and escalation to Finance Operations."},
+            {"ref_id": "or-e3", "source_block_id": "text-1", "quote": "The rapid-refund runbook covers queue diagnosis, feature-flag rollback, replay from the durable queue, and reconciliation against Ledger records."}
+          ],
+          "claims": [
+            {"claim_ref": "or-c1", "assertion_id": "service_expectations", "value": "40 refunds/second, p95 below 500 ms, recovery within 30 minutes.", "evidence_refs": ["or-e1"]},
+            {"claim_ref": "or-c2", "assertion_id": "support_owner", "value": "Payments on-call team", "evidence_refs": ["or-e2"]},
+            {"claim_ref": "or-c3", "assertion_id": "recovery_plan", "value": "Runbook covers diagnosis, rollback, queue replay, and Ledger reconciliation.", "evidence_refs": ["or-e3"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "or-s1", "role": "supporting", "assertion_ids": ["service_expectations", "support_owner", "recovery_plan"], "claim_refs": ["or-c1", "or-c2", "or-c3"], "evidence_refs": ["or-e1", "or-e2", "or-e3"], "relation": "supports"}],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "document_governance", "applicability": "applicable",
+          "evidence": [{"ref_id": "dg-e1", "source_block_id": "text-1", "quote": "Owner: Maya Chen. Status: approved v1.3, last materially updated 2026-09-20."}],
+          "claims": [
+            {"claim_ref": "dg-c1", "assertion_id": "document_owner", "value": "Maya Chen", "evidence_refs": ["dg-e1"]},
+            {"claim_ref": "dg-c2", "assertion_id": "status_and_version", "value": "approved v1.3, updated 2026-09-20", "evidence_refs": ["dg-e1"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "dg-s1", "role": "supporting", "assertion_ids": ["document_owner", "status_and_version"], "claim_refs": ["dg-c1", "dg-c2"], "evidence_refs": ["dg-e1"], "relation": "supports"}],
+          "gaps": [], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        }
+      ]
+    },
+    "gaps": {
+      "source_path": "fixtures/corpus/gaps.md",
+      "source_sha256": "a8a79f61ecc3643281bb9d8548c6fbfc1cc20c325acda9127fb3c8d7c0fb87e2",
+      "rubric_version": "0.7.0-evaluation-shadow",
+      "batch_id": "batch-1",
+      "plan_fingerprint": "a827a05fdf2f0d1a193e8148f1298fbc",
+      "criteria": [
+        {
+          "criterion_id": "problem_statement", "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "ps-e1", "source_block_id": "text-1", "quote": "Sellers cannot see when a payout will arrive, and support handles about 300 payout questions each week."},
+            {"ref_id": "ps-e2", "source_block_id": "text-1", "quote": "Sellers running daily operations are the people affected."}
+          ],
+          "claims": [
+            {"claim_ref": "ps-c1", "assertion_id": "problem", "value": "Sellers cannot see when a payout will arrive.", "evidence_refs": ["ps-e1"]},
+            {"claim_ref": "ps-c2", "assertion_id": "affected_users", "value": "Sellers running daily operations", "evidence_refs": ["ps-e2"]},
+            {"claim_ref": "ps-c3", "assertion_id": "evidence", "value": "Support handles about 300 payout questions weekly.", "evidence_refs": ["ps-e1"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "ps-s1", "role": "supporting", "assertion_ids": ["problem", "affected_users", "evidence"], "claim_refs": ["ps-c1", "ps-c2", "ps-c3"], "evidence_refs": ["ps-e1", "ps-e2"], "relation": "supports"}],
+          "gaps": [{"gap_ref": "ps-g1", "assertion_ids": ["cost_of_inaction"], "kind": "missing_evidence"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "success_metrics", "applicability": "applicable",
+          "evidence": [{"ref_id": "sm-e1", "source_block_id": "text-1", "quote": "We will track payout page engagement."}],
+          "claims": [{"claim_ref": "sm-c1", "assertion_id": "primary_metric", "value": "payout page engagement", "evidence_refs": ["sm-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "sm-s1", "role": "supporting", "assertion_ids": ["primary_metric"], "claim_refs": ["sm-c1"], "evidence_refs": ["sm-e1"], "relation": "supports"}],
+          "gaps": [
+            {"gap_ref": "sm-g1", "assertion_ids": ["baseline"], "kind": "missing_evidence"},
+            {"gap_ref": "sm-g2", "assertion_ids": ["target"], "kind": "missing_decision"},
+            {"gap_ref": "sm-g3", "assertion_ids": ["measurement_window"], "kind": "missing_decision"},
+            {"gap_ref": "sm-g4", "assertion_ids": ["guardrail_metric"], "kind": "missing_decision"}
+          ], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {"criterion_id": "non_goals", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "ng-g1", "assertion_ids": ["non_goals"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {
+          "criterion_id": "functional_requirements", "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "fr-e1", "source_block_id": "text-1", "quote": "Sellers can open a payout dashboard from the account menu.\nThe dashboard lists each payout with its status and expected arrival date.\nA seller can filter payouts by date range."},
+            {"ref_id": "fr-e2", "source_block_id": "text-1", "quote": "Everything listed here is required for launch."}
+          ],
+          "claims": [
+            {"claim_ref": "fr-c1", "assertion_id": "primary_flow", "value": "Seller opens the dashboard and sees payout status and expected arrival.", "evidence_refs": ["fr-e1"]},
+            {"claim_ref": "fr-c2", "assertion_id": "requirements", "value": ["Open dashboard from account menu", "List status and expected arrival", "Filter by date range"], "evidence_refs": ["fr-e1"]},
+            {"claim_ref": "fr-c3", "assertion_id": "prioritisation", "value": "All listed requirements are required for launch.", "evidence_refs": ["fr-e2"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "fr-s1", "role": "supporting", "assertion_ids": ["primary_flow", "requirements", "prioritisation"], "claim_refs": ["fr-c1", "fr-c2", "fr-c3"], "evidence_refs": ["fr-e1", "fr-e2"], "relation": "supports"}],
+          "gaps": [
+            {"gap_ref": "fr-g1", "assertion_ids": ["preconditions"], "kind": "missing_decision"},
+            {"gap_ref": "fr-g2", "assertion_ids": ["decision_rules_and_precedence"], "kind": "missing_decision"}
+          ], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {"criterion_id": "acceptance_criteria", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "ac-g1", "assertion_ids": ["criteria"], "kind": "missing_evidence"}, {"gap_ref": "ac-g2", "assertion_ids": ["failure_and_boundary_criteria"], "kind": "missing_evidence"}, {"gap_ref": "ac-g3", "assertion_ids": ["requirement_coverage"], "kind": "missing_evidence"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {
+          "criterion_id": "edge_cases_and_states", "applicability": "applicable",
+          "evidence": [{"ref_id": "es-e1", "source_block_id": "text-1", "quote": "If the payout service is unavailable the dashboard shows a cached view with a stale-data notice.\nA new seller with no payouts sees onboarding guidance instead of an empty table."}],
+          "claims": [
+            {"claim_ref": "es-c1", "assertion_id": "error_states", "value": "Unavailable service shows cached data with a stale notice.", "evidence_refs": ["es-e1"]},
+            {"claim_ref": "es-c2", "assertion_id": "empty_or_edge_states", "value": "New sellers with no payouts see onboarding guidance.", "evidence_refs": ["es-e1"]}
+          ],
+          "evidence_sets": [{"evidence_set_ref": "es-s1", "role": "supporting", "assertion_ids": ["error_states", "empty_or_edge_states"], "claim_refs": ["es-c1", "es-c2"], "evidence_refs": ["es-e1"], "relation": "supports"}],
+          "gaps": [{"gap_ref": "es-g1", "assertion_ids": ["transitional_or_degraded_states"], "kind": "missing_decision"}, {"gap_ref": "es-g2", "assertion_ids": ["supported_platforms"], "kind": "missing_decision"}, {"gap_ref": "es-g3", "assertion_ids": ["accessibility_approach"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {"criterion_id": "instrumentation", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "in-g1", "assertion_ids": ["events"], "kind": "missing_decision"}, {"gap_ref": "in-g2", "assertion_ids": ["metric_link"], "kind": "missing_decision"}, {"gap_ref": "in-g3", "assertion_ids": ["operational_signals"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {
+          "criterion_id": "dependencies", "applicability": "applicable",
+          "evidence": [{"ref_id": "dp-e1", "source_block_id": "text-1", "quote": "This work depends on the Payouts service team and the existing notification platform."}],
+          "claims": [{"claim_ref": "dp-c1", "assertion_id": "dependencies", "value": ["Payouts service team", "notification platform"], "evidence_refs": ["dp-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "dp-s1", "role": "supporting", "assertion_ids": ["dependencies"], "claim_refs": ["dp-c1"], "evidence_refs": ["dp-e1"], "relation": "supports"}],
+          "gaps": [{"gap_ref": "dp-g1", "assertion_ids": ["dependency_readiness"], "kind": "missing_decision"}, {"gap_ref": "dp-g2", "assertion_ids": ["constraints"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {"criterion_id": "risk_compliance", "applicability": "unclear", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "rc-g1", "assertion_ids": ["data_handled"], "kind": "missing_decision"}, {"gap_ref": "rc-g2", "assertion_ids": ["purpose_and_minimisation"], "kind": "missing_decision"}, {"gap_ref": "rc-g3", "assertion_ids": ["access_and_third_parties"], "kind": "missing_decision"}, {"gap_ref": "rc-g4", "assertion_ids": ["review_status"], "kind": "missing_decision"}, {"gap_ref": "rc-g5", "assertion_ids": ["data_lifecycle"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {
+          "criterion_id": "rollout", "applicability": "applicable",
+          "evidence": [{"ref_id": "ro-e1", "source_block_id": "text-1", "quote": "We will ship the dashboard to all sellers in a single release."}],
+          "claims": [{"claim_ref": "ro-c1", "assertion_id": "rollout_mechanism", "value": "All sellers in one release.", "evidence_refs": ["ro-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "ro-s1", "role": "supporting", "assertion_ids": ["rollout_mechanism"], "claim_refs": ["ro-c1"], "evidence_refs": ["ro-e1"], "relation": "supports"}],
+          "gaps": [{"gap_ref": "ro-g1", "assertion_ids": ["launch_and_stop_criteria"], "kind": "missing_decision"}, {"gap_ref": "ro-g2", "assertion_ids": ["rollback_plan"], "kind": "missing_decision"}, {"gap_ref": "ro-g3", "assertion_ids": ["rollout_owner"], "kind": "missing_decision"}, {"gap_ref": "ro-g4", "assertion_ids": ["support_and_communications"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "open_questions_owned", "applicability": "applicable",
+          "evidence": [{"ref_id": "oq-e1", "source_block_id": "text-1", "quote": "Whether we show fee breakdowns is still undecided."}],
+          "claims": [{"claim_ref": "oq-c1", "assertion_id": "open_questions", "value": ["Whether to show fee breakdowns"], "evidence_refs": ["oq-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "oq-s1", "role": "supporting", "assertion_ids": ["open_questions"], "claim_refs": ["oq-c1"], "evidence_refs": ["oq-e1"], "relation": "supports"}],
+          "gaps": [{"gap_ref": "oq-g1", "assertion_ids": ["owners"], "kind": "missing_decision"}, {"gap_ref": "oq-g2", "assertion_ids": ["target_dates"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {"criterion_id": "alternatives_considered", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "al-g1", "assertion_ids": ["alternatives"], "kind": "missing_decision"}, {"gap_ref": "al-g2", "assertion_ids": ["rejection_reasons"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "assumptions_validation", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "av-g1", "assertion_ids": ["assumptions"], "kind": "missing_decision"}, {"gap_ref": "av-g2", "assertion_ids": ["validation"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "operational_readiness", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "or-g1", "assertion_ids": ["service_expectations"], "kind": "missing_decision"}, {"gap_ref": "or-g2", "assertion_ids": ["support_owner"], "kind": "missing_decision"}, {"gap_ref": "or-g3", "assertion_ids": ["recovery_plan"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "document_governance", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "dg-g1", "assertion_ids": ["document_owner"], "kind": "missing_decision"}, {"gap_ref": "dg-g2", "assertion_ids": ["status_and_version"], "kind": "missing_evidence"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []}
+      ]
+    },
+    "gaming": {
+      "source_path": "fixtures/corpus/gaming.md",
+      "source_sha256": "e5563f972f9f7fcfc5805e391c46d192e7734544a592bb20fd976904f58aac09",
+      "rubric_version": "0.7.0-evaluation-shadow",
+      "batch_id": "batch-1",
+      "plan_fingerprint": "94f7d40bc0c9086d6bbae9c1f55e5a38",
+      "criteria": [
+        {
+          "criterion_id": "problem_statement", "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "ps-e1", "source_block_id": "text-1", "quote": "Customers find the current checkout experience frustrating and inconsistent."},
+            {"ref_id": "ps-e2", "source_block_id": "text-1", "quote": "Our customers are the people affected by this."},
+            {"ref_id": "ps-e3", "source_block_id": "text-1", "quote": "Feedback from several stakeholders suggests this is a real and pressing problem."},
+            {"ref_id": "ps-e4", "source_block_id": "text-1", "quote": "If we do not act, the situation is likely to get worse over time."}
+          ],
+          "claims": [
+            {"claim_ref": "ps-c1", "assertion_id": "problem", "value": "Checkout is frustrating and inconsistent.", "evidence_refs": ["ps-e1"]},
+            {"claim_ref": "ps-c2", "assertion_id": "affected_users", "value": "Customers", "evidence_refs": ["ps-e2"]},
+            {"claim_ref": "ps-c3", "assertion_id": "evidence", "value": "Unspecified stakeholder feedback", "evidence_refs": ["ps-e3"]},
+            {"claim_ref": "ps-c4", "assertion_id": "cost_of_inaction", "value": "The situation is likely to worsen.", "evidence_refs": ["ps-e4"]}
+          ],
+          "evidence_sets": [
+            {"evidence_set_ref": "ps-s1", "role": "supporting", "assertion_ids": ["problem", "affected_users"], "claim_refs": ["ps-c1", "ps-c2"], "evidence_refs": ["ps-e1", "ps-e2"], "relation": "supports"},
+            {"evidence_set_ref": "ps-s2", "role": "context", "assertion_ids": ["evidence", "cost_of_inaction"], "claim_refs": ["ps-c3", "ps-c4"], "evidence_refs": ["ps-e3", "ps-e4"], "relation": "unclear"}
+          ],
+          "gaps": [{"gap_ref": "ps-g1", "assertion_ids": ["evidence"], "kind": "unsupported_claim"}, {"gap_ref": "ps-g2", "assertion_ids": ["cost_of_inaction"], "kind": "unsupported_claim"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "success_metrics", "applicability": "applicable",
+          "evidence": [
+            {"ref_id": "sm-e1", "source_block_id": "text-1", "quote": "The primary metric is checkout conversion."},
+            {"ref_id": "sm-e2", "source_block_id": "text-1", "quote": "Conversion is currently lower than we would like.\nWe want to improve it meaningfully after launch.\nWe will review performance regularly once the feature is live.\nWe will also make sure that other key metrics do not get worse."}
+          ],
+          "claims": [
+            {"claim_ref": "sm-c1", "assertion_id": "primary_metric", "value": "checkout conversion", "evidence_refs": ["sm-e1"]},
+            {"claim_ref": "sm-c2", "assertion_id": "baseline", "value": "lower than desired", "evidence_refs": ["sm-e2"]},
+            {"claim_ref": "sm-c3", "assertion_id": "target", "value": "improve meaningfully", "evidence_refs": ["sm-e2"]},
+            {"claim_ref": "sm-c4", "assertion_id": "measurement_window", "value": "regularly after launch", "evidence_refs": ["sm-e2"]},
+            {"claim_ref": "sm-c5", "assertion_id": "guardrail_metric", "value": "other key metrics", "evidence_refs": ["sm-e2"]}
+          ],
+          "evidence_sets": [
+            {"evidence_set_ref": "sm-s1", "role": "supporting", "assertion_ids": ["primary_metric"], "claim_refs": ["sm-c1"], "evidence_refs": ["sm-e1"], "relation": "supports"},
+            {"evidence_set_ref": "sm-s2", "role": "context", "assertion_ids": ["baseline", "target", "measurement_window", "guardrail_metric"], "claim_refs": ["sm-c2", "sm-c3", "sm-c4", "sm-c5"], "evidence_refs": ["sm-e2"], "relation": "unclear"}
+          ],
+          "gaps": [{"gap_ref": "sm-g1", "assertion_ids": ["baseline"], "kind": "unsupported_claim"}, {"gap_ref": "sm-g2", "assertion_ids": ["target"], "kind": "ambiguous_requirement"}, {"gap_ref": "sm-g3", "assertion_ids": ["measurement_window"], "kind": "ambiguous_requirement"}, {"gap_ref": "sm-g4", "assertion_ids": ["guardrail_metric"], "kind": "ambiguous_requirement"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "non_goals", "applicability": "applicable",
+          "evidence": [{"ref_id": "ng-e1", "source_block_id": "text-1", "quote": "Anything not described in this document is considered out of scope.\nWe are not trying to solve every checkout problem at once."}],
+          "claims": [{"claim_ref": "ng-c1", "assertion_id": "non_goals", "value": ["Anything not described", "Not every checkout problem"], "evidence_refs": ["ng-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "ng-s1", "role": "context", "assertion_ids": ["non_goals"], "claim_refs": ["ng-c1"], "evidence_refs": ["ng-e1"], "relation": "unclear"}],
+          "gaps": [{"gap_ref": "ng-g1", "assertion_ids": ["non_goals"], "kind": "ambiguous_requirement"}], "ambiguities": [{"issue_ref": "ng-a1", "assertion_ids": ["non_goals"], "evidence_refs": ["ng-e1"], "alternatives": ["All unspecified capabilities are excluded", "Specific checkout capabilities are excluded but not named"]}], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "functional_requirements", "applicability": "applicable",
+          "evidence": [{"ref_id": "fr-e1", "source_block_id": "text-1", "quote": "The checkout should work reliably across all supported platforms.\nThe experience must be intuitive and easy for customers to understand.\nThe system should handle errors gracefully.\nAll of the above are important for a successful launch."}],
+          "claims": [{"claim_ref": "fr-c1", "assertion_id": "requirements", "value": ["Work reliably", "Be intuitive", "Handle errors gracefully"], "evidence_refs": ["fr-e1"]}, {"claim_ref": "fr-c2", "assertion_id": "prioritisation", "value": "All statements are important.", "evidence_refs": ["fr-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "fr-s1", "role": "context", "assertion_ids": ["requirements", "prioritisation"], "claim_refs": ["fr-c1", "fr-c2"], "evidence_refs": ["fr-e1"], "relation": "unclear"}],
+          "gaps": [{"gap_ref": "fr-g1", "assertion_ids": ["primary_flow"], "kind": "missing_decision"}, {"gap_ref": "fr-g2", "assertion_ids": ["preconditions"], "kind": "missing_decision"}, {"gap_ref": "fr-g3", "assertion_ids": ["requirements"], "kind": "ambiguous_requirement"}, {"gap_ref": "fr-g4", "assertion_ids": ["prioritisation"], "kind": "ambiguous_requirement"}, {"gap_ref": "fr-g5", "assertion_ids": ["decision_rules_and_precedence"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "acceptance_criteria", "applicability": "applicable",
+          "evidence": [{"ref_id": "ac-e1", "source_block_id": "text-1", "quote": "The feature is complete when checkout works as described above.\nQuality assurance will confirm that the experience behaves as expected."}],
+          "claims": [{"claim_ref": "ac-c1", "assertion_id": "criteria", "value": "Checkout works as described and behaves as expected.", "evidence_refs": ["ac-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "ac-s1", "role": "context", "assertion_ids": ["criteria"], "claim_refs": ["ac-c1"], "evidence_refs": ["ac-e1"], "relation": "unclear"}],
+          "gaps": [{"gap_ref": "ac-g1", "assertion_ids": ["criteria"], "kind": "ambiguous_requirement"}, {"gap_ref": "ac-g2", "assertion_ids": ["failure_and_boundary_criteria"], "kind": "missing_evidence"}, {"gap_ref": "ac-g3", "assertion_ids": ["requirement_coverage"], "kind": "missing_evidence"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "edge_cases_and_states", "applicability": "applicable",
+          "evidence": [{"ref_id": "es-e1", "source_block_id": "text-1", "quote": "Errors should be handled in a user-friendly way with helpful messaging.\nEmpty states should guide the customer toward the next logical action."}],
+          "claims": [{"claim_ref": "es-c1", "assertion_id": "error_states", "value": "User-friendly helpful error messaging.", "evidence_refs": ["es-e1"]}, {"claim_ref": "es-c2", "assertion_id": "empty_or_edge_states", "value": "Guide users to the next logical action.", "evidence_refs": ["es-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "es-s1", "role": "context", "assertion_ids": ["error_states", "empty_or_edge_states"], "claim_refs": ["es-c1", "es-c2"], "evidence_refs": ["es-e1"], "relation": "unclear"}],
+          "gaps": [{"gap_ref": "es-g1", "assertion_ids": ["error_states"], "kind": "ambiguous_requirement"}, {"gap_ref": "es-g2", "assertion_ids": ["empty_or_edge_states"], "kind": "ambiguous_requirement"}, {"gap_ref": "es-g3", "assertion_ids": ["transitional_or_degraded_states"], "kind": "missing_decision"}, {"gap_ref": "es-g4", "assertion_ids": ["supported_platforms"], "kind": "ambiguous_requirement"}, {"gap_ref": "es-g5", "assertion_ids": ["accessibility_approach"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "instrumentation", "applicability": "applicable",
+          "evidence": [{"ref_id": "in-e1", "source_block_id": "text-1", "quote": "We will add appropriate analytics events to the checkout flow.\nThese events will let us understand how the feature is performing."}],
+          "claims": [{"claim_ref": "in-c1", "assertion_id": "events", "value": "appropriate analytics events", "evidence_refs": ["in-e1"]}, {"claim_ref": "in-c2", "assertion_id": "metric_link", "value": "understand feature performance", "evidence_refs": ["in-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "in-s1", "role": "context", "assertion_ids": ["events", "metric_link"], "claim_refs": ["in-c1", "in-c2"], "evidence_refs": ["in-e1"], "relation": "unclear"}],
+          "gaps": [{"gap_ref": "in-g1", "assertion_ids": ["events"], "kind": "ambiguous_requirement"}, {"gap_ref": "in-g2", "assertion_ids": ["metric_link"], "kind": "ambiguous_requirement"}, {"gap_ref": "in-g3", "assertion_ids": ["operational_signals"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "dependencies", "applicability": "applicable",
+          "evidence": [{"ref_id": "dp-e1", "source_block_id": "text-1", "quote": "This work depends on the usual platform and backend teams.\nThere may be other dependencies that we discover during implementation."}],
+          "claims": [{"claim_ref": "dp-c1", "assertion_id": "dependencies", "value": ["usual platform teams", "backend teams", "unknown future dependencies"], "evidence_refs": ["dp-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "dp-s1", "role": "context", "assertion_ids": ["dependencies"], "claim_refs": ["dp-c1"], "evidence_refs": ["dp-e1"], "relation": "unclear"}],
+          "gaps": [{"gap_ref": "dp-g1", "assertion_ids": ["dependencies"], "kind": "ambiguous_requirement"}, {"gap_ref": "dp-g2", "assertion_ids": ["dependency_readiness"], "kind": "missing_decision"}, {"gap_ref": "dp-g3", "assertion_ids": ["constraints"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "risk_compliance", "applicability": "unclear",
+          "evidence": [{"ref_id": "rc-e1", "source_block_id": "text-1", "quote": "This feature follows all standard company policies for customer data.\nThe relevant teams will be consulted as needed."}],
+          "claims": [{"claim_ref": "rc-c1", "assertion_id": "review_status", "value": "Relevant teams consulted as needed.", "evidence_refs": ["rc-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "rc-s1", "role": "context", "assertion_ids": ["review_status"], "claim_refs": ["rc-c1"], "evidence_refs": ["rc-e1"], "relation": "unclear"}],
+          "gaps": [{"gap_ref": "rc-g1", "assertion_ids": ["data_handled"], "kind": "missing_decision"}, {"gap_ref": "rc-g2", "assertion_ids": ["purpose_and_minimisation"], "kind": "missing_decision"}, {"gap_ref": "rc-g3", "assertion_ids": ["access_and_third_parties"], "kind": "missing_decision"}, {"gap_ref": "rc-g4", "assertion_ids": ["review_status"], "kind": "ambiguous_requirement"}, {"gap_ref": "rc-g5", "assertion_ids": ["data_lifecycle"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "rollout", "applicability": "applicable",
+          "evidence": [{"ref_id": "ro-e1", "source_block_id": "text-1", "quote": "We will roll this out in a phased and careful manner.\nIf anything goes wrong we will take appropriate corrective action."}],
+          "claims": [{"claim_ref": "ro-c1", "assertion_id": "rollout_mechanism", "value": "phased rollout", "evidence_refs": ["ro-e1"]}, {"claim_ref": "ro-c2", "assertion_id": "rollback_plan", "value": "appropriate corrective action", "evidence_refs": ["ro-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "ro-s1", "role": "context", "assertion_ids": ["rollout_mechanism", "rollback_plan"], "claim_refs": ["ro-c1", "ro-c2"], "evidence_refs": ["ro-e1"], "relation": "unclear"}],
+          "gaps": [{"gap_ref": "ro-g1", "assertion_ids": ["rollout_mechanism"], "kind": "ambiguous_requirement"}, {"gap_ref": "ro-g2", "assertion_ids": ["launch_and_stop_criteria"], "kind": "missing_decision"}, {"gap_ref": "ro-g3", "assertion_ids": ["rollback_plan"], "kind": "ambiguous_requirement"}, {"gap_ref": "ro-g4", "assertion_ids": ["rollout_owner"], "kind": "missing_decision"}, {"gap_ref": "ro-g5", "assertion_ids": ["support_and_communications"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "open_questions_owned", "applicability": "applicable",
+          "evidence": [{"ref_id": "oq-e1", "source_block_id": "text-1", "quote": "A few details are still being worked through with the wider team.\nThese will be resolved as part of the implementation process."}],
+          "claims": [{"claim_ref": "oq-c1", "assertion_id": "open_questions", "value": ["A few unspecified details"], "evidence_refs": ["oq-e1"]}, {"claim_ref": "oq-c2", "assertion_id": "target_dates", "value": ["During implementation"], "evidence_refs": ["oq-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "oq-s1", "role": "context", "assertion_ids": ["open_questions", "target_dates"], "claim_refs": ["oq-c1", "oq-c2"], "evidence_refs": ["oq-e1"], "relation": "unclear"}],
+          "gaps": [{"gap_ref": "oq-g1", "assertion_ids": ["open_questions"], "kind": "ambiguous_requirement"}, {"gap_ref": "oq-g2", "assertion_ids": ["owners"], "kind": "missing_decision"}, {"gap_ref": "oq-g3", "assertion_ids": ["target_dates"], "kind": "ambiguous_requirement"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "alternatives_considered", "applicability": "applicable",
+          "evidence": [{"ref_id": "al-e1", "source_block_id": "text-1", "quote": "We considered several other approaches to this problem.\nThey were not chosen because the proposed approach is a better fit."}],
+          "claims": [{"claim_ref": "al-c1", "assertion_id": "alternatives", "value": ["Several unspecified approaches"], "evidence_refs": ["al-e1"]}, {"claim_ref": "al-c2", "assertion_id": "rejection_reasons", "value": ["Proposed approach is a better fit"], "evidence_refs": ["al-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "al-s1", "role": "context", "assertion_ids": ["alternatives", "rejection_reasons"], "claim_refs": ["al-c1", "al-c2"], "evidence_refs": ["al-e1"], "relation": "unclear"}],
+          "gaps": [{"gap_ref": "al-g1", "assertion_ids": ["alternatives"], "kind": "ambiguous_requirement"}, {"gap_ref": "al-g2", "assertion_ids": ["rejection_reasons"], "kind": "unsupported_claim"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {"criterion_id": "assumptions_validation", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "av-g1", "assertion_ids": ["assumptions"], "kind": "missing_decision"}, {"gap_ref": "av-g2", "assertion_ids": ["validation"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "operational_readiness", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "or-g1", "assertion_ids": ["service_expectations"], "kind": "missing_decision"}, {"gap_ref": "or-g2", "assertion_ids": ["support_owner"], "kind": "missing_decision"}, {"gap_ref": "or-g3", "assertion_ids": ["recovery_plan"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "document_governance", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "dg-g1", "assertion_ids": ["document_owner"], "kind": "missing_decision"}, {"gap_ref": "dg-g2", "assertion_ids": ["status_and_version"], "kind": "missing_evidence"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []}
+      ]
+    },
+    "notes": {
+      "source_path": "fixtures/corpus/notes.md",
+      "source_sha256": "559f3ab005493064f140f5952540be1c5143fae229dc1157dcf72929b0fc9d15",
+      "rubric_version": "0.7.0-evaluation-shadow",
+      "batch_id": "batch-1",
+      "plan_fingerprint": "86c8ee0abc7e29dda8d7d03d71128f45",
+      "criteria": [
+        {
+          "criterion_id": "problem_statement", "applicability": "applicable",
+          "evidence": [{"ref_id": "ps-e1", "source_block_id": "text-1", "quote": "Sellers keep complaining about refunds taking forever."}, {"ref_id": "ps-e2", "source_block_id": "text-1", "quote": "Everyone agrees this is important and it will be a big win for retention."}],
+          "claims": [{"claim_ref": "ps-c1", "assertion_id": "problem", "value": "Refunds take too long.", "evidence_refs": ["ps-e1"]}, {"claim_ref": "ps-c2", "assertion_id": "affected_users", "value": "Sellers", "evidence_refs": ["ps-e1"]}, {"claim_ref": "ps-c3", "assertion_id": "evidence", "value": "Seller complaints", "evidence_refs": ["ps-e1"]}, {"claim_ref": "ps-c4", "assertion_id": "cost_of_inaction", "value": "Retention opportunity", "evidence_refs": ["ps-e2"]}],
+          "evidence_sets": [{"evidence_set_ref": "ps-s1", "role": "supporting", "assertion_ids": ["problem", "affected_users", "evidence"], "claim_refs": ["ps-c1", "ps-c2", "ps-c3"], "evidence_refs": ["ps-e1"], "relation": "supports"}, {"evidence_set_ref": "ps-s2", "role": "context", "assertion_ids": ["cost_of_inaction"], "claim_refs": ["ps-c4"], "evidence_refs": ["ps-e2"], "relation": "unclear"}],
+          "gaps": [{"gap_ref": "ps-g1", "assertion_ids": ["cost_of_inaction"], "kind": "unsupported_claim"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {"criterion_id": "success_metrics", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "sm-g1", "assertion_ids": ["primary_metric"], "kind": "missing_decision"}, {"gap_ref": "sm-g2", "assertion_ids": ["baseline"], "kind": "missing_evidence"}, {"gap_ref": "sm-g3", "assertion_ids": ["target"], "kind": "missing_decision"}, {"gap_ref": "sm-g4", "assertion_ids": ["measurement_window"], "kind": "missing_decision"}, {"gap_ref": "sm-g5", "assertion_ids": ["guardrail_metric"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "non_goals", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "ng-g1", "assertion_ids": ["non_goals"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {
+          "criterion_id": "functional_requirements", "applicability": "unclear",
+          "evidence": [{"ref_id": "fr-e1", "source_block_id": "text-1", "quote": "We should probably do something about this in the next quarter.\nMaybe a dashboard, maybe faster settlement, the team will figure it out."}],
+          "claims": [{"claim_ref": "fr-c1", "assertion_id": "requirements", "value": ["Dashboard", "Faster settlement"], "evidence_refs": ["fr-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "fr-s1", "role": "context", "assertion_ids": ["requirements"], "claim_refs": ["fr-c1"], "evidence_refs": ["fr-e1"], "relation": "unclear"}],
+          "gaps": [{"gap_ref": "fr-g1", "assertion_ids": ["primary_flow"], "kind": "missing_decision"}, {"gap_ref": "fr-g2", "assertion_ids": ["preconditions"], "kind": "missing_decision"}, {"gap_ref": "fr-g3", "assertion_ids": ["requirements"], "kind": "missing_decision"}, {"gap_ref": "fr-g4", "assertion_ids": ["prioritisation"], "kind": "missing_decision"}, {"gap_ref": "fr-g5", "assertion_ids": ["decision_rules_and_precedence"], "kind": "missing_decision"}],
+          "ambiguities": [{"issue_ref": "fr-a1", "assertion_ids": ["requirements"], "evidence_refs": ["fr-e1"], "alternatives": ["Build a dashboard", "Accelerate settlement"]}], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {"criterion_id": "acceptance_criteria", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "ac-g1", "assertion_ids": ["criteria"], "kind": "missing_evidence"}, {"gap_ref": "ac-g2", "assertion_ids": ["failure_and_boundary_criteria"], "kind": "missing_evidence"}, {"gap_ref": "ac-g3", "assertion_ids": ["requirement_coverage"], "kind": "missing_evidence"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "edge_cases_and_states", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "es-g1", "assertion_ids": ["error_states"], "kind": "missing_decision"}, {"gap_ref": "es-g2", "assertion_ids": ["empty_or_edge_states"], "kind": "missing_decision"}, {"gap_ref": "es-g3", "assertion_ids": ["transitional_or_degraded_states"], "kind": "missing_decision"}, {"gap_ref": "es-g4", "assertion_ids": ["supported_platforms"], "kind": "missing_decision"}, {"gap_ref": "es-g5", "assertion_ids": ["accessibility_approach"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "instrumentation", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "in-g1", "assertion_ids": ["events"], "kind": "missing_decision"}, {"gap_ref": "in-g2", "assertion_ids": ["metric_link"], "kind": "missing_decision"}, {"gap_ref": "in-g3", "assertion_ids": ["operational_signals"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "dependencies", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "dp-g1", "assertion_ids": ["dependencies"], "kind": "missing_decision"}, {"gap_ref": "dp-g2", "assertion_ids": ["dependency_readiness"], "kind": "missing_decision"}, {"gap_ref": "dp-g3", "assertion_ids": ["constraints"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "risk_compliance", "applicability": "unclear", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "rc-g1", "assertion_ids": ["data_handled"], "kind": "missing_decision"}, {"gap_ref": "rc-g2", "assertion_ids": ["purpose_and_minimisation"], "kind": "missing_decision"}, {"gap_ref": "rc-g3", "assertion_ids": ["access_and_third_parties"], "kind": "missing_decision"}, {"gap_ref": "rc-g4", "assertion_ids": ["review_status"], "kind": "missing_decision"}, {"gap_ref": "rc-g5", "assertion_ids": ["data_lifecycle"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "rollout", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "ro-g1", "assertion_ids": ["rollout_mechanism"], "kind": "missing_decision"}, {"gap_ref": "ro-g2", "assertion_ids": ["launch_and_stop_criteria"], "kind": "missing_decision"}, {"gap_ref": "ro-g3", "assertion_ids": ["rollback_plan"], "kind": "missing_decision"}, {"gap_ref": "ro-g4", "assertion_ids": ["rollout_owner"], "kind": "missing_decision"}, {"gap_ref": "ro-g5", "assertion_ids": ["support_and_communications"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "open_questions_owned", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "oq-g1", "assertion_ids": ["open_questions"], "kind": "missing_decision"}, {"gap_ref": "oq-g2", "assertion_ids": ["owners"], "kind": "missing_decision"}, {"gap_ref": "oq-g3", "assertion_ids": ["target_dates"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {
+          "criterion_id": "alternatives_considered", "applicability": "unclear",
+          "evidence": [{"ref_id": "al-e1", "source_block_id": "text-1", "quote": "Maybe a dashboard, maybe faster settlement, the team will figure it out."}],
+          "claims": [{"claim_ref": "al-c1", "assertion_id": "alternatives", "value": ["Dashboard", "Faster settlement"], "evidence_refs": ["al-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "al-s1", "role": "context", "assertion_ids": ["alternatives"], "claim_refs": ["al-c1"], "evidence_refs": ["al-e1"], "relation": "unclear"}],
+          "gaps": [{"gap_ref": "al-g1", "assertion_ids": ["alternatives"], "kind": "ambiguous_requirement"}, {"gap_ref": "al-g2", "assertion_ids": ["rejection_reasons"], "kind": "missing_decision"}], "ambiguities": [{"issue_ref": "al-a1", "assertion_ids": ["alternatives"], "evidence_refs": ["al-e1"], "alternatives": ["Dashboard is the proposed solution", "Faster settlement is the proposed solution"]}], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {
+          "criterion_id": "assumptions_validation", "applicability": "applicable",
+          "evidence": [{"ref_id": "av-e1", "source_block_id": "text-1", "quote": "Everyone agrees this is important and it will be a big win for retention."}],
+          "claims": [{"claim_ref": "av-c1", "assertion_id": "assumptions", "value": ["The work will be a big retention win"], "evidence_refs": ["av-e1"]}],
+          "evidence_sets": [{"evidence_set_ref": "av-s1", "role": "supporting", "assertion_ids": ["assumptions"], "claim_refs": ["av-c1"], "evidence_refs": ["av-e1"], "relation": "supports"}],
+          "gaps": [{"gap_ref": "av-g1", "assertion_ids": ["validation"], "kind": "missing_evidence"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []
+        },
+        {"criterion_id": "operational_readiness", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "or-g1", "assertion_ids": ["service_expectations"], "kind": "missing_decision"}, {"gap_ref": "or-g2", "assertion_ids": ["support_owner"], "kind": "missing_decision"}, {"gap_ref": "or-g3", "assertion_ids": ["recovery_plan"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "document_governance", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "dg-g1", "assertion_ids": ["document_owner"], "kind": "missing_decision"}, {"gap_ref": "dg-g2", "assertion_ids": ["status_and_version"], "kind": "missing_evidence"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []}
+      ]
+    },
+    "placeholders": {
+      "source_path": "fixtures/corpus/placeholders.md",
+      "source_sha256": "995c16b6767ef5b7bbc44c6474661c05e945220cdf7cb87e6c335ecbbc384894",
+      "rubric_version": "0.7.0-evaluation-shadow",
+      "batch_id": "batch-1",
+      "plan_fingerprint": "600f7b99b87943a16583a80c6efda5d1",
+      "criteria": [
+        {"criterion_id": "problem_statement", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "ps-g1", "assertion_ids": ["problem"], "kind": "missing_decision"}, {"gap_ref": "ps-g2", "assertion_ids": ["affected_users"], "kind": "missing_decision"}, {"gap_ref": "ps-g3", "assertion_ids": ["evidence"], "kind": "missing_evidence"}, {"gap_ref": "ps-g4", "assertion_ids": ["cost_of_inaction"], "kind": "missing_evidence"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "success_metrics", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "sm-g1", "assertion_ids": ["primary_metric"], "kind": "missing_decision"}, {"gap_ref": "sm-g2", "assertion_ids": ["baseline"], "kind": "missing_evidence"}, {"gap_ref": "sm-g3", "assertion_ids": ["target"], "kind": "missing_decision"}, {"gap_ref": "sm-g4", "assertion_ids": ["measurement_window"], "kind": "missing_decision"}, {"gap_ref": "sm-g5", "assertion_ids": ["guardrail_metric"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "non_goals", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "ng-g1", "assertion_ids": ["non_goals"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "functional_requirements", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "fr-g1", "assertion_ids": ["primary_flow"], "kind": "missing_decision"}, {"gap_ref": "fr-g2", "assertion_ids": ["preconditions"], "kind": "missing_decision"}, {"gap_ref": "fr-g3", "assertion_ids": ["requirements"], "kind": "missing_decision"}, {"gap_ref": "fr-g4", "assertion_ids": ["prioritisation"], "kind": "missing_decision"}, {"gap_ref": "fr-g5", "assertion_ids": ["decision_rules_and_precedence"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "acceptance_criteria", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "ac-g1", "assertion_ids": ["criteria"], "kind": "missing_evidence"}, {"gap_ref": "ac-g2", "assertion_ids": ["failure_and_boundary_criteria"], "kind": "missing_evidence"}, {"gap_ref": "ac-g3", "assertion_ids": ["requirement_coverage"], "kind": "missing_evidence"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "edge_cases_and_states", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "es-g1", "assertion_ids": ["error_states"], "kind": "missing_decision"}, {"gap_ref": "es-g2", "assertion_ids": ["empty_or_edge_states"], "kind": "missing_decision"}, {"gap_ref": "es-g3", "assertion_ids": ["transitional_or_degraded_states"], "kind": "missing_decision"}, {"gap_ref": "es-g4", "assertion_ids": ["supported_platforms"], "kind": "missing_decision"}, {"gap_ref": "es-g5", "assertion_ids": ["accessibility_approach"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "instrumentation", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "in-g1", "assertion_ids": ["events"], "kind": "missing_decision"}, {"gap_ref": "in-g2", "assertion_ids": ["metric_link"], "kind": "missing_decision"}, {"gap_ref": "in-g3", "assertion_ids": ["operational_signals"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "dependencies", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "dp-g1", "assertion_ids": ["dependencies"], "kind": "unsupported_claim"}, {"gap_ref": "dp-g2", "assertion_ids": ["dependency_readiness"], "kind": "missing_decision"}, {"gap_ref": "dp-g3", "assertion_ids": ["constraints"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "risk_compliance", "applicability": "unclear", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "rc-g1", "assertion_ids": ["data_handled"], "kind": "missing_decision"}, {"gap_ref": "rc-g2", "assertion_ids": ["purpose_and_minimisation"], "kind": "missing_decision"}, {"gap_ref": "rc-g3", "assertion_ids": ["access_and_third_parties"], "kind": "missing_decision"}, {"gap_ref": "rc-g4", "assertion_ids": ["review_status"], "kind": "missing_decision"}, {"gap_ref": "rc-g5", "assertion_ids": ["data_lifecycle"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "rollout", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "ro-g1", "assertion_ids": ["rollout_mechanism"], "kind": "missing_decision"}, {"gap_ref": "ro-g2", "assertion_ids": ["launch_and_stop_criteria"], "kind": "missing_decision"}, {"gap_ref": "ro-g3", "assertion_ids": ["rollback_plan"], "kind": "missing_decision"}, {"gap_ref": "ro-g4", "assertion_ids": ["rollout_owner"], "kind": "missing_decision"}, {"gap_ref": "ro-g5", "assertion_ids": ["support_and_communications"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "open_questions_owned", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "oq-g1", "assertion_ids": ["open_questions"], "kind": "missing_decision"}, {"gap_ref": "oq-g2", "assertion_ids": ["owners"], "kind": "missing_decision"}, {"gap_ref": "oq-g3", "assertion_ids": ["target_dates"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "alternatives_considered", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "al-g1", "assertion_ids": ["alternatives"], "kind": "missing_decision"}, {"gap_ref": "al-g2", "assertion_ids": ["rejection_reasons"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "assumptions_validation", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "av-g1", "assertion_ids": ["assumptions"], "kind": "missing_decision"}, {"gap_ref": "av-g2", "assertion_ids": ["validation"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "operational_readiness", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "or-g1", "assertion_ids": ["service_expectations"], "kind": "missing_decision"}, {"gap_ref": "or-g2", "assertion_ids": ["support_owner"], "kind": "missing_decision"}, {"gap_ref": "or-g3", "assertion_ids": ["recovery_plan"], "kind": "missing_decision"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []},
+        {"criterion_id": "document_governance", "applicability": "applicable", "evidence": [], "claims": [], "evidence_sets": [], "gaps": [{"gap_ref": "dg-g1", "assertion_ids": ["document_owner"], "kind": "missing_decision"}, {"gap_ref": "dg-g2", "assertion_ids": ["status_and_version"], "kind": "missing_evidence"}], "ambiguities": [], "contradictions": [], "not_applicable_evidence_refs": []}
+      ]
+    }
+  }
+}

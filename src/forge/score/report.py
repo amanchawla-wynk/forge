@@ -26,6 +26,7 @@ class NarrativeReport(BaseModel):
     blocked_consumers: list[str]
     next_step: str | None
     confidence_note: str
+    evaluation_revision: int = 0
 
 
 def build_narrative_report(
